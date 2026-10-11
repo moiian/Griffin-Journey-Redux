@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.28. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.29. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.28-beta"
+local VERSION = "0.1.29-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -10,7 +10,7 @@ local alive, queued = true, false
 local operation = nil
 local active, camera_state = nil, nil
 local camera_mode, follow_state = "original", nil
-local camera_follow_status = "镜头实验：原跟随"
+local camera_follow_status = "镜头跟随：游戏默认"
 local status = "先生成狮鹫，再开始驾驶。"
 local hooks_ready, hooks_tried, friend_value = false, false, nil
 local yaw_state, yaw_hook_ready = nil, false
@@ -20,7 +20,7 @@ passengers.frame=0
 passengers.protection={damage=true,relocation=true,lost_check=false,destroy=false,counts={}}
 local masks = nil
 local input = {x = 0, y = 0, buttons = 0}
-local settings = {distance = 30, fov = 90, player_distance = 20, player_height = 0, freeze_player = true, rider_anim="", rider_lookX=0, rider_lookZ=1, rider_tilt_follow=1, rider_pitch_offset=0, rider_anchor="head", rider_neck_joint="", rider_height=1.0, rider_forward=0, rider_side=0, camera_x=0, camera_y=0, camera_z=0, sphere_navigation=true, navigation_radius=4.019, steering_yaw=50.276, steering_pitch=22.018, navigation_height=0.991, bumper_pitch=59, controls_revision=1, camera_auto_yaw=false, camera_yaw_speed=120, camera_manual_threshold=0.55}
+local settings = {distance = 30, fov = 90, freeze_player = true, rider_anim="", rider_lookX=0, rider_lookZ=1, rider_tilt_follow=1, rider_pitch_offset=0, rider_anchor="head", rider_neck_joint="", rider_height=1.0, rider_forward=0, rider_side=0, navigation_radius=4.019, steering_yaw=50.276, steering_pitch=22.018, navigation_height=0.991, bumper_pitch=59, controls_revision=1, camera_auto_yaw=false, camera_yaw_speed=120, camera_manual_threshold=0.55}
 local loaded_settings=nil
 local settings_path = "GriffinFlightBeta_Settings.json"
 local log_id = os.date("!%Y%m%dT%H%M%SZ") .. "_" .. math.floor(os.clock() * 1000)
@@ -95,15 +95,12 @@ if type(json.load_file) == "function" then
         if finite(saved.camera_manual_threshold) then settings.camera_manual_threshold=math.max(0.25,math.min(0.95,saved.camera_manual_threshold)) end
         if finite(saved.camera_yaw_speed) then settings.camera_yaw_speed=math.max(15,math.min(360,saved.camera_yaw_speed)) end
         if type(saved.freeze_player) == "boolean" then settings.freeze_player = saved.freeze_player end
-        if type(saved.sphere_navigation)=="boolean" then settings.sphere_navigation=saved.sphere_navigation end
         if finite(saved.navigation_radius) then settings.navigation_radius=math.max(2,math.min(30,saved.navigation_radius)) end
         if finite(saved.navigation_height) then settings.navigation_height=math.max(-27,math.min(27,saved.navigation_height)) end
         if finite(saved.steering_yaw) then settings.steering_yaw=math.max(1,math.min(85,saved.steering_yaw)) end
         -- First controls migration adopts the user's screenshot, not an older cached pitch.
         if saved.controls_revision == 1 and finite(saved.steering_pitch) then settings.steering_pitch=math.max(1,math.min(80,saved.steering_pitch)) end
         if finite(saved.bumper_pitch) then settings.bumper_pitch=math.max(1,math.min(59,saved.bumper_pitch)) end
-        if finite(saved.player_height) then settings.player_height = math.max(-80, math.min(80, saved.player_height)) end
-        if finite(saved.player_distance) then settings.player_distance = math.max(2, math.min(80, saved.player_distance)) end
         if finite(saved.distance) then settings.distance = math.max(0, math.min(80, saved.distance)) end
         if finite(saved.fov) then settings.fov = math.max(40, math.min(120, saved.fov)) end
         for _,spec in ipairs({{"rider_lookX",-1,1},{"rider_lookZ",-1,1},{"rider_tilt_follow",0,1},{"rider_pitch_offset",-45,45}}) do
@@ -114,9 +111,6 @@ if type(json.load_file) == "function" then
         if finite(saved.rider_height) then settings.rider_height=math.max(-5,math.min(15,saved.rider_height)) end
         if finite(saved.rider_forward) then settings.rider_forward=math.max(-15,math.min(15,saved.rider_forward)) end
         if finite(saved.rider_side) then settings.rider_side=math.max(-10,math.min(10,saved.rider_side)) end
-        for _,key in ipairs({"camera_x","camera_y","camera_z"}) do
-            if finite(saved[key]) then settings[key]=math.max(-80,math.min(80,saved[key])) end
-        end
     end
 end
 
@@ -270,7 +264,7 @@ local function discover_joints(d)
     end
     event("anchor_joint_inventory",{root=d.root_name,hip=d.hip_name,display_roots=#d.display_roots})
 end
-local function prepare_rider(d,key)
+local function prepare_rider(d)
     discover_joints(d)
     assert(d.hip_joint and d.hip_joint:get_Valid(),"玩家Hip骨骼不可用，未开启固定")
     local ch=d.spawn.result.chara
@@ -304,25 +298,8 @@ local function prepare_rider(d,key)
         fallback=not d.rider_head and "Griffin root + forward 3m / up 4m" or nil})
 end
 local function prepare_anchor_mode(d,key)
-    if key=="rider" then prepare_rider(d,key);return end
-    if key~="full" then
-        local td=sdk.find_type_definition("via.physics.CharacterController")
-        assert(td and td:get_method("applyWorldOffset(via.vec3)"),"Controller world-offset interface unavailable")
-        local ct=sdk.find_type_definition("app.CharacterPosRotContext")
-        assert(ct and ct:get_method("setPos(via.Position)"),"Context position interface unavailable")
-    end
-    if key=="root_bone" or key=="hip" then
-        discover_joints(d)
-        local joint=d.root_joint
-        if key=="hip" then joint=d.hip_joint end
-        assert(joint and joint:get_Valid(),"当前玩家没有可用的对应骨骼；未切换")
-    elseif key=="controller" then
-        local td=sdk.find_type_definition("via.physics.CharacterController")
-        assert(td and td:get_method("applyWorldOffset(via.vec3)"),"Controller world-offset interface unavailable")
-    elseif key=="context" then
-        local td=sdk.find_type_definition("app.CharacterPosRotContext")
-        assert(td and td:get_method("get_Pos()") and td:get_method("setPos(via.Position)"),"Context position interface unavailable")
-    end
+    assert(key=="rider" or key=="full","Unsupported display mode")
+    if key=="rider" then prepare_rider(d) end
 end
 local function anchor_positions(d)
     local scene=vector(d.transform:call("get_Position()"))
@@ -333,37 +310,13 @@ local function anchor_positions(d)
         root_bone=d.root_joint and d.root_joint:get_Valid() and vector(d.root_joint:call("get_Position()")) or nil,
         hip=d.hip_joint and d.hip_joint:get_Valid() and vector(d.hip_joint:call("get_Position()")) or nil}
 end
-local function set_context_scene(d,target)
-    local scene=vector(d.transform:call("get_Position()"))
-    local universal=d.transform:call("get_UniversalPosition()")
-    universal.x=universal.x+target.x-scene.x
-    universal.y=universal.y+target.y-scene.y
-    universal.z=universal.z+target.z-scene.z
-    d.context:call("setPos(via.Position)",universal)
-end
 local function write_anchor(d,target,neutral)
-    local key=d.anchor_mode
-    restore_bone(d) -- remove last frame's pose correction before moving the actor
-    d.anchor_target=target;d.neutral_anchor=neutral
-    d.moved=true
-    if key=="full" or key=="rider" then
-        d.transform:call("set_Position(via.vec3)",Vector3f.new(target.x,target.y,target.z))
-        passengers.orient(d,passengers.player_config())
-        sync_player(d)
-        d.anchor_plan={transform=target,context=target,controller=target}
-        return
-    end
-    local actor_target=key=="transform" and target or neutral
-    local context_target=key=="context" and target or neutral
-    local controller_target=key=="controller" and target or neutral
-    -- Move all layers with the Griffin. Unselected layers get neutral, not stick.
-    d.transform:call("set_Position(via.vec3)",Vector3f.new(actor_target.x,actor_target.y,actor_target.z))
-    set_context_scene(d,context_target)
-    local physical=vector(d.controller:call("get_Position()"))
-    d.controller:call("applyWorldOffset(via.vec3)",Vector3f.new(controller_target.x-physical.x,
-        controller_target.y-physical.y,controller_target.z-physical.z))
-    if d.fall_reset_pending then passengers.reset_fall(d) end
-    d.anchor_plan={transform=actor_target,context=context_target,controller=controller_target}
+    restore_bone(d)
+    d.anchor_target=target;d.neutral_anchor=neutral;d.moved=true
+    d.transform:call("set_Position(via.vec3)",Vector3f.new(target.x,target.y,target.z))
+    passengers.orient(d,passengers.player_config())
+    sync_player(d)
+    d.anchor_plan={transform=target,context=target,controller=target}
 end
 
 local function change_anchor_mode(key)
@@ -389,13 +342,7 @@ local function change_anchor_mode(key)
         end
     end)
 end
--- Camera experiment: target bone or native BaseOffset only. Never changes navigation.
-local camera_modes={
-    {key="original",label="原跟随／恢复镜头"},
-    {key="offset",label="【本轮】镜头偏移滑条"},
-    {key="hip",label="【本轮】镜头跟随玩家Hip"},
-    {key="griffin",label="【本轮】镜头跟随狮鹫头部"},
-}
+-- Head-joint camera follow; independent of navigation.
 local function restore_follow()
     yaw_state=nil -- angle writes leave no persistent lock; native/manual control resumes
     local s=follow_state
@@ -407,10 +354,6 @@ local function restore_follow()
             assert(s.original_joint and s.original_joint:get_Valid(),"原镜头骨骼已失效")
             s.main:call("set_TargetJoint(via.Joint)",s.original_joint)
         end
-        if s.last_offset and close_position(vector(s.main:call("get_BaseOffset()")),s.last_offset) then
-            local p=s.original_offset
-            s.main:call("set_BaseOffset(via.vec3)",Vector3f.new(p.x,p.y,p.z))
-        end
     end)
     if ok then follow_state=nil else event("camera_follow_restore_error",tostring(err)) end
     return ok,err
@@ -421,7 +364,7 @@ local function change_camera_mode(key)
         local ok,err=restore_follow()
         if not ok then camera_follow_status="镜头恢复未完成："..tostring(err);return end
         camera_mode=key
-        camera_follow_status=key=="original" and "镜头实验：原跟随" or "镜头实验已选择，驾驶期间生效。"
+        camera_follow_status=key=="original" and "镜头跟随：游戏默认" or "镜头跟随已选择，驾驶期间生效。"
         event("camera_follow_mode",key)
     end)
 end
@@ -436,38 +379,28 @@ local function tick_camera_follow()
         assert(main and main:get_Valid(),"主镜头控制器不可用")
         assert(main:call("get_TargetCharacter()")==d.player,"当前镜头不属于驾驶玩家")
         if not follow_state then
-            local joint
-            if camera_mode=="hip" or camera_mode=="griffin" then
-                prepare_rider(d,"rider")
-                joint=camera_mode=="hip" and d.hip_joint or d.rider_head
-                assert(joint and joint:get_Valid(),"所选跟随骨骼不可用；未改镜头")
-            end
+            assert(camera_mode=="griffin","Unsupported camera follow mode")
+            prepare_rider(d)
+            local joint=d.rider_head
+            assert(joint and joint:get_Valid(),"狮鹫头部骨骼不可用；未改镜头")
             local original_joint=main:call("get_TargetJoint()")
             if joint then assert(original_joint and original_joint:get_Valid(),"原镜头骨骼不可用，无法安全恢复") end
-            local original_offset=vector(main:call("get_BaseOffset()"))
             follow_state={main=main,manager=manager,player=d.player,joint=joint,original_joint=original_joint,
-                original_offset=original_offset,controller=main._CurrentCameraController}
+                controller=main._CurrentCameraController}
             event("camera_follow_bound",{mode=camera_mode,original_joint=original_joint and tostring(original_joint:call("get_Name()")),
-                joint=joint and tostring(joint:call("get_Name()")),offset=original_offset})
+                joint=joint and tostring(joint:call("get_Name()"))})
         end
         local s=follow_state
-        assert(main==s.main and manager==s.manager and main._CurrentCameraController==s.controller,"镜头控制器变化，停止实验")
-        if s.joint then
-            assert(s.joint:get_Valid(),"跟随骨骼失效")
-            s.last_joint=s.joint -- keep restoration information even if setter raises
-            main:call("set_TargetJoint(via.Joint)",s.joint)
-        else
-            local p=s.original_offset
-            s.last_offset={x=p.x+settings.camera_x,y=p.y+settings.camera_y,z=p.z+settings.camera_z}
-            local v=s.last_offset
-            main:call("set_BaseOffset(via.vec3)",Vector3f.new(v.x,v.y,v.z))
-        end
-        camera_follow_status="镜头实验运行："..camera_mode
+        assert(main==s.main and manager==s.manager and main._CurrentCameraController==s.controller,"镜头控制器变化，停止跟随")
+        assert(s.joint:get_Valid(),"跟随骨骼失效")
+        s.last_joint=s.joint
+        main:call("set_TargetJoint(via.Joint)",s.joint)
+        camera_follow_status="镜头跟随中："..camera_mode
     end)
     if not ok then
         local restored,restore_err=restore_follow()
         camera_mode="original"
-        camera_follow_status="镜头实验停用："..tostring(err)..(not restored and ("；恢复失败："..tostring(restore_err)) or "")
+        camera_follow_status="镜头跟随已停用："..tostring(err)..(not restored and ("；恢复失败："..tostring(restore_err)) or "")
         event("camera_follow_error",camera_follow_status)
     end
 end
@@ -853,7 +786,6 @@ local function change_player_freeze(freeze)
 end
 
 -- Bound to the retained spawn reference; free-player observations do not move the player.
-local target_record, target_status = nil, "目标坐标：尚未记录"
 local function target_context(r)
     local ch = validate_spawn(r)
     local c = assert(core())
@@ -913,11 +845,6 @@ local function read_target_probe(d)
     event("target_probe_error", d.target_probe_failed)
     return {error=d.target_probe_failed}
 end
-local function start_target_record(r)
-    target_record={spawn=r,deadline=now()+60,next_sample=now()}
-    target_status="目标坐标记录中（60秒），玩家可自由移动；日志自动保存。"
-    event("target_record_started",60)
-end
 local function select_player_target(r)
     local _,_,tc=target_context(r)
     local td=sdk.find_type_definition("app.TargetController.TargetTypeEnum")
@@ -931,31 +858,6 @@ local function select_player_target(r)
     tc:call("setTarget(app.TargetController.TargetTypeEnum)",value)
     event("manual_player_target_returned",target_snapshot(r))
 end
-local function target_test(sync_once, select_player)
-    local r=active and active.spawn or state.spawns[#state.spawns]
-    if not r or not r.ready or r.delete_requested then target_status="请先生成并等待狮鹫就绪。";return end
-    run_once(function()
-        if not alive or state.generation ~= generation or r.delete_requested or r.deleted then return end
-        local ok,err=pcall(function()
-            local before=target_snapshot(r)
-            event("flight_target_test_before",before)
-            if select_player then select_player_target(r) end
-            if sync_once then
-                local _, transform, tc, ctrl=target_context(r)
-                assert(tc:call("get_TargetCharacter()") == r.owner, "目标角色不是玩家；取消同步")
-                local td=sdk.find_type_definition("app.FlightControl")
-                assert(td and td:get_method("setFlightTargetPosition(via.vec3)"), "Flight target setter unavailable")
-                local pos=vector(transform:call("get_Position()"))
-                event("flight_target_sync_request",pos)
-                ctrl:call("setFlightTargetPosition(via.vec3)",Vector3f.new(pos.x,pos.y,pos.z))
-                event("flight_target_sync_returned",target_snapshot(r))
-            end
-            start_target_record(r)
-        end)
-        if not ok then target_status="目标请求未完成："..tostring(err);event("target_test_error",target_status);start_target_record(r) end
-    end)
-end
-
 local function request_instance_skip(result, player)
     assert(result and result.go and result.chara and result.go:get_Valid() and result.chara:get_Valid(), "Griffin unavailable")
     local ch = result.chara
@@ -1065,9 +967,8 @@ local function start_driver()
             assert(d.transform and d.context and d.controller and d.fall and d.fsm, "Player interfaces unavailable")
             local ft = d.fsm:get_type_definition()
             assert(ft:get_method("get_Enabled()") and ft:get_method("set_Enabled(System.Boolean)"), "FSM Enabled interface unavailable")
-            d.original_position = d.transform:call("get_UniversalPosition()")
             d.original_fsm = d.fsm:call("get_Enabled()")
-            assert(d.original_position and type(d.original_fsm) == "boolean", "Cannot capture player state")
+            assert(type(d.original_fsm) == "boolean", "Cannot capture player state")
             input = read_pad()
             d.previous_buttons = input.buttons -- holding A/RT on enable is not a fresh press
             active = d
@@ -1087,7 +988,7 @@ local function start_driver()
                 set_intent(d, "Ch253HoverWaitHoHomingHeight", "hover")
             end
             status = "驾驶中：A 仅起飞；RT 3档，LT 逐档减速；RB／LB 分档操作。"
-            event("driver_started", {ahead = settings.player_distance, height = settings.player_height, freeze_player = d.freeze_requested, lateral = 12, vertical = 10, anchor_mode=d.anchor_mode,sphere_navigation=settings.sphere_navigation,navigation_radius=settings.navigation_radius,steering_yaw=settings.steering_yaw,steering_pitch=settings.steering_pitch})
+            event("driver_started", {freeze_player = d.freeze_requested,anchor_mode=d.anchor_mode,navigation_radius=settings.navigation_radius,steering_yaw=settings.steering_yaw,steering_pitch=settings.steering_pitch})
         end)
         if not ok then
             if active then stop_driver("Start failed") end
@@ -1097,15 +998,11 @@ local function start_driver()
 end
 
 -- Fixed-radius spherical navigation. Stick sets angles, never accumulates distance.
-local function navigation_anchor(d,ch,tr,pos,fx,fz)
-    if not settings.sphere_navigation then
-        local neutral={x=pos.x+fx*settings.player_distance,y=pos.y+settings.player_height,z=pos.z+fz*settings.player_distance}
-        return {x=neutral.x+fz*input.x*12,y=neutral.y+input.y*10,z=neutral.z-fx*input.x*12},neutral,nil
-    end
+local function navigation_anchor(d,ch,tr,fx,fz)
     if d.rider_griffin_transform~=tr or not d.rider_head or not d.rider_head:get_Valid() then
-        prepare_rider(d,"rider")
+        prepare_rider(d)
     end
-    assert(d.rider_head and d.rider_head:get_Valid(),"未找到狮鹫头部，不能建立头部球面导航；可关闭球面模式")
+    assert(d.rider_head and d.rider_head:get_Valid(),"未找到狮鹫头部，不能建立头部球面导航")
     assert(validate_spawn(d.spawn)==ch,"Griffin reference changed")
     local center=vector(d.rider_head:call("get_Position()"))
     local radius=settings.navigation_radius
@@ -1195,7 +1092,7 @@ local function tick_driver()
             else event("takeoff_ignored","A仅允许地面起飞") end
         elseif d.gear<=2 and (held(pressed,masks.rb) or held(pressed,masks.lb)) then
             resume(d.gear)
-            d.manual_hold=held(pressed,masks.rb) and "hover" or "landing"
+            d.manual_hold=held(pressed,masks.lb) and "landing" or (d.gear==2 and "climb" or "hover")
             d.wait_center=true
         end
         if d.mode=="taking_off" then
@@ -1213,24 +1110,25 @@ local function tick_driver()
         if d.controls_active and not d.external_control and d.mode~="taking_off" then
             local node,mode
             if d.manual_hold=="landing" then node,mode="Ch253HoverToLanding","landing"
+            elseif d.manual_hold=="climb" then node,mode="HoverBackwardTargetHeight","climb"
             elseif d.manual_hold=="hover" then node,mode="Ch253HoverWaitHoHomingHeight","hover"
             elseif d.gear==3 then node,mode="Ch253WrapAroundStartLoop","dash"
             elseif d.gear==2 then
-                node,mode="HoverForwardTargetHeight","coast"
+                node,mode="Ch253HoverWaitHoHomingHeight","hover"
                 if moving and math.abs(input.x)>math.abs(input.y) then
                     node=input.x<0 and "HoverLateralRTargetHeight" or "HoverLateralLTargetHeight"
-                elseif input.y<0 then node="HoverBackwardTargetHeight"
-                elseif input.y>0 then node="FlightTarget" end
+                elseif input.y<0 then node,mode="HoverBackward","reverse"
+                elseif input.y>0 then node,mode="HoverForward","forward" end
             elseif moving then node,mode="Ch253AirHoverMoveToTarget","fine"
             else node,mode="Ch253HoverWaitHoHomingHeight","hover" end
             if node~=d.control_node then d.control_node=node; set_intent(d,node,mode) end
         end
-        local target,neutral,sphere=navigation_anchor(d,ch,tr,pos,fx,fz)
+        local target,neutral,sphere=navigation_anchor(d,ch,tr,fx,fz)
         write_anchor(d,target,neutral)
         dispatch(d)
         d.trace = {navigation_sphere=sphere,neutral_anchor=neutral,anchor_plan=d.anchor_plan,griffin = pos, player = vector(d.transform:call("get_Position()")), target = target,
             physical = vector(d.controller:call("get_Position()")), flight = flying, ground = ground,
-            action = tostring(action_name), mode = d.mode, gear=d.gear, manual_hold=d.manual_hold, external_control=d.external_control, bumpers={rb=held(input.buttons,masks.rb),lb=held(input.buttons,masks.lb)}, anchor_mode=d.anchor_mode, anchor_height = settings.player_height, stick = {x=input.x,y=input.y}}
+            action = tostring(action_name), mode = d.mode, gear=d.gear, manual_hold=d.manual_hold, external_control=d.external_control, bumpers={rb=held(input.buttons,masks.rb),lb=held(input.buttons,masks.lb)}, anchor_mode=d.anchor_mode, stick = {x=input.x,y=input.y}}
         passengers.tick_pose(d)
         passengers.tick(d)
         d.trace.passenger_protection=passengers.protection.counts
@@ -1476,6 +1374,7 @@ passengers.snapshot=function(value)
 end
 passengers.capture_probe_refs=function(a)
     local info=a.player:get_field("<GenerateInfo>k__BackingField")
+    a.generate_info=info
     a.generate_container=info and info:call("get_Container()") or nil
     a.brine=a.player:get_field("<BrineProcessor>k__BackingField")
 end
@@ -1499,7 +1398,8 @@ passengers.probe_tick=function()
                 fall_dead=a.player:call("get_IsFallDead()"),cause=tostring(a.player:call("get_CauseOfDeath()")),
                 brine=b and b["<IsKilledByBrine>k__BackingField"] or false,
                 wall_brine=b and b["<IsKilledByWallBrine>k__BackingField"] or false,
-                position=vector(a.transform:call("get_Position()")),container_available=a.generate_container~=nil}
+                position=vector(a.transform:call("get_Position()")),container_available=a.generate_container~=nil,
+                generate_destroyed=a.generate_info and a.generate_info:call("get_IsExecutedDestroy()") or false}
         end)
         if not ok then
             if not a.health_probe_error then event("rider_health_probe_error",{group=a.group or "player",slot=a.slot,error=tostring(value)},true);a.health_probe_error=true end
@@ -1508,7 +1408,8 @@ passengers.probe_tick=function()
         local previous=a.health_probe
         a.health_probe=value
         if not previous or previous.hp~=value.hp or previous.dead~=value.dead or previous.fall_dead~=value.fall_dead
-            or previous.cause~=value.cause or previous.brine~=value.brine or previous.wall_brine~=value.wall_brine then
+            or previous.cause~=value.cause or previous.brine~=value.brine or previous.wall_brine~=value.wall_brine
+            or previous.generate_destroyed~=value.generate_destroyed then
             event("rider_health_changed",{group=a.group or "player",slot=a.slot,before=previous,after=value},true)
         end
     end)
@@ -1610,6 +1511,19 @@ passengers.install_protection=function()
         local a=passengers.each_controlled(function(actor) if actor.brine==processor then return actor end end)
         if a then passengers.record_protection(a,"BrineProcessor.onKillCommon",false) end
     end)
+    -- Observe execution/notification only. Never skip destructors or destruction callbacks.
+    hook("app.GenerateInfo","applyDestroy()",function(args)
+        if not active then return end
+        local info=sdk.to_managed_object(args[2])
+        if not info then return end
+        local a=passengers.each_controlled(function(actor) if actor.generate_info==info then return actor end end)
+        if a then passengers.record_protection(a,"GenerateInfo.applyDestroy",false) end
+    end)
+    hook("app.Character","onDestroyCharacterByGenerator()",function(args)
+        if not active then return end
+        local a=passengers.controlled(sdk.to_managed_object(args[2]),true)
+        if a then passengers.record_protection(a,"Character.onDestroyCharacterByGenerator",false) end
+    end)
     passengers.protection.status=#errors==0 and "驾驶角色扣血／随从丢失保护及根因探针已安装" or "部分保护／探针不可用："..table.concat(errors,"; ")
     event("passenger_protection_installed",{errors=errors})
 end
@@ -1694,9 +1608,8 @@ passengers.bind=function(d,ch,group,index)
         fsm=player_fsm(ch),group=group,slot=index,anchor_mode="rider"}
     assert(a.player_go and a.transform and a.context and a.controller and a.fall and a.fsm,"Passenger interfaces unavailable")
     assert(owned_player(a,false),"Passenger interface ownership mismatch")
-    a.original_position=a.transform:call("get_UniversalPosition()")
     a.original_fsm=a.fsm:call("get_Enabled()")
-    assert(a.original_position and type(a.original_fsm)=="boolean","Passenger original state unavailable")
+    assert(type(a.original_fsm)=="boolean","Passenger original state unavailable")
     discover_joints(a)
     assert(a.hip_joint and a.hip_joint:get_Valid(),"Passenger Hip unavailable")
     a.pose_pending=passengers.visual_seat(group,index).anim
@@ -1709,6 +1622,22 @@ passengers.prepare_rig=function(a,d)
     a.heading=d.heading;a.body_pitch=d.body_pitch;a.rider_griffin_transform=d.rider_griffin_transform
     a.rider_head=d.rider_head;a.rider_head_name=d.rider_head_name;a.rider_necks=d.rider_necks
 end
+passengers.record_release_context=function(a,reason,valid)
+    local value={group=a.group,slot=a.slot,instance=tostring(a.player),reason=reason,valid=valid,
+        health=a.health_probe,protection=passengers.snapshot(a.protection_counts or {})}
+    if valid then
+        local ok,detail=pcall(function()
+            local info=a.player:get_field("<GenerateInfo>k__BackingField")
+            return {hp=a.player:call("get_Hp()"),dead=a.player:call("get_IsDead()"),
+                gameobject_valid=a.player_go:get_Valid(),interfaces_match=owned_player(a,false),
+                generate_destroyed=info and info:call("get_IsExecutedDestroy()") or false,
+                generate_info_unchanged=info==a.generate_info,
+                position=vector(a.transform:call("get_Position()"))}
+        end)
+        if ok then value.current=detail else value.read_error=tostring(detail) end
+    end
+    event("passenger_release_context",value)
+end
 passengers.tick=function(d)
     d.passengers=d.passengers or {}
     passengers.last_error=nil
@@ -1720,8 +1649,13 @@ passengers.tick=function(d)
         end
     end
     for ch,a in pairs(d.passengers) do
-        if not wanted[ch] or not ch:get_Valid() then
-            if not ch:get_Valid() then event("passenger_unloaded",{group=a.group,slot=a.slot,instance=tostring(ch),protection=a.protection_counts,health=a.health_probe}) end
+        local valid=ch:get_Valid()
+        if not wanted[ch] or not valid then
+            local in_roster=false
+            for _,member in ipairs((passengers.roster or {})[a.group] or {}) do if member==ch then in_roster=true end end
+            local reason=not valid and "invalid_instance" or (in_roster and "seat_disabled" or "absent_from_engine_roster")
+            passengers.record_release_context(a,reason,valid)
+            if not valid then event("passenger_unloaded",{group=a.group,slot=a.slot,instance=tostring(ch),protection=a.protection_counts,health=a.health_probe}) end
             a.anchor_target=nil
             local ok,err=pcall(passengers.restore_one,a)
             if ok then d.passengers[ch]=nil;event("passenger_released",{group=a.group,slot=a.slot})
@@ -1915,22 +1849,7 @@ re.on_frame(function()
         rotate()
         if #journal.samples < 650 then journal.samples[#journal.samples+1] = {time=now(), data=passengers.snapshot(active.trace)} end
     end
-    if target_record and not menu.gameplay_paused() then
-        local rec=target_record
-        if now()>=rec.deadline or rec.spawn.deleted or rec.spawn.delete_requested then
-            target_record=nil;target_status="目标坐标记录已结束，日志已保存。";event("target_record_stopped",true)
-        elseif now()>=rec.next_sample then
-            rec.next_sample=now()+0.5
-            local ok,value=pcall(target_snapshot,rec.spawn)
-            if ok then
-                rotate()
-                journal.samples[#journal.samples+1]={time=now(),data={kind="target_record",target_probe=value}}
-            else
-                target_record=nil;target_status="目标记录停止："..tostring(value);event("target_record_error",target_status)
-            end
-        end
-    end
-    if (active or target_record) and now()-last_flush >= 2 then flush() end
+    if active and now()-last_flush >= 2 then flush() end
 end)
 re.on_application_entry("UpdateHID",function()
     if not alive then return end
@@ -1990,7 +1909,7 @@ menu.player_visual_post=function()
             local joint=spec.joint
             if joint and joint:get_Valid() then
                 local original=vector(joint:call("get_Position()"))
-                local anchor=d.anchor_mode==spec.key and d.anchor_target or d.neutral_anchor
+                local anchor=d.neutral_anchor
                 if seat and spec.key=="hip" then anchor=seat end
                 local target={x=anchor.x+original.x-actor.x,y=anchor.y+original.y-actor.y,z=anchor.z+original.z-actor.z}
                 items[#items+1]={joint=joint,key=spec.key,original=original,written=target}
@@ -2010,7 +1929,7 @@ menu.player_visual_post=function()
             if d.trace then d.trace.rider=d.rider_trace end
         end
     end)
-    if not ok then menu.visual_error("骨骼位置实验失败",err) end
+    if not ok then menu.visual_error("座位显示更新失败",err) end
 end
 menu.visual_error=function(label,err)
     -- A paused render callback must not release actors or invoke gameplay cleanup.
@@ -2113,7 +2032,6 @@ _G.GriffinFlightBetaBridge = bridge
 re.on_script_reset(function()
     stop_driver("脚本重置")
     alive = false
-    target_record=nil
     skip_think_enabled=false;skip_think_expected=nil;block_player_fall=false
     if rawget(_G, "GriffinFlightBetaBridge") == bridge then _G.GriffinFlightBetaBridge = nil end
     for _, r in ipairs(state.spawns) do r.friend = false; r.ready = false; r.destroy_queued = false end
@@ -2278,15 +2196,15 @@ if loaded_settings then controls.save() end
 
 menu.edit_facing=function(seat,id)
     local dirty=false
-    for _,spec in ipairs({{"lookX","【新增】Look At X（右正／左负）",0,-1,1},
-        {"lookZ","【新增】Look At Z（前正／后负）",1,-1,1},
-        {"pitch_offset","【新增】角色倾斜修正角（度）",0,-45,45}}) do
+    for _,spec in ipairs({{"lookX","Look At X（右正／左负）",0,-1,1},
+        {"lookZ","Look At Z（前正／后负）",1,-1,1},
+        {"pitch_offset","角色倾斜修正角（度）",0,-45,45}}) do
         local key=spec[1]
         if not finite(seat[key]) then seat[key]=spec[3] end
         local changed,value=imgui.slider_float(spec[2].."###"..id..key,seat[key],spec[4],spec[5])
         if changed and finite(value) then seat[key]=math.max(spec[4],math.min(spec[5],value));dirty=true end
     end
-    local changed,value=menu.toggle("【新增】角色身体倾斜跟随###"..id.."Tilt",(seat.tilt_follow or 1)>0)
+    local changed,value=menu.toggle("角色身体倾斜跟随###"..id.."Tilt",(seat.tilt_follow or 1)>0)
     if changed then seat.tilt_follow=value and 1 or 0;dirty=true end
     imgui.text("Look At X左右面向、Z前后面向；(0, 1)朝狮鹫前方。倾斜仅作用于角色身体。")
     return dirty
@@ -2511,11 +2429,11 @@ re.on_draw_ui(function()
         imgui.tree_pop()
     end
     if imgui.tree_node("飞行设置") then
-        menu.slider("steering_yaw","【本轮】左右转向灵敏度（最大角度）",1,85)
-        menu.slider("steering_pitch","【本轮】摇杆上下微调（最大角度）",1,80)
+        menu.slider("steering_yaw","左右转向灵敏度（最大角度）",1,85)
+        menu.slider("steering_pitch","摇杆上下微调（最大角度）",1,80)
         menu.slider("bumper_pitch","RB／LB 升降角度（最高59°）",1,59)
-        menu.slider("navigation_radius","【本轮】头部导航半径（米）",2,30)
-        menu.slider("navigation_height","【本轮】球面回中高度（米）",-settings.navigation_radius*0.9,settings.navigation_radius*0.9)
+        menu.slider("navigation_radius","头部导航半径（米）",2,30)
+        menu.slider("navigation_height","球面回中高度（米）",-settings.navigation_radius*0.9,settings.navigation_radius*0.9)
         imgui.tree_pop()
     end
     if imgui.tree_node("镜头设置") then
@@ -2527,8 +2445,8 @@ re.on_draw_ui(function()
             if value and install_yaw_hook() then settings.head_camera=true;change_camera_mode("griffin") end
             controls.save()
         end
-        menu.slider("camera_yaw_speed","【新增】镜头跟随速度（度／秒）",15,360)
-        menu.slider("camera_manual_threshold","【新增】右摇杆接管阈值",0.25,0.95)
+        menu.slider("camera_yaw_speed","镜头跟随速度（度／秒）",15,360)
+        menu.slider("camera_manual_threshold","右摇杆接管阈值",0.25,0.95)
         imgui.tree_pop()
     end
     if imgui.tree_node("座位预设") then
@@ -2537,7 +2455,7 @@ re.on_draw_ui(function()
     end
     if imgui.tree_node("按键设置") then menu.bindings();imgui.tree_pop() end
     if imgui.tree_node("DEBUG") then
-        local changed,value=menu.toggle("【新增】显示预设[1]（仅手动调试）",menu.show_physical)
+        local changed,value=menu.toggle("显示预设[1]（仅手动调试）",menu.show_physical)
         if changed then
             menu.show_physical=value
             if not value then
@@ -2548,29 +2466,24 @@ re.on_draw_ui(function()
         if menu.show_physical then imgui.text("在座位预设的当前布局中选择[1]，编辑实体位置。") end
         changed,value=menu.toggle("驾驶玩家／乘客扣血拦截",passengers.protection.damage)
         if changed then passengers.protection.damage=value end
-        changed,value=menu.toggle("【新增】阻止落座乘客自动传送／丢失",passengers.protection.relocation)
+        changed,value=menu.toggle("阻止落座乘客自动传送／丢失",passengers.protection.relocation)
         if changed then passengers.protection.relocation=value end
-        changed,value=menu.toggle("【探针验证】跳过落座随从丢失检查",passengers.protection.lost_check)
+        changed,value=menu.toggle("跳过随从丢失检查",passengers.protection.lost_check)
         if changed then passengers.protection.lost_check=value;event("lost_check_guard_mode",value) end
-        changed,value=menu.toggle("【探针验证】拦截落座乘客生成器销毁",passengers.protection.destroy)
+        changed,value=menu.toggle("阻止乘客被生成器销毁",passengers.protection.destroy)
         if changed then passengers.protection.destroy=value;event("destroy_guard_mode",value) end
-        imgui.text("后两项默认只记录命中，勾选后拦截；结束驾驶立即放行。")
+        imgui.text("两项额外拦截用于对照；日志自动记录，结束驾驶后放行。")
         imgui.text(passengers.protection.status or "乘客保护：开始驾驶后安装")
-        for key,count in pairs(passengers.protection.counts) do imgui.text(key.."："..count) end
+        if imgui.tree_node("运行诊断") then
+            for key,count in pairs(passengers.protection.counts) do imgui.text(key.."："..count) end
+            imgui.tree_pop()
+        end
         if beta_button((skip_think_enabled and "关闭跳过狮鹫思考" or "开启跳过狮鹫思考").."###BetaThinkToggle") then set_skip_think(not skip_think_enabled) end
         imgui.text(skip_think_status)
-        local changed,value=menu.toggle("【测试】拦截驾驶角色坠落死亡请求",block_player_fall)
+        local changed,value=menu.toggle("拦截驾驶角色坠落死亡请求",block_player_fall)
         if changed then block_player_fall=value;if active then install_fall_hook() end;event("fall_request_block_mode",value) end
-        changed,value=menu.toggle("【对照测试】冻结玩家 FSM",settings.freeze_player)
+        changed,value=menu.toggle("冻结玩家 FSM",settings.freeze_player)
         if changed then change_player_freeze(value) end
-        changed,value=menu.toggle("【本轮】限制导航目标在头部球面",settings.sphere_navigation)
-        if changed then settings.sphere_navigation=value;controls.save() end
-        menu.slider("player_height","【新增】玩家相对高度（米）",-80,80)
-        menu.slider("player_distance","玩家与狮鹫距离",2,80)
-        for _,mode in ipairs({{key="original",label="恢复原镜头"},{key="griffin",label="跟随狮鹫头部"}}) do
-            changed,value=menu.toggle(mode.label.."###BetaCamera_"..mode.key,camera_mode==mode.key)
-            if changed then change_camera_mode(value and mode.key or "original") end
-        end
         imgui.text("坠落请求："..fall_hits.."；拦截："..fall_blocked)
         imgui.text(yaw_status);imgui.text(camera_follow_status)
         if active and active.trace then imgui.text("当前动作："..active.trace.action) end
