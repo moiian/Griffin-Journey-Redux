@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.12. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.13. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.12-beta"
+local VERSION = "0.1.13-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -9,11 +9,13 @@ state.generation = generation
 local alive, queued = true, false
 local operation = nil
 local active, camera_state = nil, nil
+local camera_mode, follow_state = "original", nil
+local camera_follow_status = "镜头实验：原跟随"
 local status = "先生成狮鹫，再开始驾驶。"
 local hooks_ready, hooks_tried, friend_value = false, false, nil
 local masks = nil
 local input = {x = 0, y = 0, buttons = 0}
-local settings = {distance = 30, fov = 90, player_distance = 20, player_height = 0, freeze_player = true, rider_height=1.0, rider_forward=0, rider_side=0}
+local settings = {distance = 30, fov = 90, player_distance = 20, player_height = 0, freeze_player = true, rider_height=1.0, rider_forward=0, rider_side=0, camera_x=0, camera_y=0, camera_z=0}
 local settings_path = "GriffinFlightBeta_Settings.json"
 local log_id = os.date("!%Y%m%dT%H%M%SZ") .. "_" .. math.floor(os.clock() * 1000)
 local part, last_flush, next_sample = 1, -math.huge, 0
@@ -71,6 +73,9 @@ if type(json.load_file) == "function" then
         if finite(saved.rider_height) then settings.rider_height=math.max(-5,math.min(15,saved.rider_height)) end
         if finite(saved.rider_forward) then settings.rider_forward=math.max(-15,math.min(15,saved.rider_forward)) end
         if finite(saved.rider_side) then settings.rider_side=math.max(-10,math.min(10,saved.rider_side)) end
+        for _,key in ipairs({"camera_x","camera_y","camera_z"}) do
+            if finite(saved[key]) then settings[key]=math.max(-80,math.min(80,saved[key])) end
+        end
     end
 end
 
@@ -336,7 +341,104 @@ local function change_anchor_mode(key)
         end
     end)
 end
+-- Camera experiment: target bone or native BaseOffset only. Never changes navigation.
+local camera_modes={
+    {key="original",label="原跟随／恢复镜头"},
+    {key="offset",label="【本轮】镜头偏移滑条"},
+    {key="hip",label="【本轮】镜头跟随玩家Hip"},
+    {key="griffin",label="【本轮】镜头跟随狮鹫头部"},
+}
+local function restore_follow()
+    local s=follow_state
+    if not s then return true end
+    local ok,err=pcall(function()
+        if not s.main:get_Valid() then return end
+        if s.main:call("get_TargetCharacter()")~=s.player then return end
+        if s.last_joint and s.main:call("get_TargetJoint()")==s.last_joint then
+            assert(s.original_joint and s.original_joint:get_Valid(),"原镜头骨骼已失效")
+            s.main:call("set_TargetJoint(via.Joint)",s.original_joint)
+        end
+        if s.last_offset and close_position(vector(s.main:call("get_BaseOffset()")),s.last_offset) then
+            local p=s.original_offset
+            s.main:call("set_BaseOffset(via.vec3)",Vector3f.new(p.x,p.y,p.z))
+        end
+    end)
+    if ok then follow_state=nil else event("camera_follow_restore_error",tostring(err)) end
+    return ok,err
+end
+local function change_camera_mode(key)
+    run_once(function()
+        if not alive then return end
+        local ok,err=restore_follow()
+        if not ok then camera_follow_status="镜头恢复未完成："..tostring(err);return end
+        camera_mode=key
+        camera_follow_status=key=="original" and "镜头实验：原跟随" or "镜头实验已选择，驾驶期间生效。"
+        event("camera_follow_mode",key)
+    end)
+end
+local function tick_camera_follow()
+    local d,c=active,core()
+    if not alive or not d or camera_mode=="original" or not c or c.properties.isPaused then return end
+    local ok,err=pcall(function()
+        assert(owned_player(d,true),"玩家实例变化")
+        local manager=assert(sdk.get_managed_singleton("app.CameraManager"),"CameraManager不可用")
+        local controllers=manager._MainCameraControllers
+        local main=controllers and controllers[0]
+        assert(main and main:get_Valid(),"主镜头控制器不可用")
+        assert(main:call("get_TargetCharacter()")==d.player,"当前镜头不属于驾驶玩家")
+        if not follow_state then
+            local joint
+            if camera_mode=="hip" or camera_mode=="griffin" then
+                prepare_rider(d,"rider")
+                joint=camera_mode=="hip" and d.hip_joint or d.rider_head
+                assert(joint and joint:get_Valid(),"所选跟随骨骼不可用；未改镜头")
+            end
+            local original_joint=main:call("get_TargetJoint()")
+            if joint then assert(original_joint and original_joint:get_Valid(),"原镜头骨骼不可用，无法安全恢复") end
+            local original_offset=vector(main:call("get_BaseOffset()"))
+            follow_state={main=main,manager=manager,player=d.player,joint=joint,original_joint=original_joint,
+                original_offset=original_offset,controller=main._CurrentCameraController}
+            event("camera_follow_bound",{mode=camera_mode,original_joint=original_joint and tostring(original_joint:call("get_Name()")),
+                joint=joint and tostring(joint:call("get_Name()")),offset=original_offset})
+        end
+        local s=follow_state
+        assert(main==s.main and manager==s.manager and main._CurrentCameraController==s.controller,"镜头控制器变化，停止实验")
+        if s.joint then
+            assert(s.joint:get_Valid(),"跟随骨骼失效")
+            s.last_joint=s.joint -- keep restoration information even if setter raises
+            main:call("set_TargetJoint(via.Joint)",s.joint)
+        else
+            local p=s.original_offset
+            s.last_offset={x=p.x+settings.camera_x,y=p.y+settings.camera_y,z=p.z+settings.camera_z}
+            local v=s.last_offset
+            main:call("set_BaseOffset(via.vec3)",Vector3f.new(v.x,v.y,v.z))
+        end
+        camera_follow_status="镜头实验运行："..camera_mode
+    end)
+    if not ok then
+        local restored,restore_err=restore_follow()
+        camera_mode="original"
+        camera_follow_status="镜头实验停用："..tostring(err)..(not restored and ("；恢复失败："..tostring(restore_err)) or "")
+        event("camera_follow_error",camera_follow_status)
+    end
+end
+local function read_camera_follow()
+    local d,s=active,follow_state
+    if not d or not s then return end
+    local ok,probe=pcall(function()
+        return {mode=camera_mode,target=vector(s.main:call("get_TargetPosition()")),
+            base_offset=vector(s.main:call("get_BaseOffset()")),
+            selected=s.joint and vector(s.joint:call("get_Position()")) or nil,
+            readback_matches=not s.joint or s.main:call("get_TargetJoint()")==s.joint,
+            player=vector(d.transform:call("get_Position()")),
+            hip=d.hip_joint and vector(d.hip_joint:call("get_Position()")) or nil,
+            griffin=vector(d.spawn.result.chara:call("get_Transform()"):call("get_Position()"))}
+    end)
+    if d.trace then d.trace.camera_follow=ok and probe or {mode=camera_mode,error=tostring(probe)} end
+end
 local function restore_camera()
+    restore_follow()
+    camera_mode="original"
     local s = camera_state
     if not s then return end
     camera_state = nil
@@ -894,7 +996,7 @@ re.on_application_entry("UpdateHID",function()
     if ok then input = result
     else stop_driver("手柄读取失败"); failed("手柄读取失败", result) end
 end)
-re.on_pre_application_entry("UpdateBehavior",function() tick_skip_think();tick_driver() end)
+re.on_pre_application_entry("UpdateBehavior",function() tick_skip_think();tick_driver();tick_camera_follow() end)
 re.on_pre_application_entry("UpdateJointExpression",function()
     local d=active
     if not d or not alive or not d.bones_applied then return end
@@ -943,6 +1045,7 @@ re.on_application_entry("UpdateJointExpression",function()
     if not ok then stop_driver("骨骼位置实验失败");failed("骨骼位置实验失败",err) end
 end)
 re.on_application_entry("PrepareRendering",function()
+    read_camera_follow()
     local d = active
     if not d or d.camera_failed then return end
     local ok, err = pcall(function()
@@ -1130,6 +1233,28 @@ re.on_draw_ui(function()
                 end
             end
         end
+        imgui.tree_pop()
+    end
+    if imgui.tree_node("【本轮】独立镜头测试") then
+        imgui.text("互斥选择；取消或结束驾驶恢复。默认原跟随，模式不跨重置保存。")
+        if type(imgui.checkbox)=="function" then
+            for _,mode in ipairs(camera_modes) do
+                local styled=type(imgui.push_style_color)=="function" and type(imgui.pop_style_color)=="function"
+                if styled then imgui.push_style_color(0,0xffa8ecff) end
+                local changed,value=imgui.checkbox(mode.label.."###BetaCamera_"..mode.key,camera_mode==mode.key)
+                if styled then imgui.pop_style_color(1) end
+                if changed then change_camera_mode(value and mode.key or "original") end
+            end
+        end
+        if type(imgui.slider_float)=="function" then
+            for _,spec in ipairs({{key="camera_x",label="【本轮】镜头偏移X"},
+                {key="camera_y",label="【本轮】镜头偏移Y"},{key="camera_z",label="【本轮】镜头偏移Z"}}) do
+                local changed,value=imgui.slider_float(spec.label,settings[spec.key],-80,80)
+                if changed and finite(value) then settings[spec.key]=math.max(-80,math.min(80,value));pcall(json.dump_file,settings_path,settings) end
+            end
+        end
+        imgui.text("滑条仅在偏移模式生效；跟随模式只更换镜头骨骼。")
+        imgui.text(camera_follow_status)
         imgui.tree_pop()
     end
     if imgui.tree_node("玩家距离与镜头设置") then
