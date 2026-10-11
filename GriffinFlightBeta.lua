@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.24. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.25. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.24-beta"
+local VERSION = "0.1.25-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -1378,10 +1378,18 @@ passengers.seat=function(group,index,preset)
     local store=preset or settings
     if type(store[key])~="table" then store[key]={} end
     local seat=store[key][index]
-    if type(seat)~="table" then seat={};store[key][index]=seat end
+    local physical=settings.seat_presets and (preset==settings.seat_presets[1] or not preset and settings.seat_index==1)
+    if type(seat)~="table" then
+        seat={};store[key][index]=seat
+        if physical then
+            -- New roster slots inherit the former safe point once; each owns its own table.
+            for _,field in ipairs({"anchor","neck_joint","height","forward","side","tilt_follow","pitch_offset"}) do seat[field]=settings.seat_presets[1].player[field] end
+            seat.enabled=true;seat.anim=""
+        end
+    end
     if seat.enabled==nil then seat.enabled=true end
     if type(seat.anim)~="string" then seat.anim="" end
-    for _,spec in ipairs({{"lookX",0,-1,1},{"lookZ",1,-1,1},{"tilt_follow",1,0,1},{"pitch_offset",0,-45,45}}) do
+    for _,spec in ipairs({{"lookX",0,-1,1},{"lookZ",1,-1,1},{"tilt_follow",physical and 0 or 1,0,1},{"pitch_offset",0,-45,45}}) do
         local key,default,lo,hi=spec[1],spec[2],spec[3],spec[4]
         seat[key]=finite(seat[key]) and math.max(lo,math.min(hi,seat[key])) or default
     end
@@ -1390,9 +1398,11 @@ passengers.seat=function(group,index,preset)
     if not finite(seat.height) then seat.height=0.5 end
     if not finite(seat.forward) then seat.forward=-index*1.2-(group=="companions" and 3.6 or 0) end
     if not finite(seat.side) then seat.side=index%2==1 and -0.7 or 0.7 end
-    seat.height=math.max(-5,math.min(15,seat.height))
-    seat.forward=math.max(-15,math.min(15,seat.forward))
-    seat.side=math.max(-10,math.min(10,seat.side))
+    if not physical then
+        seat.height=math.max(-5,math.min(15,seat.height))
+        seat.forward=math.max(-15,math.min(15,seat.forward))
+        seat.side=math.max(-10,math.min(10,seat.side))
+    end
     return seat
 end
 -- Same receiver-scoped damage policy as OJR; no global invincibility fields.
@@ -1496,7 +1506,7 @@ passengers.tick_pose=function(a)
 end
 
 passengers.visual_seat=function(group,index)
-    if settings.seat_index==1 then return settings.seat_presets[1].player end
+    if settings.seat_index==1 then return passengers.seat(group,index,settings.seat_presets[1]) end
     return passengers.seat(group,index)
 end
 passengers.restore_one=function(a)
@@ -1545,7 +1555,7 @@ passengers.bind=function(d,ch,group,index)
     assert(a.original_position and type(a.original_fsm)=="boolean","Passenger original state unavailable")
     discover_joints(a)
     assert(a.hip_joint and a.hip_joint:get_Valid(),"Passenger Hip unavailable")
-    a.pose_pending=settings.seat_index~=1 and passengers.seat(group,index).anim or nil
+    a.pose_pending=passengers.visual_seat(group,index).anim
     d.passengers[ch]=a -- recovery registered before the first native mutation
     event("passenger_bound",{group=group,slot=index})
     return a
@@ -1588,8 +1598,8 @@ passengers.tick=function(d)
                 a.fsm_touched=true;a.fsm:call("set_Enabled(System.Boolean)",false)
                 assert(a.fsm:call("get_Enabled()")==false,"Passenger freeze readback mismatch")
             end
-            -- Preset [1] is the shared debug real-position anchor, independent of stick input.
-            local physical=rider_seat(a,settings.seat_presets[1].player)
+            -- Each passenger always uses its own slot in preset [1] for real position.
+            local physical=rider_seat(a,passengers.seat(a.group,a.slot,settings.seat_presets[1]))
             a.moved=true;a.anchor_target=physical;a.neutral_anchor=physical
             a.transform:call("set_Position(via.vec3)",Vector3f.new(physical.x,physical.y,physical.z))
             passengers.orient(a,passengers.visual_seat(a.group,a.slot))
@@ -2003,6 +2013,22 @@ if loaded_settings and loaded_settings.preset_store_revision~=1 and loaded_setti
 end
 if not finite(settings.seat_presets[1].player.tilt_follow) then settings.seat_presets[1].player.tilt_follow=0 end
 if not finite(settings.seat_presets[1].player.pitch_offset) then settings.seat_presets[1].player.pitch_offset=0 end
+menu.migrate_physical=function()
+    if loaded_settings and loaded_settings.physical_seat_revision==1 then return end
+    local preset=settings.seat_presets[1]
+    for _,group in ipairs({"pawns","companions"}) do
+        local count=group=="pawns" and 3 or 0
+        for _,entry in ipairs(settings.seat_presets) do count=math.max(count,type(entry[group])=="table" and #entry[group] or 0) end
+        preset[group]=type(preset[group])=="table" and preset[group] or {}
+        for i=1,count do
+            local seat=menu.clone(preset[group][i] or {})
+            for _,field in ipairs({"anchor","neck_joint","height","forward","side","tilt_follow","pitch_offset"}) do seat[field]=preset.player[field] end
+            seat.enabled=true;seat.anim="";preset[group][i]=seat
+        end
+    end
+end
+menu.migrate_physical()
+settings.physical_seat_revision=1
 settings.preset_store_revision=1
 menu.show_physical=false
 menu.selected_index=settings.seat_index
@@ -2032,9 +2058,9 @@ menu.pull_values=function(index)
             settings["rider_"..key]=value
         end
     end
+    -- The current layout controls visible seats and carry options, including debug [1].
+    settings.pawn_seats=preset.pawns;settings.companion_seats=preset.companions
     if index~=1 then
-        -- Runtime references alias the authoritative layout; no clone/draft can diverge.
-        settings.pawn_seats=preset.pawns;settings.companion_seats=preset.companions
         preset.camera=type(preset.camera)=="table" and preset.camera or {}
         for _,spec in ipairs({{"distance",30,0,80},{"fov",90,40,120}}) do
             local value=preset.camera[spec[1]]
@@ -2057,9 +2083,9 @@ menu.apply_preset=function(index)
     settings.seat_index=index;menu.selected_index=index
     menu.pull_values(index)
     if active then
-        active.fall_reset_pending=true;active.pose_pending=index~=1 and settings.rider_anim or nil
+        active.fall_reset_pending=true;active.pose_pending=settings.rider_anim
         for _,a in pairs(active.passengers or {}) do
-            a.fall_reset_pending=true;a.pose_pending=index~=1 and passengers.seat(a.group,a.slot).anim or nil
+            a.fall_reset_pending=true;a.pose_pending=passengers.visual_seat(a.group,a.slot).anim
         end
     end
     controls.save();status="当前生效预设："..preset.name
@@ -2135,18 +2161,21 @@ menu.edit_seat=function(seat,id,preset)
     end
     for _,spec in ipairs({{"side","X（左右）",-10,10},{"forward","Z（前后）",-15,15},{"height","Y（高度）",-5,15}}) do
         if not finite(seat[spec[1]]) then seat[spec[1]]=0 end
-        if id=="BetaPhysical" then spec[3],spec[4]=-100,100 end
+        if preset==settings.seat_presets[1] then spec[3],spec[4]=-100,100 end
         local changed,value=menu.number(spec[2].."###"..id..spec[1],seat[spec[1]],0.05,spec[3],spec[4])
         if changed and finite(value) then seat[spec[1]]=math.max(spec[3],math.min(spec[4],value));dirty=true end
     end
-    if id~="BetaPhysical" and menu.edit_facing(seat,id=="BetaPlayerSeat" and "BetaPlayerFacing" or id) then dirty=true end
+    if menu.edit_facing(seat,id=="BetaPlayerSeat" and "BetaPlayerFacing" or id) then dirty=true end
     if dirty then
         menu.persist_preset(preset)
-        if id=="BetaPhysical" and active then
-            for _,a in pairs(active.passengers or {}) do a.fall_reset_pending=true end
+        if active then
+            if id=="BetaPlayerSeat" then active.fall_reset_pending=true end
+            for _,a in pairs(active.passengers or {}) do
+                if id=="BetaSeat"..a.group..a.slot then a.fall_reset_pending=true end
+            end
         end
     end
-    if id~="BetaPhysical" then menu.animation(seat,id=="BetaPlayerSeat" and "BetaPlayerPose" or id,preset) end
+    menu.animation(seat,id=="BetaPlayerSeat" and "BetaPlayerPose" or id,preset)
 end
 menu.passenger_seats=function(preset)
     for _,group in ipairs({"pawns","companions"}) do
@@ -2205,9 +2234,9 @@ menu.presets=function()
             local changed,name=imgui.input_text("预设名称###BetaPresetName",preset.name)
             if changed and type(name)=="string" and name:match("%S") then preset.name=name:sub(1,120);menu.persist_preset(preset) end
         end
-    else imgui.text("调试[1]：随从实体始终使用此位置，当前Hip也放到此位置。玩家实体仍由摇杆控制。") end
+    else imgui.text("调试[1]：各随从／同伴的实体与当前Hip使用各自参数；玩家参数只控制玩家Hip。") end
     if imgui.tree_node("玩家参数###BetaPlayerParameters") then
-        menu.edit_seat(preset.player,index==1 and "BetaPhysical" or "BetaPlayerSeat",preset)
+        menu.edit_seat(preset.player,"BetaPlayerSeat",preset)
         if index~=1 then
             preset.camera=type(preset.camera)=="table" and preset.camera or {distance=settings.distance,fov=settings.fov}
             for _,spec in ipairs({{"distance","相机距离偏移",0,80},{"fov","FOV",40,120}}) do
@@ -2217,7 +2246,7 @@ menu.presets=function()
         end
         imgui.tree_pop()
     end
-    if index~=1 then menu.passenger_seats(preset) end
+    menu.passenger_seats(preset)
     imgui.text("与牛车MOD相同：调整立即保存；新增复制当前布局，删除需确认。")
     if menu.pending_preset then imgui.text("布局切换已排队，游戏继续后应用。") end
     if menu.save_error then imgui.text(menu.save_error) end
