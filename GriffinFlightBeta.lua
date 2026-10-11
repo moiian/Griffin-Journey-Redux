@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.29. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.30. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.29-beta"
+local VERSION = "0.1.30-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -79,7 +79,8 @@ local function event(name, detail, defer_flush)
     if #journal.events < 450 then
         journal.events[#journal.events + 1] = {name = name, detail = detail, time = now()}
     end
-    if not defer_flush then flush() end
+    -- Batch gameplay events into the regular flush; exits still flush after active is cleared.
+    if not defer_flush and not active then flush() end
 end
 local function failed(label, err)
     status = label .. "：" .. tostring(err)
@@ -1331,7 +1332,7 @@ passengers.controlled=function(ch,include_player)
     if a and a.moved and a.anchor_target and not a.recovery_pending and ch:get_Valid() then return a end
 end
 -- Hooks only aggregate in memory. No disk I/O or per-hit snapshots in native callbacks.
-passengers.record_protection=function(a,route,blocked)
+passengers.record_protection=function(a,route,blocked,detail)
     if not a then return end
     local key=(a.group or "player")..":"..(a.slot or 0)..":"..route..(blocked and ":blocked" or ":observed")
     local counts=passengers.protection.counts
@@ -1341,6 +1342,23 @@ passengers.record_protection=function(a,route,blocked)
     a.protection_dirty=true
     a.protection_routes=a.protection_routes or {}
     a.protection_routes[route]=blocked and "blocked" or "observed"
+    if route=="fall" or route=="pawnLost.InstanceInfo" or route=="requestDestroy.exactContainer" then
+        a.request_windows=a.request_windows or {}
+        local w=a.request_windows[route]
+        if not w then
+            w={first_time=now(),first_frame=passengers.frame,hits=0,peak_per_behavior_frame=0,
+                first_health=a.health_probe,instance=tostring(a.player)}
+            a.request_windows[route]=w
+            if detail then
+                local ok,value=pcall(passengers.read_instance_info,detail,a)
+                if ok then w.argument=value else w.argument_error=tostring(value) end
+            end
+        end
+        w.hits=w.hits+1;w.last_time=now()
+        if w.last_frame~=passengers.frame then w.hits_this_frame=0 end
+        w.last_frame=passengers.frame;w.hits_this_frame=(w.hits_this_frame or 0)+1
+        w.peak_per_behavior_frame=math.max(w.peak_per_behavior_frame,w.hits_this_frame)
+    end
 end
 passengers.each_controlled=function(fn)
     local d=active
@@ -1378,6 +1396,54 @@ passengers.capture_probe_refs=function(a)
     a.generate_container=info and info:call("get_Container()") or nil
     a.brine=a.player:get_field("<BrineProcessor>k__BackingField")
 end
+passengers.read_instance_info=function(info,a)
+    local argument_ch=info:get_field("<Chara>k__BackingField")
+    local container=info:get_field("<Container>k__BackingField")
+    local matches={}
+    passengers.each_controlled(function(actor)
+        if actor.generate_container==container then matches[#matches+1]={group=actor.group,slot=actor.slot,instance=tostring(actor.player)} end
+    end)
+    return {character=tostring(argument_ch),character_matches=argument_ch==a.player,container_matches=matches,
+        canceled=info:get_field("<Canceled>k__BackingField"),deleted=info:get_field("<Deleted>k__BackingField"),
+        failed=info:get_field("<Failed>k__BackingField")}
+end
+passengers.read_fall_probe=function(a)
+    local value={time=now(),behavior_frame=passengers.frame,instance=tostring(a.player)}
+    if not owned_player(a,false) then value.error="Interface ownership changed";return value end
+    local function read(key,fn)
+        local ok,v=pcall(fn)
+        if ok then value[key]=v else value.errors=value.errors or {};value.errors[key]=tostring(v) end
+    end
+    read("ground",function() return a.player:call("get_IsGround()") end)
+    read("sec_fall",function() return a.player:get_field("SecFall") end)
+    read("fall",function()
+        return {height=a.fall:get_field("<FallHeight>k__BackingField"),
+            landing_height=a.fall:get_field("<FallHeightOnLanding>k__BackingField"),
+            damage_check_height=a.fall:get_field("<HeightCheckDamageFromFall>k__BackingField"),
+            base_universal=vector(a.fall:get_field("BaseFallHeight")),
+            highest_universal=vector(a.fall:get_field("<HighestPositionOnAir>k__BackingField"))}
+    end)
+    read("positions",function()
+        return {scene=vector(a.transform:call("get_Position()")),
+            universal=vector(a.transform:call("get_UniversalPosition()")),
+            context_universal=vector(a.context:call("get_Pos()")),
+            controller_scene=vector(a.controller:call("get_Position()"))}
+    end)
+    read("landing",function()
+        local landing=a.player:get_field("<LandingProcessor>k__BackingField")
+        if not landing then return {available=false} end
+        return {available=true,object_ground=landing:get_field("<IsObjectGround>k__BackingField"),
+            keep_ground=landing:get_field("<IsKeepGround>k__BackingField"),
+            previous_keep_ground=landing:get_field("<IsPrevKeepGround>k__BackingField"),
+            last_ground_universal=vector(landing:get_field("<LastGroundPosition>k__BackingField"))}
+    end)
+    read("safe_position",function()
+        local recorder=a.player:get_field("<FallPreventerPosRecorder>k__BackingField")
+        if not recorder then return {available=false} end
+        return {available=true,unsafe=recorder:get_field("IsUnsafe"),universal=vector(recorder:get_field("<Pos>k__BackingField"))}
+    end)
+    return value
+end
 passengers.probe_tick=function()
     if not active then return end
     passengers.each_controlled(function(a)
@@ -1386,7 +1452,9 @@ passengers.probe_tick=function()
             local counts,routes={},{}
             for key,value in pairs(a.protection_counts or {}) do counts[key]=value end
             for key,value in pairs(a.protection_routes or {}) do routes[key]=value end
-            event("rider_protection",{group=a.group or "player",slot=a.slot,counts=counts,routes=routes},true)
+            event("rider_protection",{group=a.group or "player",slot=a.slot,counts=counts,routes=routes,
+                windows=passengers.snapshot(a.request_windows),latest_health=passengers.snapshot(a.health_probe)},true)
+            a.request_windows=nil
         end
         if now()<(a.health_probe_at or -math.huge) then return end
         a.health_probe_at=now()+0.5
@@ -1399,7 +1467,8 @@ passengers.probe_tick=function()
                 brine=b and b["<IsKilledByBrine>k__BackingField"] or false,
                 wall_brine=b and b["<IsKilledByWallBrine>k__BackingField"] or false,
                 position=vector(a.transform:call("get_Position()")),container_available=a.generate_container~=nil,
-                generate_destroyed=a.generate_info and a.generate_info:call("get_IsExecutedDestroy()") or false}
+                generate_destroyed=a.generate_info and a.generate_info:call("get_IsExecutedDestroy()") or false,
+                physics=passengers.read_fall_probe(a)}
         end)
         if not ok then
             if not a.health_probe_error then event("rider_health_probe_error",{group=a.group or "player",slot=a.slot,error=tostring(value)},true);a.health_probe_error=true end
@@ -1480,7 +1549,7 @@ passengers.install_protection=function()
         local info=sdk.to_managed_object(args[3])
         local a=passengers.container_actor(info and info["<Container>k__BackingField"])
         if a and a.group=="pawns" then
-            passengers.record_protection(a,"pawnLost.InstanceInfo",passengers.protection.relocation)
+            passengers.record_protection(a,"pawnLost.InstanceInfo",passengers.protection.relocation,info)
             if passengers.protection.relocation then return sdk.PreHookResult.SKIP_ORIGINAL end
         end
     end)
