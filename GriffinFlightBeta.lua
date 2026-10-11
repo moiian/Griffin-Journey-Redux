@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.3. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.4. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.3-beta"
+local VERSION = "0.1.4-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -19,6 +19,8 @@ local log_id = os.date("!%Y%m%dT%H%M%SZ") .. "_" .. math.floor(os.clock() * 1000
 local part, last_flush, next_sample = 1, -math.huge, 0
 local journal = {version = VERSION, events = {}, samples = {}}
 local stop_driver, delete_one
+local skip_think_enabled, skip_think_expected = false, nil
+local skip_think_status = "跳过思考：关闭"
 
 local function core()
     local c = rawget(_G, "NickCore")
@@ -321,6 +323,68 @@ local function read_target_probe(d)
     return {error=d.target_probe_failed}
 end
 
+local function request_instance_skip(result, player)
+    assert(result and result.go and result.chara and result.go:get_Valid() and result.chara:get_Valid(), "Griffin unavailable")
+    local ch = result.chara
+    assert(ch:get_CharaIDString()=="ch253000_00" and ch:call("get_GameObject()")==result.go, "Griffin binding mismatch")
+    local maker=ch:call("get_AIDecisionMaker()")
+    assert(maker and maker:call("get_Character()")==ch, "AIDecisionMaker mismatch")
+    local module=maker:call("get_DecisionModule()")
+    assert(module and module:call("get_Chara()")==ch and module:call("get_Owner()")==result.go
+        and module:call("get_AIDecisionMaker()")==maker, "DecisionModule mismatch")
+    local td=sdk.find_type_definition("app.AIDecisionModule")
+    assert(td and td:get_method("requestSkipThink()") and td:get_method("get_IsSkipThink()"), "SkipThink interface unavailable")
+    module:call("requestSkipThink()")
+    assert(module:call("get_IsSkipThink()")==true, "SkipThink flag readback failed")
+end
+
+local function set_skip_think(enabled)
+    skip_think_enabled, skip_think_expected = false, nil
+    if not enabled then skip_think_status="已停止请求跳过狮鹫思考。";event("skip_think_disabled",true);return true end
+    local r=active and active.spawn or state.spawns[#state.spawns]
+    if not alive or not r or not r.ready or r.delete_requested then return false,"请先生成并等待狮鹫就绪" end
+    skip_think_expected=r
+    skip_think_enabled=true
+    skip_think_status="已开启逐帧跳过思考，等待首次请求。"
+    event("skip_think_enabled",true)
+    return true
+end
+local function tick_skip_think()
+    if not skip_think_enabled or not alive then return end
+    local c,r=core(),skip_think_expected
+    if not c or c.properties.isPaused then return end
+    local ok,err=pcall(function()
+        assert(r and r.owner==c.properties.player and not r.delete_requested and state.spawns[#state.spawns]==r,"Griffin context changed")
+        request_instance_skip(r.result,r.owner)
+    end)
+    if ok then skip_think_status="跳过思考：已请求；模块标志=true（动作仍可单独请求）"
+    else skip_think_enabled=false;skip_think_expected=nil;skip_think_status="跳过思考已关闭："..tostring(err);event("skip_think_error",skip_think_status) end
+end
+
+local fall_hook_installed,fall_hook_tried=false,false
+local block_player_fall=false
+local fall_hits,fall_blocked,fall_logged,fall_log_at=0,0,0,-math.huge
+local fall_hook_status="坠落死亡请求拦截：关闭（固定玩家期间观察）"
+local function install_fall_hook()
+    if fall_hook_installed or fall_hook_tried then return end
+    fall_hook_tried=true
+    local ok,err=pcall(function()
+        local td=sdk.find_type_definition("app.Character")
+        local method=td and td:get_method("requestFallDead()")
+        assert(method and sdk.PreHookResult and sdk.PreHookResult.SKIP_ORIGINAL,"Fall request hook unavailable")
+        sdk.hook(method,function(args)
+            local d,c=active,core()
+            if alive and d and d.moved and c and not c.properties.isPaused and c.properties.player==d.player
+                and sdk.to_managed_object(args[2])==d.player then
+                fall_hits=fall_hits+1
+                if block_player_fall then fall_blocked=fall_blocked+1;return sdk.PreHookResult.SKIP_ORIGINAL end
+            end
+        end,function(ret) return ret end)
+        fall_hook_installed=true
+    end)
+    if not ok then fall_hook_status="坠落请求 Hook 不可用："..tostring(err);event("fall_hook_error",fall_hook_status) end
+end
+
 local function start_driver()
     local experiment = rawget(_G, "GriffinMountExperimentControl")
     if experiment and experiment.is_driving() then status = "请先结束实验工具的玩家固定。"; return end
@@ -358,6 +422,7 @@ local function start_driver()
             input = read_pad()
             d.previous_buttons = input.buttons -- holding A/RT on enable is not a fresh press
             active = d
+            install_fall_hook()
             apply_player_freeze(d, settings.freeze_player)
             if r.result.chara:call("get_IsFlight()") then
                 set_intent(d, "Ch253HoverWaitHoHomingHeight", "hover")
@@ -486,6 +551,9 @@ re.on_frame(function()
     if not alive then return end
     local c = core()
     if not c then return end
+    if fall_hits~=fall_logged and now()-fall_log_at>=1 then
+        fall_logged=fall_hits;fall_log_at=now();event("player_fall_request",{hits=fall_hits,blocked=fall_blocked})
+    end
     for i=#state.spawns,1,-1 do
         local r = state.spawns[i]
         if r.owner ~= c.properties.player then r.friend = false end
@@ -502,7 +570,10 @@ re.on_frame(function()
                     local container = info and info:call("get_Container()")
                     local data = container and container._CharaInfo
                     assert(data, "Spawn ThinkStop interface unavailable")
-                    if data:call("get_IsThinkStop()") then data:call("set_IsThinkStop(System.Boolean)",false) end
+                    local before=data:call("get_IsThinkStop()")
+                    if before then data:call("set_IsThinkStop(System.Boolean)",false) end
+                    r.spawn_think_stop=data:call("get_IsThinkStop()")
+                    event("spawn_think_stop",{before=before,after=r.spawn_think_stop})
                     status = "狮鹫已生成并设为队伍友方，可以开始驾驶。"
                     event("spawn_ready", "Friend bound; spawn ThinkStop released when true")
                 end)
@@ -524,7 +595,7 @@ re.on_application_entry("UpdateHID",function()
     if ok then input = result
     else stop_driver("手柄读取失败"); failed("手柄读取失败", result) end
 end)
-re.on_pre_application_entry("UpdateBehavior",tick_driver)
+re.on_pre_application_entry("UpdateBehavior",function() tick_skip_think();tick_driver() end)
 re.on_application_entry("PrepareRendering",function()
     local d = active
     if not d or d.camera_failed then return end
@@ -554,6 +625,8 @@ function bridge.get_instance()
     local r = active and active.spawn or state.spawns[#state.spawns]
     if r and r.ready and not r.delete_requested then return r.result end
 end
+function bridge.set_skip_think(enabled) return set_skip_think(enabled) end
+function bridge.get_skip_think() return skip_think_enabled,skip_think_status end
 function bridge.is_driving() return alive and (active ~= nil or state.recovery ~= nil or queued) end
 function bridge.request_action(node, allow_cross, phase)
     if not bridge.get_instance() or type(node) ~= "string" or node == "" then return false, "Beta 实例尚未就绪" end
@@ -596,6 +669,7 @@ _G.GriffinFlightBetaBridge = bridge
 re.on_script_reset(function()
     stop_driver("脚本重置")
     alive = false
+    skip_think_enabled=false;skip_think_expected=nil;block_player_fall=false
     if rawget(_G, "GriffinFlightBetaBridge") == bridge then _G.GriffinFlightBetaBridge = nil end
     for _, r in ipairs(state.spawns) do r.friend = false; r.ready = false; r.destroy_queued = false end
     flush()
@@ -615,6 +689,24 @@ re.on_draw_ui(function()
     if not imgui.tree_node("狮鹫飞行 Beta###GriffinFlightBeta") then return end
     imgui.text("版本 "..VERSION.." | A 起飞／降落 · RT 冲刺 · LT 悬停")
     if beta_button("一键生成狮鹫并设为友方###BetaSpawn") then spawn() end
+    if beta_button((skip_think_enabled and "关闭跳过狮鹫思考" or "【新增】开启跳过狮鹫思考").."###BetaThinkToggle") then
+        local ok,err=set_skip_think(not skip_think_enabled)
+        if not ok then skip_think_status=tostring(err) end
+    end
+    imgui.text(skip_think_status)
+    if type(imgui.checkbox)=="function" then
+        local styled=type(imgui.push_style_color)=="function" and type(imgui.pop_style_color)=="function"
+        if styled then imgui.push_style_color(0,0xffa8ecff) end
+        local changed,value=imgui.checkbox("【测试】拦截玩家坠落死亡请求",block_player_fall)
+        if styled then imgui.pop_style_color(1) end
+        if changed then
+            block_player_fall=value
+            if active then install_fall_hook() end
+            event("fall_request_block_mode",value)
+        end
+    end
+    imgui.text("坠落死亡请求："..fall_hits.."；已拦截："..fall_blocked)
+    if fall_hook_tried and not fall_hook_installed then imgui.text(fall_hook_status) end
     if type(imgui.checkbox) == "function" then
         local styled = type(imgui.push_style_color)=="function" and type(imgui.pop_style_color)=="function"
         if styled then imgui.push_style_color(0,0xffa8ecff) end
@@ -633,6 +725,7 @@ re.on_draw_ui(function()
         if type(run_once)~="function" then status="等待 NickCore 加载后再删除。";imgui.tree_pop();return end
         run_once(function()
             if not alive or not stop_driver("删除狮鹫") then return end
+            set_skip_think(false)
             for _, r in ipairs(state.spawns) do r.delete_requested=true; delete_one(r) end
         end)
     end
