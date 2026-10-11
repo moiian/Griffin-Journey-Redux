@@ -1,7 +1,7 @@
--- Griffin Mount Experiment: stage 3 read-only flight observation.
+-- Griffin Mount Experiment: stage 3 player-as-target flight control experiment.
 -- Requires the installed aaaNickCore.lua and _NickCore/EnemySpawner.lua.
 -- Keeps an explicit spawn return or user-confirmed instance; never selects by Character ID.
-local VERSION = "0.3.8-stage3-yaw-fix"
+local VERSION = "0.3.9-stage3-stick-lure"
 local state = "Idle"
 local detail = "Ready for one ordinary Griffin request per script session."
 local shared = nil
@@ -54,6 +54,15 @@ local target_probe_status = "目标与坐标记录随动作探针开启；只读
 local yaw_degrees = 45
 local yaw_status = "先运行慢速或快速动作，再点击左转或右转；每次只改一次世界朝向。"
 local last_yaw_request = -math.huge
+local lure = nil
+local lure_restore_pending = nil
+local lure_start_pending = false
+local lure_start_cancelled = false
+local lure_status = "先让狮鹫进入目标导向飞行，再开启20秒摇杆测试。"
+local lure_input = {x=0, y=0, raw_x=0, raw_y=0}
+local lure_input_error = nil
+local lure_invert_y = false
+local stop_lure
 local test_actions = {
     {key = "Test takeoff", label = "起飞", node = "Ch253TakeoffBackJump", phase = "ground"},
     {key = "Test hover", label = "悬停", node = "HoverWait", phase = "air"},
@@ -296,6 +305,7 @@ local function bind_existing_griffin()
 end
 
 local function unbind_griffin()
+    if lure or lure_restore_pending or lure_start_pending then return end
     if relation_pending or recording then return end
     disable_friendship("Disabled: instance unbound. World object left in place.")
     shared, owner, candidate = nil, nil, nil
@@ -555,6 +565,12 @@ local function queue_flight_snapshot(source)
             values = {}, errors = {}, action_probe_enabled = action_probe, target_origin = target_origin,
             target_probe_enabled = action_probe and target_probe
         }
+        if lure then
+            sample.stick_lure = {active=true, input_x=lure_input.x, input_y=lure_input.y,
+                raw_x=lure_input.raw_x, raw_y=lure_input.raw_y, writes=lure.writes,
+                elapsed=game_time()-lure.started, target=lure.target, player_readback=lure.readback,
+                controller_readback=lure.physical, forward_distance=20, lateral_range=12, vertical_range=10}
+        end
         local ok, err = pcall(function()
             local core = dependency()
             assert(core and core.properties.player == owner and shared == expected, "Instance context changed")
@@ -748,6 +764,7 @@ local function start_recording()
 end
 
 local function queue_action_test(action)
+    if lure or lure_restore_pending then action_test_status = "请先停止摇杆测试并恢复玩家位置。"; return end
     if relation_pending or not shared or not shared.go or not shared.chara then return end
     if game_time() - last_action_request < 3 then
         action_test_status = "请等待至少3个游戏运行秒，再提交下一个动作。"
@@ -808,6 +825,7 @@ local function queue_action_test(action)
 end
 
 local function queue_yaw_test(direction)
+    if lure or lure_restore_pending then yaw_status = "摇杆测试期间不直接旋转狮鹫；请先停止并恢复。"; return end
     if relation_pending or not shared or not shared.go or not shared.chara then return end
     if game_time() - last_yaw_request < 1 then
         yaw_status = "请间隔至少1个游戏运行秒，再点击转向。"
@@ -880,7 +898,210 @@ local function queue_yaw_test(direction)
     end)
 end
 
+local function vector_values(v)
+    local result = {}
+    for _, key in ipairs({"x", "y", "z"}) do
+        local n = v and v[key]
+        assert(type(n)=="number" and n==n and math.abs(n)<math.huge, "Invalid position")
+        result[key] = n
+    end
+    return result
+end
+
+local function player_lure_owned(d)
+    local core = dependency()
+    if not core or core.properties.player ~= d.player then return false end
+    if not d.player:get_Valid() or not d.player_go:get_Valid() then return false end
+    return d.player:call("get_GameObject()") == d.player_go
+        and d.player:call("get_Transform()") == d.transform
+        and d.player:get_field("<PosRotContext>k__BackingField") == d.context
+        and d.player:get_field("<AdjustTerrain>k__BackingField") == d.terrain
+        and d.terrain.MainCharacterController == d.controller
+        and d.player:get_field("<FallInfo>k__BackingField") == d.fall
+end
+
+local function synchronize_lure_player(d)
+    local universal = d.transform:call("get_UniversalPosition()")
+    -- Same typed position/context/physics sequence as the inspected OJR source.
+    -- No Character.warp, nil targets, collision changes or FSM changes.
+    d.context:call("setPos(via.Position)", universal)
+    d.fall:call("resetBaseHeight(via.Position)", universal)
+    d.fall:call("resetFallHeight()")
+    d.controller:call("warp()")
+end
+
+stop_lure = function(reason)
+    local d = lure or lure_restore_pending
+    if not d then return end
+    lure = nil -- stop further driver writes before trying restoration
+    lure_input = {x=0,y=0,raw_x=0,raw_y=0}
+    log_event("stick_lure_stopped", reason)
+    local ok, err = pcall(function()
+        if not player_lure_owned(d) then
+            lure_status = "测试已停止；玩家或控制器已切换，放弃旧对象的位置恢复。"
+            log_event("stick_lure_restore_skipped", "Player/context changed; no old-instance write")
+            return
+        end
+        if d.moved then
+            log_event("stick_lure_restore_attempt", "Restore original universal position")
+            flush_flight_log() -- restoration is still attempted if logging fails
+            d.transform:call("set_UniversalPosition(via.Position)", d.original_universal)
+            synchronize_lure_player(d)
+        end
+        lure_status = "测试已停止并恢复玩家原位置：" .. reason
+        log_event("stick_lure_restored", lure_status)
+    end)
+    lure_restore_pending = not ok and d or nil
+    if not ok then
+        lure_status = "移动已停止，恢复失败；请点击停止／恢复重试：" .. tostring(err)
+        log_event("stick_lure_restore_error", lure_status)
+    end
+    flush_flight_log()
+end
+
+local function read_lure_stick()
+    local singleton = sdk.get_native_singleton("via.hid.Gamepad")
+    local definition = sdk.find_type_definition("via.hid.GamePad")
+    assert(singleton and definition, "Gamepad API unavailable")
+    local device = sdk.call_native_func(singleton, definition, "get_MergedDevice")
+    assert(device, "Merged gamepad unavailable")
+    local axis = device:call("get_AxisL()")
+    local x, y = axis and axis.x, axis and axis.y
+    assert(type(x)=="number" and x==x and math.abs(x)<math.huge
+        and type(y)=="number" and y==y and math.abs(y)<math.huge, "Left stick unavailable")
+    x,y=math.max(-1,math.min(1,x)),math.max(-1,math.min(1,y))
+    local raw_x,raw_y=x,y
+    local magnitude=math.sqrt(x*x+y*y)
+    if magnitude<=0.2 then x,y=0,0
+    else
+        local scale=math.min(1,(magnitude-0.2)/0.8)/magnitude
+        x,y=x*scale,y*scale
+    end
+    if lure_invert_y then y=-y end
+    if reframework and reframework:is_drawing_ui() then x,y=0,0 end
+    return {x=x,y=y,raw_x=raw_x,raw_y=raw_y}
+end
+
+local function validate_lure_griffin(d)
+    local bus=rawget(_G,"DD2_OxcartControl")
+    assert(not bus or not bus.owner, "OJR currently owns the player")
+    assert(shared==d.expected and owner==d.player and player_lure_owned(d), "Bound context changed")
+    assert(d.expected.go:get_Valid() and d.expected.chara:get_Valid(), "Griffin unavailable")
+    assert(d.expected.chara:get_CharaIDString()=="ch253000_00"
+        and d.expected.chara:call("get_GameObject()") == d.expected.go, "Griffin binding mismatch")
+    assert(friendly and not aggro_conflict(), "Party Friend unavailable")
+    for _,member in ipairs(party) do
+        assert(d.expected.chara:call("getBattleRelationshipTo(app.Character)",member)==friend_value
+            and member:call("getBattleRelationshipTo(app.Character)",d.expected.chara)==friend_value,
+            "Party relationship changed")
+    end
+    assert(d.expected.chara:call("get_IsFlight()"), "Griffin is no longer airborne")
+    local ctrl=d.expected.chara:call("get_FlightCtrl()")
+    assert(ctrl and ctrl:call("get_CachedCharacter()")==d.expected.chara, "Flight controller mismatch")
+    local manager=d.expected.chara:call("get_ActionManager()")
+    assert(manager and manager:call("get_GameObject()")==d.expected.go, "ActionManager mismatch")
+    local info=manager:get_field("CurrentAction")
+    assert(info and info:get_field("Name")=="Ch253WrapAroundStartLoop", "Fast flight action changed")
+    local ch=NickCore.object.get_component(d.expected.go,"app.Ch253")
+    local tc=ch and ch:call("get_TargetController()")
+    assert(tc and tc:call("get_Owner()")==d.expected.go and tc:call("get_Chara()")==d.expected.chara,
+        "TargetController mismatch")
+    assert(tc:call("get_TargetCharacter()")==d.player, "Griffin is not targeting this player")
+end
+
+local function start_lure_test()
+    if lure or lure_restore_pending or lure_start_pending or relation_pending then return end
+    if not shared or not shared.go or not shared.chara then return end
+    lure_start_pending = true
+    lure_start_cancelled = false
+    local expected, player = shared, owner
+    run_once(function()
+        if lure_start_cancelled then lure_start_pending=false;return end
+        local ok,err=pcall(function()
+            local core=dependency()
+            assert(core and core.properties.player==player and not core.properties.isPaused, "Gameplay unavailable")
+            assert(type(re.on_pre_application_entry)=="function" and type(re.on_application_entry)=="function",
+                "Application callbacks unavailable")
+            assert(not rawget(_G,"DD2_OxcartControl") or not _G.DD2_OxcartControl.owner, "OJR currently owns the player")
+            local terrain=player:get_field("<AdjustTerrain>k__BackingField")
+            local d={expected=expected,player=player,player_go=player:call("get_GameObject()"),
+                transform=player:call("get_Transform()"),context=player:get_field("<PosRotContext>k__BackingField"),
+                terrain=terrain,controller=terrain and terrain.MainCharacterController,
+                fall=player:get_field("<FallInfo>k__BackingField"),started=game_time(),writes=0}
+            assert(d.transform and d.context and d.controller and d.fall, "Player physics interfaces unavailable")
+            validate_lure_griffin(d)
+            lure_input=read_lure_stick()
+            d.original_universal=d.transform:call("get_UniversalPosition()")
+            assert(d.original_universal, "Original universal position unavailable")
+            d.original_scene=vector_values(d.transform:call("get_Position()"))
+            assert(#flight_log.samples<850 and #flight_log.events<470, "Use a fresh recording session")
+            start_recording() -- renew recorder window; preserve all earlier samples
+            log_event("stick_lure_started", "20 gameplay seconds; ahead=20m, lateral=12m, vertical=10m, deadzone=0.2")
+            flight_log.events[#flight_log.events].player_original_scene=d.original_scene
+            assert(flush_flight_log(), "Pre-movement log failed")
+            lure=d;lure_input_error=nil
+            lure_status="摇杆测试已开启：左右横移／上下升降，20秒后恢复玩家原位置。"
+        end)
+        if not ok then
+            lure_status="未开启摇杆测试："..tostring(err)
+            log_event("stick_lure_start_blocked",lure_status)
+        end
+        lure_start_pending=false
+    end)
+end
+
+local function tick_lure_test()
+    local d=lure
+    if not d then return end
+    local core=dependency()
+    if not core or core.properties.isPaused or game_time()<d.started then stop_lure("暂停或游戏上下文变化");return end
+    if not d.moved then
+        if reframework and reframework:is_drawing_ui() then return end
+        d.started=game_time() -- countdown starts with the first move, after UI closes
+    end
+    if game_time()-d.started>=20 then stop_lure("20秒测试到期");return end
+    if lure_input_error then stop_lure("摇杆读取失败："..lure_input_error);return end
+    if not recording then stop_lure("记录已停止或保存失败");return end
+    local ok,err=pcall(function()
+        validate_lure_griffin(d)
+        local tr=d.expected.chara:call("get_Transform()")
+        local position=vector_values(tr:call("get_Position()"))
+        local q=rotation_values(tr:call("get_Rotation()"))
+        local fx,fz=2*(q.x*q.z+q.w*q.y),1-2*(q.x*q.x+q.y*q.y)
+        local length=math.sqrt(fx*fx+fz*fz)
+        assert(length>0.2,"Griffin forward is too vertical")
+        fx,fz=fx/length,fz/length
+        local x,y=lure_input.x,lure_input.y
+        local point={x=position.x+fx*20+fz*x*12,y=position.y+y*10,z=position.z+fz*20-fx*x*12}
+        if not d.moved then
+            log_event("stick_lure_first_write", "Player Transform + position context + controller sync")
+            flight_log.events[#flight_log.events].target=point
+            assert(flush_flight_log(),"Pre-write log failed")
+        end
+        d.moved=true
+        d.transform:call("set_Position(via.vec3)",Vector3f.new(point.x,point.y,point.z))
+        synchronize_lure_player(d)
+        d.target=point;d.writes=d.writes+1
+        d.readback=vector_values(d.transform:call("get_Position()"))
+        d.physical=vector_values(d.controller:call("get_Position()"))
+    end)
+    if not ok then stop_lure("驾驶检查或位置写入失败："..tostring(err)) end
+end
+
+if type(re.on_application_entry)=="function" and type(re.on_pre_application_entry)=="function" then
+    re.on_application_entry("UpdateHID",function()
+        if not lure then return end
+        local ok,value=pcall(read_lure_stick)
+        if ok then lure_input=value;lure_input_error=nil
+        else lure_input={x=0,y=0,raw_x=0,raw_y=0};lure_input_error=tostring(value) end
+    end)
+    -- Supply the real player target before the game's behavior/AI stage.
+    re.on_pre_application_entry("UpdateBehavior",tick_lure_test)
+end
+
 re.on_script_reset(function()
+    lure_start_cancelled=true
+    if lure or lure_restore_pending then stop_lure("脚本重置") end
     recording = false
     if request_listener_table and request_listener_table[request_listener_key] == request_listener_fn then
         request_listener_table[request_listener_key] = nil
@@ -916,6 +1137,8 @@ end
 button_labels["Toggle cross phase"] = "切换跨阶段测试（允许地面直接请求空中动作）"
 button_labels["Yaw left"] = "【本轮转向】左转（一次）"
 button_labels["Yaw right"] = "【本轮转向】右转（一次）"
+button_labels["Start stick lure"] = "【本轮驾驶】开启左摇杆测试（20秒）"
+button_labels["Stop stick lure"] = "【本轮驾驶】停止／恢复玩家原位置"
 local function ui_button(key)
     local label = button_labels[key] or key
     local highlight = label:find("【本轮", 1, true) ~= nil
@@ -932,7 +1155,7 @@ end
 re.on_draw_ui(function()
     if not imgui.tree_node("狮鹫坐骑实验 - 阶段3###Griffin Mount Experiment - Stage 3 Observe") then return end
     imgui.text("版本：" .. VERSION)
-    imgui.text("本轮：绑定狮鹫 → 设为友方 → 单次动作测试（自动记录）")
+    imgui.text("本轮：目标导向飞行 → 开启左摇杆测试 → 关闭界面驾驶")
     imgui.text("录制会自动包含动作名和原生请求，不必另开探针。")
     if not dependency() then imgui.text("等待 NickCore 加载完成。") end
     imgui.text("绑定来源：" .. (target_origin == "selected" and "现有狮鹫" or target_origin == "spawned" and "本脚本生成" or "尚未绑定"))
@@ -973,7 +1196,23 @@ re.on_draw_ui(function()
             imgui.tree_pop()
         end
     end
-    if shared and shared.go and shared.chara and imgui.tree_node("【本轮】转向测试（慢速／快速共用）") then
+    if shared and shared.go and shared.chara and imgui.tree_node("【本轮】左摇杆驾驶（玩家作为前方目标）") then
+        imgui.text("先点目标导向飞行，再开启测试并关闭界面。")
+        imgui.text("左右横移／上下升降；松杆回正前方。测试20秒后回到原位置。")
+        if type(imgui.checkbox)=="function" then
+            local changed,value=imgui.checkbox("上下反转（推上反而下降时开启）",lure_invert_y)
+            if changed then lure_invert_y=value end
+        end
+        if not lure and not lure_restore_pending and not lure_start_pending and ui_button("Start stick lure") then start_lure_test() end
+        if (lure or lure_restore_pending or lure_start_pending) and ui_button("Stop stick lure") then
+            lure_start_cancelled=true
+            run_once(function() stop_lure("手动停止") end)
+        end
+        imgui.text(lure_status)
+        if lure then imgui.text(string.format("摇杆 X %.2f / Y %.2f | 位置更新 %d 次",lure_input.x,lure_input.y,lure.writes)) end
+        imgui.tree_pop()
+    end
+    if shared and shared.go and shared.chara and imgui.tree_node("旧版单次旋转测试（本轮不用点）") then
         imgui.text("先进入悬停前移或目标导向飞行，再转向。")
         if type(imgui.slider_int) == "function" then
             local changed, value = imgui.slider_int("【本轮】单次转向角度（度）", yaw_degrees, 5, 180)
