@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.22. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.23. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.22-beta"
+local VERSION = "0.1.23-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -16,9 +16,11 @@ local hooks_ready, hooks_tried, friend_value = false, false, nil
 local yaw_state, yaw_hook_ready = nil, false
 local yaw_status = "自动转向镜头：未开启"
 local controls,menu,passengers = {},{},{}
+passengers.frame=0
+passengers.protection={damage=true,relocation=true,counts={}}
 local masks = nil
 local input = {x = 0, y = 0, buttons = 0}
-local settings = {distance = 30, fov = 90, player_distance = 20, player_height = 0, freeze_player = true, rider_lookX=0, rider_lookZ=1, rider_tilt_follow=1, rider_pitch_offset=0, rider_anchor="head", rider_neck_joint="", rider_height=1.0, rider_forward=0, rider_side=0, camera_x=0, camera_y=0, camera_z=0, sphere_navigation=true, navigation_radius=4.019, steering_yaw=50.276, steering_pitch=22.018, navigation_height=0.991, bumper_pitch=59, controls_revision=1, camera_auto_yaw=false, camera_yaw_speed=120, camera_manual_threshold=0.55}
+local settings = {distance = 30, fov = 90, player_distance = 20, player_height = 0, freeze_player = true, rider_anim="", rider_lookX=0, rider_lookZ=1, rider_tilt_follow=1, rider_pitch_offset=0, rider_anchor="head", rider_neck_joint="", rider_height=1.0, rider_forward=0, rider_side=0, camera_x=0, camera_y=0, camera_z=0, sphere_navigation=true, navigation_radius=4.019, steering_yaw=50.276, steering_pitch=22.018, navigation_height=0.991, bumper_pitch=59, controls_revision=1, camera_auto_yaw=false, camera_yaw_speed=120, camera_manual_threshold=0.55}
 local loaded_settings=nil
 local settings_path = "GriffinFlightBeta_Settings.json"
 local log_id = os.date("!%Y%m%dT%H%M%SZ") .. "_" .. math.floor(os.clock() * 1000)
@@ -70,6 +72,7 @@ if type(json.load_file) == "function" then
     local ok, saved = pcall(json.load_file, settings_path)
     if ok and type(saved) == "table" then
         loaded_settings=saved
+        settings.rider_anim=type(saved.rider_anim)=="string" and saved.rider_anim or ""
         if type(saved.camera_auto_yaw)=="boolean" then settings.camera_auto_yaw=saved.camera_auto_yaw end
         if finite(saved.camera_manual_threshold) then settings.camera_manual_threshold=math.max(0.25,math.min(0.95,saved.camera_manual_threshold)) end
         if finite(saved.camera_yaw_speed) then settings.camera_yaw_speed=math.max(15,math.min(360,saved.camera_yaw_speed)) end
@@ -992,6 +995,7 @@ local function install_fall_hook()
                 local member=d.passengers and d.passengers[ch]
                 if ch==d.player and d.moved or member and member.moved and member.anchor_target and not member.recovery_pending then
                     fall_hits=fall_hits+1
+                    passengers.record_protection(ch==d.player and d or member,"fall",block_player_fall)
                     if block_player_fall then fall_blocked=fall_blocked+1;return sdk.PreHookResult.SKIP_ORIGINAL end
                 end
             end
@@ -1042,10 +1046,12 @@ local function start_driver()
             if settings.camera_auto_yaw then install_yaw_hook() end
             if settings.head_camera~=false then change_camera_mode("griffin") end
             install_fall_hook()
+            passengers.install_protection()
             apply_player_freeze(d, settings.freeze_player)
             local joint_ok,joint_err=pcall(discover_joints,d)
             if not joint_ok then event("anchor_joint_probe_error",tostring(joint_err)) end
             prepare_anchor_mode(d,d.anchor_mode)
+            if settings.rider_anim~="" then d.pose_pending=settings.rider_anim end
             select_player_target(r)
             if r.result.chara:call("get_IsFlight()") then
                 d.controls_active=true; d.control_node="Ch253HoverWaitHoHomingHeight"
@@ -1196,7 +1202,9 @@ local function tick_driver()
         d.trace = {navigation_sphere=sphere,neutral_anchor=neutral,anchor_plan=d.anchor_plan,griffin = pos, player = vector(d.transform:call("get_Position()")), target = target,
             physical = vector(d.controller:call("get_Position()")), flight = flying, ground = ground,
             action = tostring(action_name), mode = d.mode, gear=d.gear, manual_hold=d.manual_hold, external_control=d.external_control, bumpers={rb=held(input.buttons,masks.rb),lb=held(input.buttons,masks.lb)}, anchor_mode=d.anchor_mode, anchor_height = settings.player_height, stick = {x=input.x,y=input.y}}
+        passengers.tick_pose(d)
         passengers.tick(d)
+        d.trace.passenger_protection=passengers.protection.counts
         d.trace.seat_orientation=d.orientation_trace
     end)
     if not ok then stop_driver("驾驶检查或位置同步失败"); failed("驾驶已停止", err) end
@@ -1204,7 +1212,7 @@ end
 
 passengers.player_config=function()
     return {anchor=settings.rider_anchor,neck_joint=settings.rider_neck_joint,height=settings.rider_height,
-        forward=settings.rider_forward,side=settings.rider_side,lookX=settings.rider_lookX,lookZ=settings.rider_lookZ,
+        forward=settings.rider_forward,side=settings.rider_side,anim=settings.rider_anim,lookX=settings.rider_lookX,lookZ=settings.rider_lookZ,
         tilt_follow=settings.rider_tilt_follow,pitch_offset=settings.rider_pitch_offset}
 end
 passengers.basis=function(d,config,position_only)
@@ -1362,6 +1370,7 @@ passengers.seat=function(group,index)
     local seat=settings[key][index]
     if type(seat)~="table" then seat={};settings[key][index]=seat end
     if seat.enabled==nil then seat.enabled=true end
+    if type(seat.anim)~="string" then seat.anim="" end
     for _,spec in ipairs({{"lookX",0,-1,1},{"lookZ",1,-1,1},{"tilt_follow",1,0,1},{"pitch_offset",0,-45,45}}) do
         local key,default,lo,hi=spec[1],spec[2],spec[3],spec[4]
         seat[key]=finite(seat[key]) and math.max(lo,math.min(hi,seat[key])) or default
@@ -1376,6 +1385,106 @@ passengers.seat=function(group,index)
     seat.side=math.max(-10,math.min(10,seat.side))
     return seat
 end
+-- Same receiver-scoped damage policy as OJR; no global invincibility fields.
+passengers.controlled=function(ch,include_player)
+    local d,c=active,core()
+    if not alive or not d or not c or c.properties.player~=d.player then return end
+    local a=include_player and ch==d.player and d or (d.passengers or {})[ch]
+    if a and a.moved and a.anchor_target and not a.recovery_pending and ch:get_Valid() then return a end
+end
+passengers.record_protection=function(a,route,blocked)
+    if not a then return end
+    local key=(a.group or "player")..":"..(a.slot or 0)..":"..route..(blocked and ":blocked" or ":observed")
+    local counts=passengers.protection.counts
+    counts[key]=(counts[key] or 0)+1
+    a.protection_counts=a.protection_counts or {}
+    a.protection_counts[route]=(a.protection_counts[route] or 0)+1
+    if not a.protection_log_at or now()>=a.protection_log_at then
+        a.protection_log_at=now()+5
+        passengers.protection.pending=passengers.protection.pending or {}
+        passengers.protection.pending[#passengers.protection.pending+1]={group=a.group or "player",slot=a.slot,route=route,blocked=blocked,counts=a.protection_counts}
+    end
+end
+passengers.install_protection=function()
+    if passengers.protection.installed then return end
+    passengers.protection.installed=true
+    local errors={}
+    local function hook(type_name,signature,pre)
+        local ok,err=pcall(function()
+            local td=sdk.find_type_definition(type_name)
+            local m=assert(td and td:get_method(signature),signature.." unavailable")
+            sdk.hook(m,function(args)
+                local success,result=pcall(pre,args)
+                if success then return result end
+            end,function(ret) return ret end)
+        end)
+        if not ok then errors[#errors+1]=tostring(err) end
+    end
+    for _,signature in ipairs({"damageProc(app.HitController.DamageInfo)","updateDamage(app.HitController.DamageInfo, System.UInt32, System.Single, System.Boolean)"}) do
+        hook("app.HitController",signature,function(args)
+            local info=sdk.to_managed_object(args[3])
+            local receiver=info and info["<DamageGameObject>k__BackingField"]
+            if not receiver then return end
+            for ch in pairs(active and active.passengers or {}) do
+                local a=passengers.controlled(ch)
+                if a and receiver==a.player_go then
+                    passengers.record_protection(a,"damage",passengers.protection.damage)
+                    if passengers.protection.damage then return sdk.PreHookResult.SKIP_ORIGINAL end
+                end
+            end
+        end)
+    end
+    -- Confirmed Character-taking void overloads only; no CharacterID-wide control.
+    for _,signature in ipairs({"safeWarp(app.Character, via.Position)","safeWarp(app.Character, via.Position, via.Quaternion)",
+        "pawnLost(app.Character, System.Boolean, System.Boolean)","setPawnLostTimer(app.Character)"}) do
+        hook("app.PawnManager",signature,function(args)
+            local ch=sdk.to_managed_object(args[3])
+            local a=passengers.controlled(ch)
+            if a and a.group=="pawns" then
+                passengers.record_protection(a,signature,passengers.protection.relocation)
+                if passengers.protection.relocation then return sdk.PreHookResult.SKIP_ORIGINAL end
+            end
+        end)
+    end
+    passengers.protection.status=#errors==0 and "乘客伤害／自动传送保护已安装（仅当前落座实例）" or "部分乘客保护不可用："..table.concat(errors,"; ")
+    event("passenger_protection_installed",{errors=errors})
+end
+passengers.play_pose=function(a,node)
+    assert(active and alive and not core().properties.isPaused,"请开始驾驶并关闭暂停菜单后播放")
+    assert(owned_player(a,false) and player_fsm(a.player)==a.fsm,"Animation actor binding changed")
+    node=type(node)=="string" and node:match("^%s*(.-)%s*$") or ""
+    if node=="" then return end
+    local manager=assert(a.player:call("get_ActionManager()"),"Actor ActionManager unavailable")
+    a.fsm_touched=true
+    a.pose_freeze_frame=passengers.frame+1
+    a.fsm:call("set_Enabled(System.Boolean)",true)
+    local ok,err=pcall(function()
+        manager:call("requestActionCore(app.ActionManager.Priority, System.String, System.UInt32)",1,node,0)
+    end)
+    if not ok then
+        local desired=false
+        if not a.group and not settings.freeze_player then desired=a.original_fsm end
+        a.fsm:call("set_Enabled(System.Boolean)",desired)
+        a.pose_freeze_frame=nil;error(err)
+    end
+    a.fall_reset_pending=true
+    event("seat_animation_requested",{group=a.group or "player",slot=a.slot,node=node})
+end
+passengers.tick_pose=function(a)
+    if a.pose_freeze_frame and passengers.frame>=a.pose_freeze_frame then
+        local desired=false
+        if not a.group and not settings.freeze_player then desired=a.original_fsm end
+        a.fsm:call("set_Enabled(System.Boolean)",desired)
+        assert(a.fsm:call("get_Enabled()")==desired,"Animation FSM freeze readback mismatch")
+        a.pose_freeze_frame=nil
+    end
+    if a.pose_pending~=nil then
+        local node=a.pose_pending;a.pose_pending=nil
+        local ok,err=pcall(passengers.play_pose,a,node)
+        if not ok then event("seat_animation_error",{group=a.group or "player",slot=a.slot,error=tostring(err)});status="动画请求失败："..tostring(err) end
+    end
+end
+
 passengers.restore_one=function(a)
     if not a.player:get_Valid() then
         a.bones_applied=nil;a.moved=false;a.fsm_touched=false;return
@@ -1383,6 +1492,8 @@ passengers.restore_one=function(a)
     assert(owned_player(a,false),"Passenger binding changed; retained for recovery")
     restore_bone(a)
     passengers.restore_rotation(a)
+    local pose_enabled=a.pose_freeze_frame~=nil
+    a.pose_pending=nil
     if a.moved then
         if core() and core().properties.player==a.owner then
             a.transform:call("set_UniversalPosition(via.Position)",a.original_position)
@@ -1392,10 +1503,11 @@ passengers.restore_one=function(a)
     end
     if a.fsm_touched then
         assert(player_fsm(a.player)==a.fsm,"Passenger FSM changed; retained for recovery")
-        -- Do not overwrite a third party that has already re-enabled this FSM.
-        if a.fsm:call("get_Enabled()")==false then a.fsm:call("set_Enabled(System.Boolean)",a.original_fsm) end
+        -- Preserve third-party re-enabling, except the explicit pose window we own.
+        if a.fsm:call("get_Enabled()")==false or pose_enabled then a.fsm:call("set_Enabled(System.Boolean)",a.original_fsm) end
         a.fsm_touched=false
     end
+    a.pose_freeze_frame=nil
 end
 passengers.restore_all=function(d)
     local errors={}
@@ -1419,6 +1531,7 @@ passengers.bind=function(d,ch,group,index)
     assert(a.original_position and type(a.original_fsm)=="boolean","Passenger original state unavailable")
     discover_joints(a)
     assert(a.hip_joint and a.hip_joint:get_Valid(),"Passenger Hip unavailable")
+    a.pose_pending=passengers.seat(group,index).anim
     d.passengers[ch]=a -- recovery registered before the first native mutation
     event("passenger_bound",{group=group,slot=index})
     return a
@@ -1434,11 +1547,12 @@ passengers.tick=function(d)
     for _,group in ipairs({"pawns","companions"}) do
         for i,ch in ipairs((passengers.roster or {})[group] or {}) do
             local seat=passengers.seat(group,i)
-            if seat.enabled then wanted[ch]={group=group,slot=i} end
+            if seat.enabled and ch:get_Valid() then wanted[ch]={group=group,slot=i} end
         end
     end
     for ch,a in pairs(d.passengers) do
         if not wanted[ch] or not ch:get_Valid() then
+            if not ch:get_Valid() then event("passenger_unloaded",{group=a.group,slot=a.slot,protection=a.protection_counts}) end
             a.anchor_target=nil
             local ok,err=pcall(passengers.restore_one,a)
             if ok then d.passengers[ch]=nil;event("passenger_released",{group=a.group,slot=a.slot})
@@ -1456,7 +1570,7 @@ passengers.tick=function(d)
             passengers.prepare_rig(a,d)
             restore_bone(a)
             local current=a.fsm:call("get_Enabled()")
-            if current~=false then
+            if current~=false and not a.pose_freeze_frame then
                 a.fsm_touched=true;a.fsm:call("set_Enabled(System.Boolean)",false)
                 assert(a.fsm:call("get_Enabled()")==false,"Passenger freeze readback mismatch")
             end
@@ -1466,7 +1580,8 @@ passengers.tick=function(d)
             a.transform:call("set_Position(via.vec3)",Vector3f.new(physical.x,physical.y,physical.z))
             passengers.orient(a,passengers.seat(a.group,a.slot))
             sync_player(a)
-            d.passenger_trace[#d.passenger_trace+1]={group=a.group,slot=a.slot,physical=physical,fsm_enabled=false,orientation=a.orientation_trace,orientation_failed=a.orientation_failed or false}
+            passengers.tick_pose(a)
+            d.passenger_trace[#d.passenger_trace+1]={group=a.group,slot=a.slot,physical=physical,fsm_enabled=a.fsm:call("get_Enabled()"),protection=a.protection_counts,orientation=a.orientation_trace,orientation_failed=a.orientation_failed or false}
         end)
         if not ok then
             passengers.last_error=slot.group.." "..slot.slot..": "..tostring(err)
@@ -1527,6 +1642,7 @@ end
 local function spawn()
     if queued or #state.spawns > 0 or state.recovery then return end
     settings.freeze_player=true;block_player_fall=true
+    passengers.protection.damage=true;passengers.protection.relocation=true
     if not core() then status = "等待 NickCore 加载。"; return end
     local token = {}
     operation = token
@@ -1583,6 +1699,9 @@ re.on_frame(function()
     if not alive then return end
     local c = core()
     if not c or c.properties.isPaused then return end
+    local pending=passengers.protection.pending or {}
+    passengers.protection.pending={}
+    for _,detail in ipairs(pending) do event("rider_protection",detail) end
     if fall_hits~=fall_logged and now()-fall_log_at>=1 then
         fall_logged=fall_hits;fall_log_at=now();event("player_fall_request",{hits=fall_hits,blocked=fall_blocked})
     end
@@ -1676,7 +1795,7 @@ re.on_application_entry("UpdateHID",function()
     end
 end)
 
-re.on_pre_application_entry("UpdateBehavior",function() passengers.refresh();tick_skip_think();tick_driver();tick_camera_follow() end)
+re.on_pre_application_entry("UpdateBehavior",function() passengers.frame=passengers.frame+1;passengers.refresh();tick_skip_think();tick_driver();tick_camera_follow() end)
 re.on_pre_application_entry("UpdateJointExpression",function()
     passengers.pre()
     local d=active
@@ -1858,12 +1977,17 @@ menu.next_preset=function()
     local index=settings.seat_index+1
     menu.apply_preset(index>#settings.seat_presets and 2 or index)
 end
+menu.show_physical=false
 menu.apply_preset=function(index)
     local preset=settings.seat_presets[index]
-    if not preset or index==1 then return end
-    settings.pawn_seats=menu.clone(preset.pawns or {})
-    settings.companion_seats=menu.clone(preset.companions or {})
+    if not preset or index==1 and not menu.show_physical then return end
+    if index~=1 then menu.last_normal=index end
+    if index~=1 then
+        settings.pawn_seats=menu.clone(preset.pawns or {})
+        settings.companion_seats=menu.clone(preset.companions or {})
+    end
     settings.seat_index=index
+    settings.rider_anim=type(preset.player.anim)=="string" and preset.player.anim or ""
     settings.rider_anchor=preset.player.anchor=="neck" and "neck" or "head"
     settings.rider_neck_joint=type(preset.player.neck_joint)=="string" and preset.player.neck_joint or ""
     settings.rider_height=math.max(-5,math.min(15,preset.player.height))
@@ -1879,10 +2003,14 @@ menu.apply_preset=function(index)
     end
     if active then
         active.fall_reset_pending=true
-        for _,a in pairs(active.passengers or {}) do a.fall_reset_pending=true end
+        active.pose_pending=settings.rider_anim
+        for _,a in pairs(active.passengers or {}) do
+            a.fall_reset_pending=true;a.pose_pending=passengers.seat(a.group,a.slot).anim
+        end
     end
     controls.save();status="已应用座位预设："..preset.name
 end
+if loaded_settings and loaded_settings.seat_index==1 then menu.apply_preset(settings.seat_index) end
 menu.edit_facing=function(seat,id)
     local dirty=false
     for _,spec in ipairs({{"lookX","【新增】Look At X（右正／左负）",0,-1,1},
@@ -1898,6 +2026,24 @@ menu.edit_facing=function(seat,id)
     imgui.text("Look At X左右面向、Z前后面向；(0, 1)朝狮鹫前方。倾斜仅作用于角色身体。")
     return dirty
 end
+menu.animation=function(seat,id)
+    if type(seat.anim)~="string" then seat.anim="" end
+    if type(imgui.input_text)=="function" then
+        local changed,value=imgui.input_text("【新增】动作名称###"..id.."Anim",seat.anim)
+        if changed and type(value)=="string" then seat.anim=value:sub(1,160);controls.save() end
+    end
+    if beta_button("【新增】播放动画###"..id.."Play") then
+        local d=active
+        local a=id=="BetaPlayerPose" and d or nil
+        for _,member in pairs(d and d.passengers or {}) do
+            if id=="BetaSeat"..member.group..member.slot then a=member end
+        end
+        if not a then status="请先开始驾驶并启用该座位。"
+        else a.pose_pending=seat.anim end
+    end
+    imgui.text("使用动作节点名，例如 SitOnChairActions；留空不自动播放。随预设保存，落座／换预设时请求一次。")
+end
+
 menu.edit_seat=function(seat,id)
     if type(imgui.combo)=="function" then
         local changed,index=imgui.combo("骨骼锚点###"..id.."Anchor",seat.anchor=="neck" and 2 or 1,{"头部","颈部"})
@@ -1916,7 +2062,10 @@ menu.edit_seat=function(seat,id)
         local changed,value=imgui.slider_float(spec[2].."###"..id..spec[1],seat[spec[1]],spec[3],spec[4])
         if changed and finite(value) then seat[spec[1]]=math.max(spec[3],math.min(spec[4],value));controls.save() end
     end
-    if id~="BetaPhysical" and menu.edit_facing(seat,id) then controls.save() end
+    if id~="BetaPhysical" then
+        if menu.edit_facing(seat,id) then controls.save() end
+        menu.animation(seat,id)
+    end
 end
 menu.passenger_seats=function()
     imgui.text("【新增】乘客实体位置固定取预设[1]，Hip分别使用以下座位；开始驾驶后自动冻结乘客FSM。")
@@ -1952,8 +2101,9 @@ menu.physical_preset=function()
         local before=tostring(seat.anchor)..tostring(seat.neck_joint)..tostring(seat.height)..tostring(seat.forward)..tostring(seat.side)
         menu.edit_seat(seat,"BetaPhysical")
         local after=tostring(seat.anchor)..tostring(seat.neck_joint)..tostring(seat.height)..tostring(seat.forward)..tostring(seat.side)
-        if before~=after and active then
-            for _,a in pairs(active.passengers or {}) do a.fall_reset_pending=true end
+        if before~=after then
+            if settings.seat_index==1 then menu.apply_preset(1)
+            elseif active then for _,a in pairs(active.passengers or {}) do a.fall_reset_pending=true end end
         end
         imgui.text(passengers.npc_status or "同行NPC等待扫描")
         imgui.tree_pop()
@@ -2075,10 +2225,12 @@ re.on_draw_ui(function()
     if imgui.tree_node("座位预设") then
         local names={};for _,preset in ipairs(settings.seat_presets) do names[#names+1]=preset.name end
         if type(imgui.combo)=="function" then
-            local cycle_names={};for i=2,#names do cycle_names[#cycle_names+1]="["..i.."] "..names[i] end
-            local changed,index=imgui.combo("当前预设",settings.seat_index-1,cycle_names)
-            if changed then menu.apply_preset(index+1) end
+            local first=menu.show_physical and 1 or 2
+            local cycle_names={};for i=first,#names do cycle_names[#cycle_names+1]="["..i.."] "..names[i] end
+            local changed,index=imgui.combo("当前预设",settings.seat_index-first+1,cycle_names)
+            if changed then menu.apply_preset(index+first-1) end
         else imgui.text("当前预设："..names[settings.seat_index]) end
+        if settings.seat_index==1 then imgui.text("调试预览[1]：实体坐标在DEBUG中修改；该项不参与轮询。") end
         if beta_button("下一预设###BetaPresetNext") then menu.next_preset() end
         if type(imgui.combo)=="function" then
             local changed,index=imgui.combo("【新增】座位骨骼锚点",settings.rider_anchor=="neck" and 2 or 1,{"头部","颈部"})
@@ -2099,6 +2251,9 @@ re.on_draw_ui(function()
         menu.slider("rider_height","【新增】座位上下偏移",-5,15)
         menu.slider("rider_forward","【新增】座位前后偏移",-15,15)
         menu.slider("rider_side","【新增】座位左右偏移",-10,10)
+        local pose=passengers.player_config()
+        menu.animation(pose,"BetaPlayerPose")
+        if settings.rider_anim~=pose.anim then settings.rider_anim=pose.anim;controls.save() end
         local facing=passengers.player_config()
         if menu.edit_facing(facing,"BetaPlayerFacing") then
             for _,key in ipairs({"lookX","lookZ","tilt_follow","pitch_offset"}) do settings["rider_"..key]=facing[key] end
@@ -2110,8 +2265,11 @@ re.on_draw_ui(function()
             if changed and type(name)=="string" then menu.preset_name=name:sub(1,120) end
         end
         if beta_button("保存到当前预设###BetaPresetSave") then
-            local old=settings.seat_presets[settings.seat_index]
-            settings.seat_presets[settings.seat_index]=menu.snapshot(old.name,old);controls.save();status="座位预设已保存。"
+            if settings.seat_index==1 then status="预设[1]请用DEBUG实体位置编辑器直接修改。"
+            else
+                local old=settings.seat_presets[settings.seat_index]
+                settings.seat_presets[settings.seat_index]=menu.snapshot(old.name,old);controls.save();status="座位预设已保存。"
+            end
         end
         if beta_button("另存为新预设###BetaPresetNew") then
             local name=menu.preset_name:match("^%s*(.-)%s*$")
@@ -2119,10 +2277,10 @@ re.on_draw_ui(function()
         end
         if beta_button("重命名当前预设###BetaPresetRename") then
             local name=menu.preset_name:match("^%s*(.-)%s*$")
-            if name~="" then settings.seat_presets[settings.seat_index].name=name;controls.save() end
+            if name~="" and settings.seat_index~=1 then settings.seat_presets[settings.seat_index].name=name;controls.save() end
         end
         if beta_button("删除当前预设###BetaPresetDelete") then
-            if #settings.seat_presets>2 then table.remove(settings.seat_presets,settings.seat_index);menu.apply_preset(math.min(settings.seat_index,#settings.seat_presets))
+            if settings.seat_index~=1 and #settings.seat_presets>2 then table.remove(settings.seat_presets,settings.seat_index);menu.apply_preset(math.min(settings.seat_index,#settings.seat_presets))
             else status="除DEBUG预设[1]外，至少保留一个乘坐预设。" end
         end
         menu.passenger_seats()
@@ -2131,7 +2289,18 @@ re.on_draw_ui(function()
     end
     if imgui.tree_node("按键设置") then menu.bindings();imgui.tree_pop() end
     if imgui.tree_node("DEBUG") then
-        menu.physical_preset()
+        local changed,value=menu.toggle("【新增】显示预设[1]（仅手动调试）",menu.show_physical)
+        if changed then
+            menu.show_physical=value
+            if not value and settings.seat_index==1 then menu.apply_preset(menu.last_normal or 2) end
+        end
+        if menu.show_physical then menu.physical_preset() end
+        changed,value=menu.toggle("【新增】落座乘客伤害免疫",passengers.protection.damage)
+        if changed then passengers.protection.damage=value end
+        changed,value=menu.toggle("【新增】阻止落座乘客自动传送／丢失",passengers.protection.relocation)
+        if changed then passengers.protection.relocation=value end
+        imgui.text(passengers.protection.status or "乘客保护：开始驾驶后安装")
+        for key,count in pairs(passengers.protection.counts) do imgui.text(key.."："..count) end
         if beta_button((skip_think_enabled and "关闭跳过狮鹫思考" or "开启跳过狮鹫思考").."###BetaThinkToggle") then set_skip_think(not skip_think_enabled) end
         imgui.text(skip_think_status)
         local changed,value=menu.toggle("【测试】拦截驾驶角色坠落死亡请求",block_player_fall)
