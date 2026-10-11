@@ -1,7 +1,7 @@
 -- Griffin Mount Experiment: stage 3 player-as-target flight control experiment.
 -- Requires the installed aaaNickCore.lua and _NickCore/EnemySpawner.lua.
 -- Keeps an explicit spawn return or user-confirmed instance; never selects by Character ID.
-local VERSION = "0.3.12-stage3-slow"
+local VERSION = "0.3.13-stage3-directions"
 local state = "Idle"
 local detail = "Ready for one ordinary Griffin request per script session."
 local shared = nil
@@ -86,12 +86,49 @@ local function save_camera_settings()
     local ok,result=pcall(json.dump_file,camera_settings_path,camera_settings)
     if not ok or result==false then camera_status="镜头参数保存失败；本次调整仍有效。" end
 end
+local candidate_groups = {"悬停侧移与升高", "原生飞行转向", "目标高度版本", "悬停闪避方向", "飞行模式与降落", "战斗转向（后测；包含攻击）"}
 local test_actions = {
+    {key = "Test candidate HoverLateralL", label = "悬停左移", node = "HoverLateralL", phase = "air", candidate_group = "悬停侧移与升高"},
+    {key = "Test candidate HoverLateralR", label = "悬停右移", node = "HoverLateralR", phase = "air", candidate_group = "悬停侧移与升高"},
+    {key = "Test candidate HoverUpward", label = "悬停上升", node = "HoverUpward", phase = "air", candidate_group = "悬停侧移与升高"},
+    {key = "Test candidate FlightTurnLeft", label = "飞行左转", node = "FlightTurnLeft", phase = "air", candidate_group = "原生飞行转向"},
+    {key = "Test candidate FlightTurnRight", label = "飞行右转", node = "FlightTurnRight", phase = "air", candidate_group = "原生飞行转向"},
+    {key = "Test candidate FlapTurnLeft", label = "扑翼左转", node = "FlapTurnLeft", phase = "air", candidate_group = "原生飞行转向"},
+    {key = "Test candidate FlapTurnRight", label = "扑翼右转", node = "FlapTurnRight", phase = "air", candidate_group = "原生飞行转向"},
+    {key = "Test candidate Ch253BankSteepFlightLeft", label = "倾斜急转左", node = "Ch253BankSteepFlightLeft", phase = "air", candidate_group = "原生飞行转向"},
+    {key = "Test candidate Ch253BankSteepFlightRight", label = "倾斜急转右", node = "Ch253BankSteepFlightRight", phase = "air", candidate_group = "原生飞行转向"},
+    {key = "Test candidate HoverForwardTargetHeight", label = "目标高度前移", node = "HoverForwardTargetHeight", phase = "air", candidate_group = "目标高度版本"},
+    {key = "Test candidate HoverBackwardTargetHeight", label = "目标高度后移", node = "HoverBackwardTargetHeight", phase = "air", candidate_group = "目标高度版本"},
+    {key = "Test candidate HoverLateralLTargetHeight", label = "目标高度左移", node = "HoverLateralLTargetHeight", phase = "air", candidate_group = "目标高度版本"},
+    {key = "Test candidate HoverLateralRTargetHeight", label = "目标高度右移", node = "HoverLateralRTargetHeight", phase = "air", candidate_group = "目标高度版本"},
+    {key = "Test candidate HoverWaitTargetHeight", label = "目标高度等待", node = "HoverWaitTargetHeight", phase = "air", candidate_group = "目标高度版本"},
+    {key = "Test candidate Ch253HoverWaitToTargetHeight", label = "悬停调整至目标高度", node = "Ch253HoverWaitToTargetHeight", phase = "air", candidate_group = "目标高度版本"},
+    {key = "Test candidate HoverAvoidForward", label = "悬停向前闪避", node = "HoverAvoidForward", phase = "air", candidate_group = "悬停闪避方向"},
+    {key = "Test candidate HoverAvoidBack", label = "悬停向后闪避", node = "HoverAvoidBack", phase = "air", candidate_group = "悬停闪避方向"},
+    {key = "Test candidate HoverAvoidLeft", label = "悬停向左闪避", node = "HoverAvoidLeft", phase = "air", candidate_group = "悬停闪避方向"},
+    {key = "Test candidate HoverAvoidRight", label = "悬停向右闪避", node = "HoverAvoidRight", phase = "air", candidate_group = "悬停闪避方向"},
+    {key = "Test candidate Ch253AirHoverMoveToTarget", label = "空中悬停向目标移动", node = "Ch253AirHoverMoveToTarget", phase = "air", candidate_group = "飞行模式与降落"},
+    {key = "Test candidate HoverToFly", label = "悬停转飞行", node = "HoverToFly", phase = "air", candidate_group = "飞行模式与降落"},
+    {key = "Test candidate FlightTarget", label = "朝目标飞行", node = "FlightTarget", phase = "air", candidate_group = "飞行模式与降落"},
+    {key = "Test candidate Ch253SoaringFlight", label = "翱翔飞行", node = "Ch253SoaringFlight", phase = "air", candidate_group = "飞行模式与降落"},
+    {key = "Test candidate Ch253HoverToLanding", label = "悬停转降落", node = "Ch253HoverToLanding", phase = "air", candidate_group = "飞行模式与降落"},
+    {key = "Test candidate Ch253DashTurnAttack180L", label = "左转180度攻击", node = "Ch253DashTurnAttack180L", phase = "air", candidate_group = "战斗转向（后测；包含攻击）"},
+    {key = "Test candidate Ch253DashTurnAttack180R", label = "右转180度攻击", node = "Ch253DashTurnAttack180R", phase = "air", candidate_group = "战斗转向（后测；包含攻击）"},
+    {key = "Test candidate Ch253FlightTUnrDashPursuitL", label = "飞行左转冲刺追击", node = "Ch253FlightTUnrDashPursuitL", phase = "air", candidate_group = "战斗转向（后测；包含攻击）"},
+    {key = "Test candidate Ch253FlightTUnrDashPursuitR", label = "飞行右转冲刺追击", node = "Ch253FlightTUnrDashPursuitR", phase = "air", candidate_group = "战斗转向（后测；包含攻击）"},
+    {key = "Test candidate Ch253FlightTurnDashAttackStartL", label = "飞行左转冲刺攻击开始", node = "Ch253FlightTurnDashAttackStartL", phase = "air", candidate_group = "战斗转向（后测；包含攻击）"},
+    {key = "Test candidate Ch253FlightTurnDashAttackStartR", label = "飞行右转冲刺攻击开始", node = "Ch253FlightTurnDashAttackStartR", phase = "air", candidate_group = "战斗转向（后测；包含攻击）"},
+    {key = "Test candidate Ch253FlightTurnDashAttackAirLoopL", label = "飞行左转冲刺攻击循环", node = "Ch253FlightTurnDashAttackAirLoopL", phase = "air", candidate_group = "战斗转向（后测；包含攻击）"},
+    {key = "Test candidate Ch253FlightTurnDashAttackAirLoopR", label = "飞行右转冲刺攻击循环", node = "Ch253FlightTurnDashAttackAirLoopR", phase = "air", candidate_group = "战斗转向（后测；包含攻击）"},
+    {key = "Test candidate Ch253FlightTurnDashAttackDriftTurnL", label = "飞行攻击左漂移转向", node = "Ch253FlightTurnDashAttackDriftTurnL", phase = "air", candidate_group = "战斗转向（后测；包含攻击）"},
+    {key = "Test candidate Ch253FlightTurnDashAttackDriftTurnR", label = "飞行攻击右漂移转向", node = "Ch253FlightTurnDashAttackDriftTurnR", phase = "air", candidate_group = "战斗转向（后测；包含攻击）"},
+    {key = "Test candidate Ch253FlightTurnDashAttackAirToLandL", label = "飞行左转攻击转落地", node = "Ch253FlightTurnDashAttackAirToLandL", phase = "air", candidate_group = "战斗转向（后测；包含攻击）"},
+    {key = "Test candidate Ch253FlightTurnDashAttackAirToLandR", label = "飞行右转攻击转落地", node = "Ch253FlightTurnDashAttackAirToLandR", phase = "air", candidate_group = "战斗转向（后测；包含攻击）"},
     {key = "Test hover turn target", label = "悬停朝目标转向", node = "HoverTurnTarget", phase = "air", slow_probe = true},
-    {key = "Test hover homing height", label = "目标高度悬停（待验证）", node = "Ch253HoverWaitHoHomingHeight", phase = "air", slow_probe = true},
+    {key = "Test hover homing height", label = "目标高度悬停（地面原处悬停）", node = "Ch253HoverWaitHoHomingHeight", phase = "air", slow_probe = true},
     {key = "Test hover backward", label = "悬停后移", node = "HoverBackward", phase = "air", slow_probe = true},
     {key = "Test takeoff", label = "起飞", node = "Ch253TakeoffBackJump", phase = "ground"},
-    {key = "Test hover", label = "悬停", node = "HoverWait", phase = "air"},
+    {key = "Test hover", label = "悬停（地面升至固定高度）", node = "HoverWait", phase = "air"},
     {key = "Test forward", label = "悬停前移（慢速候选）", node = "HoverForward", phase = "air"},
     {key = "Test circle", label = "目标导向飞行（快速候选）", node = "Ch253WrapAroundStartLoop", phase = "air"},
     {key = "Test landing attack", label = "下冲落地攻击", node = "Ch253AirLandingPressStartLoop", phase = "air"}
@@ -835,12 +872,13 @@ local function queue_action_test(action)
             flight_log.events[#flight_log.events].request = {
                 node = action.node, layer = 0, priority = 10, cross_phase = allow_cross,
                 is_flight_before = flying, is_ground_before = grounded,
+                candidate_group = action.candidate_group, source = action.candidate_group and "dump_enum_unverified" or "observed_native_request",
                 character_address = tostring(expected.chara:get_address()), target_origin = target_origin
             }
             assert(flush_flight_log(), "Could not save pre-request log; no native request sent")
             last_action_request = game_time()
             called = true
-            -- One observed request combination, no retry or forced completion.
+            -- Observed request signature; enum-only candidate nodes remain unverified. No retry or forced completion.
             manager:call(method, 10, action.node, 0)
             action_test_status = "已提交一次：" .. action.label .. "。接口返回不代表动作执行成功。"
             log_event("manual_action_returned", action.node)
@@ -1224,7 +1262,7 @@ local button_labels = {
     ["Unbind THIS Griffin (no despawn)"] = "解除绑定（不删除狮鹫）",
  }
 for _, action in ipairs(test_actions) do
-    button_labels[action.key] = (action.slow_probe and "【本轮新增】" or "【动作测试】") .. action.label .. "（一次）"
+    button_labels[action.key] = (action.candidate_group and "【本轮新增】" or "【动作测试】") .. action.label .. "（一次）"
 end
 button_labels["Toggle cross phase"] = "切换跨阶段测试（允许地面直接请求空中动作）"
 button_labels["Yaw left"] = "【本轮转向】左转（一次）"
@@ -1249,7 +1287,7 @@ end
 re.on_draw_ui(function()
     if not imgui.tree_node("狮鹫坐骑实验 - 阶段3###Griffin Mount Experiment - Stage 3 Observe") then return end
     imgui.text("版本：" .. VERSION)
-    imgui.text("本轮：验证慢速候选动作；不自动组合或重复请求")
+    imgui.text("本轮：逐个验证侧移、升降与转向；不自动组合或重复请求")
     imgui.text("录制会自动包含动作名和原生请求，不必另开探针。")
     if not dependency() then imgui.text("等待 NickCore 加载完成。") end
     imgui.text("绑定来源：" .. (target_origin == "selected" and "现有狮鹫" or target_origin == "spawned" and "本脚本生成" or "尚未绑定"))
@@ -1275,12 +1313,23 @@ re.on_draw_ui(function()
             recording = false
             log_event("recording_stopped", "Manual stop")
         end
-        imgui.text("【本轮新增】慢速驾驶候选（每次只点一个，至少间隔3秒）")
+        imgui.text("已测试动作（每次只点一个，至少间隔3秒）")
         imgui.text("先用原有起飞／悬停进入空中；新按钮沿用跨阶段开关。")
         for _, action in ipairs(test_actions) do
             if action.slow_probe and ui_button(action.key) then queue_action_test(action) end
         end
         imgui.text(action_test_status)
+        imgui.text("【本轮新增】方向候选：按组展开测试，组内从上到下。")
+        imgui.text("仅转储名称；可用性和中文含义待实机确认。每次单次请求。")
+        imgui.text("跨阶段：" .. (cross_phase and "已开启" or "关闭；先进入空中"))
+        for _, group in ipairs(candidate_groups) do
+            if imgui.tree_node("【本轮新增】" .. group) then
+                for _, action in ipairs(test_actions) do
+                    if action.candidate_group == group and ui_button(action.key) then queue_action_test(action) end
+                end
+                imgui.tree_pop()
+            end
+        end
         if imgui.tree_node("已有动作按钮（起飞／前移／快速飞行／落地）") then
             imgui.text("每次只点一个动作，关闭界面观察；至少间隔3秒。")
             imgui.text("跨阶段测试：" .. (cross_phase and "已开启" or "关闭（按地面/空中检查）"))
@@ -1289,7 +1338,7 @@ re.on_draw_ui(function()
                 log_event("cross_phase_mode", tostring(cross_phase))
             end
             for _, action in ipairs(test_actions) do
-                if not action.slow_probe and ui_button(action.key) then queue_action_test(action) end
+                if not action.slow_probe and not action.candidate_group and ui_button(action.key) then queue_action_test(action) end
             end
             imgui.text("落地按钮是已捕获的下冲攻击，不是平稳降落。")
             imgui.text(action_test_status)
