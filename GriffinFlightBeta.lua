@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.7. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.8. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.7-beta"
+local VERSION = "0.1.8-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -20,7 +20,7 @@ local part, last_flush, next_sample = 1, -math.huge, 0
 local journal = {version = VERSION, events = {}, samples = {}}
 local stop_driver, delete_one
 local skip_think_enabled, skip_think_expected = false, nil
-local skip_think_status = "跳过思考：关闭"
+local skip_think_status = "跳过思考：默认开启，等待狮鹫就绪"
 
 local function core()
     local c = rawget(_G, "NickCore")
@@ -169,6 +169,118 @@ local function sync_player(d)
     d.fall:call("resetFallHeight()")
     d.controller:call("warp()")
 end
+-- Independent writes are experiments, not a guarantee that the engine keeps layers separate.
+local anchor_mode="full"
+local anchor_modes={
+    {key="full",label="完整同步（已验证基线）"},
+    {key="transform",label="仅 Transform／对象根位置"},
+    {key="context",label="仅位置上下文 PosRotContext"},
+    {key="controller",label="仅物理控制器（世界位移）"},
+    {key="root_bone",label="仅骨架根节点"},
+    {key="hip",label="仅髋部骨骼 Hip"},
+}
+local function close_position(a,b)
+    return math.abs(a.x-b.x)+math.abs(a.y-b.y)+math.abs(a.z-b.z)<0.001
+end
+local function restore_bone(d)
+    local a=d.bone_applied
+    if not a then return end
+    if not owned_player(d,false) then d.bone_applied=nil;return end
+    if a.joint:get_Valid() then
+        local p=vector(a.joint:call("get_Position()"))
+        if close_position(p,a.written) then
+            a.joint:call("set_Position(via.vec3)",Vector3f.new(a.original.x,a.original.y,a.original.z))
+        end
+    end
+    d.bone_applied=nil
+end
+local function discover_joints(d)
+    if d.joints_searched then return end
+    d.joints_searched=true
+    local joints=d.transform:call("get_Joints()")
+    assert(joints,"Player joints unavailable")
+    for _,joint in pairs(joints:get_elements() or {}) do
+        if joint and joint:get_Valid() then
+            local name=tostring(joint:call("get_Name()"))
+            if name:lower()=="hip" then d.hip_joint=joint;d.hip_name=name end
+            if name:lower()=="root" then d.root_joint=joint;d.root_name=name end
+            if not d.root_joint and not joint:call("get_Parent()") then d.root_joint=joint;d.root_name=name end
+        end
+    end
+    event("anchor_joint_inventory",{root=d.root_name,hip=d.hip_name})
+end
+local function prepare_anchor_mode(d,key)
+    if key=="root_bone" or key=="hip" then
+        discover_joints(d)
+        local joint=d.root_joint
+        if key=="hip" then joint=d.hip_joint end
+        assert(joint and joint:get_Valid(),"当前玩家没有可用的对应骨骼；未切换")
+    elseif key=="controller" then
+        local td=sdk.find_type_definition("via.physics.CharacterController")
+        assert(td and td:get_method("applyWorldOffset(via.vec3)"),"Controller world-offset interface unavailable")
+    elseif key=="context" then
+        local td=sdk.find_type_definition("app.CharacterPosRotContext")
+        assert(td and td:get_method("get_Pos()") and td:get_method("setPos(via.Position)"),"Context position interface unavailable")
+    end
+end
+local function anchor_positions(d)
+    local scene=vector(d.transform:call("get_Position()"))
+    local universal=vector(d.transform:call("get_UniversalPosition()"))
+    local ctx=vector(d.context:call("get_Pos()"))
+    return {transform=scene,controller=vector(d.controller:call("get_Position()")),
+        context={x=ctx.x-universal.x+scene.x,y=ctx.y-universal.y+scene.y,z=ctx.z-universal.z+scene.z},
+        root_bone=d.root_joint and d.root_joint:get_Valid() and vector(d.root_joint:call("get_Position()")) or nil,
+        hip=d.hip_joint and d.hip_joint:get_Valid() and vector(d.hip_joint:call("get_Position()")) or nil}
+end
+local function write_anchor(d,target)
+    local key=d.anchor_mode
+    d.anchor_target=target
+    d.moved=true
+    if key=="full" or key=="transform" then
+        d.transform:call("set_Position(via.vec3)",Vector3f.new(target.x,target.y,target.z))
+        if key=="full" then sync_player(d) end
+    elseif key=="context" then
+        -- Construct universal coordinates from the current scene/universal pair;
+        -- never temporarily move Transform merely to obtain via.Position.
+        local scene=vector(d.transform:call("get_Position()"))
+        local universal=d.transform:call("get_UniversalPosition()")
+        universal.x=universal.x+target.x-scene.x
+        universal.y=universal.y+target.y-scene.y
+        universal.z=universal.z+target.z-scene.z
+        d.context:call("setPos(via.Position)",universal)
+    elseif key=="controller" then
+        local p=vector(d.controller:call("get_Position()"))
+        d.controller:call("applyWorldOffset(via.vec3)",Vector3f.new(target.x-p.x,target.y-p.y,target.z-p.z))
+    end
+    -- These two calls do not synchronize context or controller during isolated tests.
+    if key~="full" then
+        d.fall:call("resetBaseHeight(via.Position)",d.transform:call("get_UniversalPosition()"))
+        d.fall:call("resetFallHeight()")
+    end
+end
+local function change_anchor_mode(key)
+    local d=active
+    if not d then anchor_mode=key;event("anchor_mode_selected",key);return end
+    run_once(function()
+        if not alive or active~=d then return end
+        local mutating=false
+        local ok,err=pcall(function()
+            validate_spawn(d.spawn)
+            assert(owned_player(d,true),"Player binding changed")
+            prepare_anchor_mode(d,key)
+            mutating=true
+            restore_bone(d)
+            -- Normalize layers to the current player Transform once, at the boundary.
+            sync_player(d)
+            d.anchor_mode=key;anchor_mode=key;d.anchor_target=nil;d.target_probe_failed=nil
+            event("anchor_mode_changed",{mode=key,baseline=anchor_positions(d)})
+        end)
+        if not ok then
+            if mutating then stop_driver("位置实验切换未完成") end
+            failed("位置实验切换失败",err)
+        end
+    end)
+end
 local function restore_camera()
     local s = camera_state
     if not s then return end
@@ -195,6 +307,8 @@ stop_driver = function(reason)
     if not d then return true end
     d.intent = nil -- queued native action callbacks must see that driving has ended
     local errors = {}
+    local bone_ok,bone_err=pcall(restore_bone,d)
+    if not bone_ok then errors[#errors+1]="骨骼恢复 "..tostring(bone_err) end
     if d.moved then
         local ok, err = pcall(function()
             if owned_player(d, true) then
@@ -376,6 +490,19 @@ local function start_target_record(r)
     target_status="目标坐标记录中（60秒），玩家可自由移动；日志自动保存。"
     event("target_record_started",60)
 end
+local function select_player_target(r)
+    local _,_,tc=target_context(r)
+    local td=sdk.find_type_definition("app.TargetController.TargetTypeEnum")
+    local field=td and td:get_field("ManualPlayer")
+    local value=field and field:get_data()
+    assert(finite(value), "ManualPlayer enum unavailable")
+    local type_def=sdk.find_type_definition("app.TargetController")
+    assert(type_def and type_def:get_method("setTarget(app.TargetController.TargetTypeEnum)"), "Target selection interface unavailable")
+    assert(tc:call("get_ManualPlayerTarget()"), "ManualPlayer target unavailable")
+    event("manual_player_target_request",{value=value,before=target_snapshot(r)})
+    tc:call("setTarget(app.TargetController.TargetTypeEnum)",value)
+    event("manual_player_target_returned",target_snapshot(r))
+end
 local function target_test(sync_once, select_player)
     local r=active and active.spawn or state.spawns[#state.spawns]
     if not r or not r.ready or r.delete_requested then target_status="请先生成并等待狮鹫就绪。";return end
@@ -384,19 +511,7 @@ local function target_test(sync_once, select_player)
         local ok,err=pcall(function()
             local before=target_snapshot(r)
             event("flight_target_test_before",before)
-            if select_player then
-                local _,_,tc=target_context(r)
-                local td=sdk.find_type_definition("app.TargetController.TargetTypeEnum")
-                local field=td and td:get_field("ManualPlayer")
-                local value=field and field:get_data()
-                assert(finite(value), "ManualPlayer enum unavailable")
-                local type_def=sdk.find_type_definition("app.TargetController")
-                assert(type_def and type_def:get_method("setTarget(app.TargetController.TargetTypeEnum)"), "Target selection interface unavailable")
-                assert(tc:call("get_ManualPlayerTarget()"), "ManualPlayer target unavailable")
-                event("manual_player_target_request",{value=value,before=before})
-                tc:call("setTarget(app.TargetController.TargetTypeEnum)",value)
-                event("manual_player_target_returned",target_snapshot(r))
-            end
+            if select_player then select_player_target(r) end
             if sync_once then
                 local _, transform, tc, ctrl=target_context(r)
                 assert(tc:call("get_TargetCharacter()") == r.owner, "目标角色不是玩家；取消同步")
@@ -452,9 +567,9 @@ local function tick_skip_think()
 end
 
 local fall_hook_installed,fall_hook_tried=false,false
-local block_player_fall=false
+local block_player_fall=true
 local fall_hits,fall_blocked,fall_logged,fall_log_at=0,0,0,-math.huge
-local fall_hook_status="坠落死亡请求拦截：关闭（固定玩家期间观察）"
+local fall_hook_status="坠落死亡请求拦截：默认开启（仅驾驶玩家）"
 local function install_fall_hook()
     if fall_hook_installed or fall_hook_tried then return end
     fall_hook_tried=true
@@ -502,7 +617,7 @@ local function start_driver()
                 transform = player:call("get_Transform()"), context = player:get_field("<PosRotContext>k__BackingField"),
                 terrain = terrain, controller = terrain and terrain.MainCharacterController,
                 fall = player:get_field("<FallInfo>k__BackingField"), fsm = player_fsm(player),
-                mode = "ground", last_request = -math.huge, started = now(), pending = false}
+                anchor_mode=anchor_mode, mode = "ground", last_request = -math.huge, started = now(), pending = false}
             assert(d.transform and d.context and d.controller and d.fall and d.fsm, "Player interfaces unavailable")
             local ft = d.fsm:get_type_definition()
             assert(ft:get_method("get_Enabled()") and ft:get_method("set_Enabled(System.Boolean)"), "FSM Enabled interface unavailable")
@@ -514,11 +629,15 @@ local function start_driver()
             active = d
             install_fall_hook()
             apply_player_freeze(d, settings.freeze_player)
+            local joint_ok,joint_err=pcall(discover_joints,d)
+            if not joint_ok then event("anchor_joint_probe_error",tostring(joint_err)) end
+            prepare_anchor_mode(d,d.anchor_mode)
+            select_player_target(r)
             if r.result.chara:call("get_IsFlight()") then
                 set_intent(d, "Ch253HoverWaitHoHomingHeight", "hover")
             end
             status = "驾驶中：A 起飞／降落，RT 冲刺，LT 悬停。"
-            event("driver_started", {ahead = settings.player_distance, height = settings.player_height, freeze_player = d.freeze_requested, lateral = 12, vertical = 10})
+            event("driver_started", {ahead = settings.player_distance, height = settings.player_height, freeze_player = d.freeze_requested, lateral = 12, vertical = 10, anchor_mode=d.anchor_mode})
         end)
         if not ok then
             if active then stop_driver("Start failed") end
@@ -549,9 +668,7 @@ local function tick_driver()
         fx,fz = fx/length,fz/length
         local target = {x=pos.x+fx*settings.player_distance+fz*input.x*12, y=pos.y+settings.player_height+input.y*10,
             z=pos.z+fz*settings.player_distance-fx*input.x*12}
-        d.moved = true
-        d.transform:call("set_Position(via.vec3)", Vector3f.new(target.x,target.y,target.z))
-        sync_player(d)
+        write_anchor(d,target)
         local flying, ground = ch:call("get_IsFlight()"), ch:call("get_IsGround()")
         local manager = ch:call("get_ActionManager()")
         assert(manager and manager:call("get_GameObject()") == d.spawn.result.go, "ActionManager mismatch")
@@ -578,7 +695,7 @@ local function tick_driver()
         dispatch(d)
         d.trace = {griffin = pos, player = vector(d.transform:call("get_Position()")), target = target,
             physical = vector(d.controller:call("get_Position()")), flight = flying, ground = ground,
-            action = tostring(action_name), mode = d.mode, anchor_height = settings.player_height, stick = {x=input.x,y=input.y}}
+            action = tostring(action_name), mode = d.mode, anchor_mode=d.anchor_mode, anchor_height = settings.player_height, stick = {x=input.x,y=input.y}}
     end)
     if not ok then stop_driver("驾驶检查或位置同步失败"); failed("驾驶已停止", err) end
 end
@@ -666,6 +783,7 @@ re.on_frame(function()
                     event("spawn_think_stop",{before=before,after=r.spawn_think_stop})
                     status = "狮鹫已生成并设为队伍友方，可以开始驾驶。"
                     event("spawn_ready", "Friend bound; spawn ThinkStop released when true")
+                    set_skip_think(true)
                 end)
                 if not ok then failed("狮鹫初始化失败",err) end
             end)
@@ -674,6 +792,8 @@ re.on_frame(function()
     if active and active.trace and now() >= next_sample then
         next_sample = now()+0.5
         active.trace.target_probe = read_target_probe(active)
+        local positions_ok,positions=pcall(anchor_positions,active)
+        active.trace.anchor_positions=positions_ok and positions or {error=tostring(positions)}
         rotate()
         if #journal.samples < 650 then journal.samples[#journal.samples+1] = {time=now(), data=active.trace} end
     end
@@ -701,6 +821,32 @@ re.on_application_entry("UpdateHID",function()
     else stop_driver("手柄读取失败"); failed("手柄读取失败", result) end
 end)
 re.on_pre_application_entry("UpdateBehavior",function() tick_skip_think();tick_driver() end)
+re.on_pre_application_entry("UpdateJointExpression",function()
+    local d=active
+    if not d or not alive or not d.bone_applied then return end
+    local ok,err=pcall(function()
+        assert(owned_player(d,true),"Player binding changed")
+        restore_bone(d)
+    end)
+    if not ok then stop_driver("骨骼恢复失败");failed("骨骼恢复失败",err) end
+end)
+re.on_application_entry("UpdateJointExpression",function()
+    local d,c=active,core()
+    if not d or not alive or not c or c.properties.isPaused or not d.anchor_target then return end
+    if d.anchor_mode~="hip" and d.anchor_mode~="root_bone" then return end
+    local ok,err=pcall(function()
+        assert(owned_player(d,true),"Player binding changed")
+        restore_bone(d)
+        local joint=d.root_joint
+        if d.anchor_mode=="hip" then joint=d.hip_joint end
+        assert(joint and joint:get_Valid(),"Player bone unavailable")
+        local original=vector(joint:call("get_Position()"))
+        local target=d.anchor_target
+        d.bone_applied={joint=joint,original=original,written=target}
+        joint:call("set_Position(via.vec3)",Vector3f.new(target.x,target.y,target.z))
+    end)
+    if not ok then stop_driver("骨骼位置实验失败");failed("骨骼位置实验失败",err) end
+end)
 re.on_application_entry("PrepareRendering",function()
     local d = active
     if not d or d.camera_failed then return end
@@ -820,7 +966,7 @@ re.on_draw_ui(function()
         if styled then imgui.pop_style_color(1) end
         if changed and type(freeze)=="boolean" then change_player_freeze(freeze) end
     end
-    if beta_button((settings.freeze_player and "开始驾驶（固定玩家＋冻结 FSM）" or "开始驾驶（固定玩家）").."###BetaStart") then start_driver() end
+    if beta_button((settings.freeze_player and "开始驾驶（固定玩家＋冻结 FSM＋玩家目标）" or "开始驾驶（固定玩家＋玩家目标）").."###BetaStart") then start_driver() end
     if beta_button("结束驾驶／恢复玩家###BetaStop") then
         operation = nil; queued = false
         if type(run_once)~="function" then stop_driver("手动结束");imgui.tree_pop();return end
@@ -836,6 +982,9 @@ re.on_draw_ui(function()
         end)
     end
     imgui.text(status)
+    for _,mode in ipairs(anchor_modes) do
+        if mode.key==anchor_mode then imgui.text("当前摇杆位置层："..mode.label);break end
+    end
     if active then
         local labels={ground="等待起飞",taking_off="起飞／降落动作",external="实验工具动作",hover="悬停",dash="冲刺"}
         imgui.text("请求模式："..(labels[active.mode] or active.mode).."；左摇杆左右转向／上下调整目标高度。")
@@ -847,6 +996,21 @@ re.on_draw_ui(function()
             imgui.text("狮鹫目标是玩家："..(probe.target_is_player and "是" or "否")..
                 "；玩家 FSM："..(probe.player_fsm_enabled and "运行" or "暂停"))
         elseif probe and probe.error then imgui.text("目标探针读取失败；驾驶仍运行，详情已记录。") end
+    end
+    if imgui.tree_node("【新增】玩家追逐来源实验（互斥开关）") then
+        imgui.text("每次只选一项；摇杆移动该层。模式切换会先同步一次清理上一项。")
+        if type(imgui.checkbox)=="function" then
+            for _,mode in ipairs(anchor_modes) do
+                local styled=type(imgui.push_style_color)=="function" and type(imgui.pop_style_color)=="function"
+                if styled then imgui.push_style_color(0,0xffa8ecff) end
+                local changed,value=imgui.checkbox(mode.label.."###BetaAnchor_"..mode.key,anchor_mode==mode.key)
+                if styled then imgui.pop_style_color(1) end
+                if changed and value then change_anchor_mode(mode.key) end
+            end
+        end
+        imgui.text("Transform 就是对象根位置；骨架根节点是另一层。只写一层仍可能被引擎联动。")
+        imgui.text("各层实际位置自动写日志；仅骨架测试在动画更新后写入。")
+        imgui.tree_pop()
     end
     if imgui.tree_node("【新增】飞行目标坐标测试") then
         if beta_button("【新增】记录目标坐标60秒（不改位置）###BetaRecordTarget") then target_test(false) end
