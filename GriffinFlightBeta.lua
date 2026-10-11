@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.9. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.10. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.9-beta"
+local VERSION = "0.1.10-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -13,7 +13,7 @@ local status = "先生成狮鹫，再开始驾驶。"
 local hooks_ready, hooks_tried, friend_value = false, false, nil
 local masks = nil
 local input = {x = 0, y = 0, buttons = 0}
-local settings = {distance = 30, fov = 90, player_distance = 20, player_height = 0, freeze_player = true}
+local settings = {distance = 30, fov = 90, player_distance = 20, player_height = 0, freeze_player = true, rider_height=1.0, rider_forward=0, rider_side=0}
 local settings_path = "GriffinFlightBeta_Settings.json"
 local log_id = os.date("!%Y%m%dT%H%M%SZ") .. "_" .. math.floor(os.clock() * 1000)
 local part, last_flush, next_sample = 1, -math.huge, 0
@@ -68,6 +68,9 @@ if type(json.load_file) == "function" then
         if finite(saved.player_distance) then settings.player_distance = math.max(2, math.min(80, saved.player_distance)) end
         if finite(saved.distance) then settings.distance = math.max(0, math.min(80, saved.distance)) end
         if finite(saved.fov) then settings.fov = math.max(40, math.min(120, saved.fov)) end
+        if finite(saved.rider_height) then settings.rider_height=math.max(-5,math.min(15,saved.rider_height)) end
+        if finite(saved.rider_forward) then settings.rider_forward=math.max(-15,math.min(15,saved.rider_forward)) end
+        if finite(saved.rider_side) then settings.rider_side=math.max(-10,math.min(10,saved.rider_side)) end
     end
 end
 
@@ -174,6 +177,8 @@ end
 local anchor_mode="full"
 local anchor_modes={
     {key="full",label="完整同步（已验证基线）"},
+    {key="rider",label="【新增】头顶骑乘显示（Hip固定）"},
+    {key="rider_root",label="【新增】头顶骑乘显示（旧相机偏移方式）"},
     {key="transform",label="仅 Transform／对象根位置响应摇杆"},
     {key="context",label="仅位置上下文响应摇杆"},
     {key="controller",label="仅物理控制器响应摇杆"},
@@ -190,11 +195,19 @@ local function restore_bone(d)
     -- Decide ownership before any parent write changes a child's world position.
     local matches={}
     for i,a in ipairs(items) do
-        matches[i]=a.joint:get_Valid() and close_position(vector(a.joint:call("get_Position()")),a.written)
+        if a.joint:get_Valid() then
+            if a.local_original and a.local_written then
+                matches[i]=close_position(vector(a.joint:call("get_LocalPosition()")),a.local_written)
+            else matches[i]=close_position(vector(a.joint:call("get_Position()")),a.written) end
+        end
     end
     -- Restore parent first, then child, using the pose captured before either write.
     for i,a in ipairs(items) do
-        if matches[i] then a.joint:call("set_Position(via.vec3)",Vector3f.new(a.original.x,a.original.y,a.original.z)) end
+        if matches[i] then
+            local p=a.local_original or a.original
+            local method=a.local_original and "set_LocalPosition(via.vec3)" or "set_Position(via.vec3)"
+            a.joint:call(method,Vector3f.new(p.x,p.y,p.z))
+        end
     end
     d.bones_applied=nil
 end
@@ -202,6 +215,7 @@ end
 local function discover_joints(d)
     if d.joints_searched then return end
     d.joints_searched=true
+    d.display_roots={}
     local joints=d.transform:call("get_Joints()")
     assert(joints,"Player joints unavailable")
     for _,joint in pairs(joints:get_elements() or {}) do
@@ -209,12 +223,45 @@ local function discover_joints(d)
             local name=tostring(joint:call("get_Name()"))
             if name:lower()=="hip" then d.hip_joint=joint;d.hip_name=name end
             if name:lower()=="root" then d.root_joint=joint;d.root_name=name end
-            if not d.root_joint and not joint:call("get_Parent()") then d.root_joint=joint;d.root_name=name end
+            local parent=joint:call("get_Parent()")
+            if not parent or not parent:get_Valid() then
+                d.display_roots[#d.display_roots+1]=joint
+                if not d.root_joint then d.root_joint=joint;d.root_name=name end
+            end
         end
     end
-    event("anchor_joint_inventory",{root=d.root_name,hip=d.hip_name})
+    event("anchor_joint_inventory",{root=d.root_name,hip=d.hip_name,display_roots=#d.display_roots})
+end
+local function prepare_rider(d,key)
+    discover_joints(d)
+    if key=="rider" then assert(d.hip_joint and d.hip_joint:get_Valid(),"玩家Hip骨骼不可用，未开启骑乘显示")
+    else assert(d.display_roots and #d.display_roots>0,"没有独立骨架根，未开启旧相机偏移方式") end
+    local ch=d.spawn.result.chara
+    local tr=ch:call("get_Transform()")
+    assert(tr,"Griffin Transform unavailable")
+    d.rider_griffin_transform=tr
+    d.rider_head=nil;d.rider_head_name=nil
+    local joints=tr:call("get_Joints()")
+    local candidates={}
+    if joints then
+        for _,joint in pairs(joints:get_elements() or {}) do
+            if joint and joint:get_Valid() then
+                local name=tostring(joint:call("get_Name()"))
+                local lower=name:lower()
+                if lower:find("head",1,true) then
+                    candidates[#candidates+1]=name
+                    if lower=="head" then d.rider_head=joint;d.rider_head_name=name
+                    elseif not d.rider_head and not lower:find("end",1,true) and not lower:find("target",1,true)
+                        and not lower:find("eff",1,true) then d.rider_head=joint;d.rider_head_name=name end
+                end
+            end
+        end
+    end
+    event("rider_head_binding",{head=d.rider_head_name,candidates=candidates,
+        fallback=not d.rider_head and "Griffin root + forward 3m / up 4m" or nil})
 end
 local function prepare_anchor_mode(d,key)
+    if key=="rider" or key=="rider_root" then prepare_rider(d,key);return end
     if key~="full" then
         local td=sdk.find_type_definition("via.physics.CharacterController")
         assert(td and td:get_method("applyWorldOffset(via.vec3)"),"Controller world-offset interface unavailable")
@@ -256,7 +303,7 @@ local function write_anchor(d,target,neutral)
     restore_bone(d) -- remove last frame's pose correction before moving the actor
     d.anchor_target=target;d.neutral_anchor=neutral
     d.moved=true
-    if key=="full" then
+    if key=="full" or key=="rider" or key=="rider_root" then
         d.transform:call("set_Position(via.vec3)",Vector3f.new(target.x,target.y,target.z))
         sync_player(d)
         d.anchor_plan={transform=target,context=target,controller=target}
@@ -684,6 +731,7 @@ local function tick_driver()
         local length = math.sqrt(fx*fx+fz*fz)
         assert(length > 0.2, "Griffin is too vertical")
         fx,fz = fx/length,fz/length
+        d.heading={x=fx,z=fz}
         local neutral={x=pos.x+fx*settings.player_distance,y=pos.y+settings.player_height,
             z=pos.z+fz*settings.player_distance}
         local target = {x=neutral.x+fz*input.x*12,y=neutral.y+input.y*10,z=neutral.z-fx*input.x*12}
@@ -719,6 +767,57 @@ local function tick_driver()
     if not ok then stop_driver("驾驶检查或位置同步失败"); failed("驾驶已停止", err) end
 end
 
+-- Visual-only late Hip override. Navigation Transform is never moved to the seat.
+local function renew_rider_visual(phase)
+    local d,c=active,core()
+    if not alive or not d or (d.anchor_mode~="rider" and d.anchor_mode~="rider_root") or not d.heading or not c or c.properties.isPaused then return end
+    local ok,err=pcall(function()
+        local ch=validate_spawn(d.spawn)
+        assert(owned_player(d,true) and player_fsm(d.player)==d.fsm,"Player binding changed")
+        assert(ch:call("get_Transform()")==d.rider_griffin_transform,"Griffin display anchor changed")
+        local hip=d.hip_joint
+        if d.anchor_mode=="rider" then assert(hip and hip:get_Valid(),"Player Hip unavailable") end
+        restore_bone(d)
+        local base
+        local fallback=not d.rider_head
+        if d.rider_head then
+            assert(d.rider_head:get_Valid(),"Griffin head joint unavailable")
+            base=vector(d.rider_head:call("get_Position()"))
+        else
+            base=vector(d.rider_griffin_transform:call("get_Position()"))
+            base={x=base.x+d.heading.x*3,y=base.y+4,z=base.z+d.heading.z*3}
+        end
+        local fx,fz=d.heading.x,d.heading.z
+        local seat={x=base.x+fx*settings.rider_forward+fz*settings.rider_side,
+            y=base.y+settings.rider_height,z=base.z+fz*settings.rider_forward-fx*settings.rider_side}
+        local actor=vector(d.transform:call("get_Position()"))
+        local items={}
+        if d.anchor_mode=="rider" then
+            items[1]={joint=hip,key="hip",original=vector(hip:call("get_Position()")),
+                local_original=vector(hip:call("get_LocalPosition()")),written=seat}
+        else
+            for i,joint in ipairs(d.display_roots) do
+                assert(joint:get_Valid(),"Player skeleton root unavailable")
+                local original=vector(joint:call("get_Position()"))
+                items[#items+1]={joint=joint,key="display_root_"..i,original=original,
+                    local_original=vector(joint:call("get_LocalPosition()")),
+                    written={x=original.x+seat.x-actor.x,y=original.y+seat.y-actor.y,z=original.z+seat.z-actor.z}}
+            end
+        end
+        d.bones_applied=items
+        for _,a in ipairs(items) do
+            a.joint:call("set_Position(via.vec3)",Vector3f.new(a.written.x,a.written.y,a.written.z))
+            a.local_written=vector(a.joint:call("get_LocalPosition()"))
+            if d.anchor_plan then d.anchor_plan[a.key]=a.written end
+        end
+        d.rider_trace={phase=phase,mode=d.anchor_mode,head_joint=d.rider_head_name,fallback=fallback,head=base,seat=seat,
+            hip=hip and hip:get_Valid() and vector(hip:call("get_Position()")) or nil,
+            transform=vector(d.transform:call("get_Position()")),root_count=#items}
+
+        if d.trace then d.trace.rider=d.rider_trace end
+    end)
+    if not ok then stop_driver("骑乘显示写入失败");failed("骑乘显示写入失败",err) end
+end
 local function spawn()
     if queued or #state.spawns > 0 or state.recovery then return end
     if not core() then status = "等待 NickCore 加载。"; return end
@@ -777,6 +876,7 @@ re.on_frame(function()
     if not alive then return end
     local c = core()
     if not c then return end
+    renew_rider_visual("on_frame")
     if fall_hits~=fall_logged and now()-fall_log_at>=1 then
         fall_logged=fall_hits;fall_log_at=now();event("player_fall_request",{hits=fall_hits,blocked=fall_blocked})
     end
@@ -852,6 +952,7 @@ end)
 re.on_application_entry("UpdateJointExpression",function()
     local d,c=active,core()
     if not d or not alive or not c or c.properties.isPaused or not d.anchor_target then return end
+    if d.anchor_mode=="rider" or d.anchor_mode=="rider_root" then renew_rider_visual("UpdateJointExpression");return end
     if d.anchor_mode=="full" or not d.neutral_anchor then return end
     local ok,err=pcall(function()
         assert(owned_player(d,true),"Player binding changed")
@@ -877,6 +978,7 @@ re.on_application_entry("UpdateJointExpression",function()
     if not ok then stop_driver("骨骼位置实验失败");failed("骨骼位置实验失败",err) end
 end)
 re.on_application_entry("PrepareRendering",function()
+    renew_rider_visual("PrepareRendering")
     local d = active
     if not d or d.camera_failed then return end
     local ok, err = pcall(function()
@@ -1027,7 +1129,7 @@ re.on_draw_ui(function()
         elseif probe and probe.error then imgui.text("目标探针读取失败；驾驶仍运行，详情已记录。") end
     end
     if imgui.tree_node("【新增】玩家追逐来源实验（互斥开关）") then
-        imgui.text("每次只选一项：选中层跟随摇杆，其余层跟随狮鹫前方中立锚点。")
+        imgui.text("头顶骑乘：真实位置在前方导航，显示骨架固定头顶。其他选项为分层实验。")
         if type(imgui.checkbox)=="function" then
             for _,mode in ipairs(anchor_modes) do
                 local styled=type(imgui.push_style_color)=="function" and type(imgui.pop_style_color)=="function"
@@ -1037,7 +1139,7 @@ re.on_draw_ui(function()
                 if changed and value then change_anchor_mode(mode.key) end
             end
         end
-        imgui.text("未选中的层也会随狮鹫移动，但不响应摇杆；引擎仍可能联动各层。")
+        imgui.text("分层实验：未选层跟随中立锚点；引擎可能联动各层。")
         imgui.text("中立锚点、各层期望/实际位置自动记录；骨架保留自然姿势偏移。")
         imgui.tree_pop()
     end
@@ -1047,6 +1149,23 @@ re.on_draw_ui(function()
         if beta_button("【新增】飞行目标对准玩家（仅一次）###BetaSyncTargetOnce") then target_test(true) end
         imgui.text("先切换玩家目标，再用工具请求冲刺；坐标同步作为独立测试。")
         imgui.text(target_status)
+        imgui.tree_pop()
+    end
+    if imgui.tree_node("【新增】头顶座位偏移（仅骑乘显示模式）") then
+        imgui.text("头顶显示不移动导航Transform；Hip方式固定髋部，旧方式平移完整骨架。")
+        if active and (active.anchor_mode=="rider" or active.anchor_mode=="rider_root") then
+            imgui.text("座位基准："..(active.rider_head_name or "未找到Head，使用狮鹫根位置＋前3米／上4米"))
+        end
+        if type(imgui.slider_float)=="function" then
+            for _,spec in ipairs({{key="rider_height",label="【新增】座位上下偏移",low=-5,high=15},
+                {key="rider_forward",label="【新增】座位前后偏移",low=-15,high=15},
+                {key="rider_side",label="【新增】座位左右偏移",low=-10,high=10}}) do
+                local changed,value=imgui.slider_float(spec.label,settings[spec.key],spec.low,spec.high)
+                if changed and finite(value) then
+                    settings[spec.key]=math.max(spec.low,math.min(spec.high,value));pcall(json.dump_file,settings_path,settings)
+                end
+            end
+        end
         imgui.tree_pop()
     end
     if imgui.tree_node("玩家距离与镜头设置") then
