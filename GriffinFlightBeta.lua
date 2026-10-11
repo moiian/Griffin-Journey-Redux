@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.4. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.5. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.4-beta"
+local VERSION = "0.1.5-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -299,28 +299,72 @@ local function change_player_freeze(freeze)
     end)
 end
 
--- Read-only comparison probe: the same owner/target getters used by Stage 3.
--- Its failure disables only the probe, never requests a new action/target.
+-- Bound to the retained spawn reference; free-player observations do not move the player.
+local target_record, target_status = nil, "目标坐标：尚未记录"
+local function target_context(r)
+    local ch = validate_spawn(r)
+    local c = assert(core())
+    local player = c.properties.player
+    assert(player == r.owner and player:get_Valid(), "Player binding changed")
+    local transform = player:call("get_Transform()")
+    assert(transform and transform == c.properties.transform, "Player transform changed")
+    local component = c.object.get_component(r.result.go, "app.Ch253")
+    local tc = component and component:call("get_TargetController()")
+    assert(tc and tc:call("get_Owner()") == r.result.go and tc:call("get_Chara()") == ch,
+        "TargetController binding mismatch")
+    local ctrl = ch:call("get_FlightCtrl()")
+    assert(ctrl and ctrl:call("get_CachedCharacter()") == ch, "FlightControl binding mismatch")
+    return player, transform, tc, ctrl
+end
+local function target_snapshot(r)
+    local player, transform, tc, ctrl = target_context(r)
+    local fsm = player_fsm(player)
+    return {target_is_player=tc:call("get_TargetCharacter()") == player,
+        target_type=tostring(tc:call("get_TargetType()")),
+        character_target_position=vector(tc:call("get_TargetPosition()")),
+        flight_target_position=vector(ctrl:call("get_TargetPosition()")),
+        player_position=vector(transform:call("get_Position()")),
+        player_fsm_enabled=fsm and fsm:call("get_Enabled()"),
+        freeze_requested=active and active.freeze_requested or false}
+end
 local function read_target_probe(d)
     if d.target_probe_failed then return {error=d.target_probe_failed} end
     local ok, value = pcall(function()
         assert(owned_player(d, true) and player_fsm(d.player) == d.fsm, "Player binding changed")
-        local ch = validate_spawn(d.spawn)
-        local c = assert(core())
-        local component = c.object.get_component(d.spawn.result.go, "app.Ch253")
-        local tc = component and component:call("get_TargetController()")
-        assert(tc and tc:call("get_Owner()") == d.spawn.result.go and tc:call("get_Chara()") == ch,
-            "TargetController binding mismatch")
-        local ctrl = ch:call("get_FlightCtrl()")
-        assert(ctrl and ctrl:call("get_CachedCharacter()") == ch, "FlightControl binding mismatch")
-        return {target_is_player=tc:call("get_TargetCharacter()") == d.player,
-            flight_target_position=vector(ctrl:call("get_TargetPosition()")),
-            player_fsm_enabled=d.fsm:call("get_Enabled()"), freeze_requested=d.freeze_requested}
+        return target_snapshot(d.spawn)
     end)
     if ok then return value end
     d.target_probe_failed = tostring(value)
     event("target_probe_error", d.target_probe_failed)
     return {error=d.target_probe_failed}
+end
+local function start_target_record(r)
+    target_record={spawn=r,deadline=now()+60,next_sample=now()}
+    target_status="目标坐标记录中（60秒），玩家可自由移动；日志自动保存。"
+    event("target_record_started",60)
+end
+local function target_test(sync_once)
+    local r=active and active.spawn or state.spawns[#state.spawns]
+    if not r or not r.ready or r.delete_requested then target_status="请先生成并等待狮鹫就绪。";return end
+    run_once(function()
+        if not alive or state.generation ~= generation or r.delete_requested or r.deleted then return end
+        local ok,err=pcall(function()
+            local before=target_snapshot(r)
+            event("flight_target_test_before",before)
+            if sync_once then
+                local _, transform, tc, ctrl=target_context(r)
+                assert(tc:call("get_TargetCharacter()") == r.owner, "目标角色不是玩家；取消同步")
+                local td=sdk.find_type_definition("app.FlightControl")
+                assert(td and td:get_method("setFlightTargetPosition(via.vec3)"), "Flight target setter unavailable")
+                local pos=vector(transform:call("get_Position()"))
+                event("flight_target_sync_request",pos)
+                ctrl:call("setFlightTargetPosition(via.vec3)",Vector3f.new(pos.x,pos.y,pos.z))
+                event("flight_target_sync_returned",target_snapshot(r))
+            end
+            start_target_record(r)
+        end)
+        if not ok then target_status="目标测试停止："..tostring(err);target_record=nil;event("target_test_error",target_status) end
+    end)
 end
 
 local function request_instance_skip(result, player)
@@ -587,7 +631,22 @@ re.on_frame(function()
         rotate()
         if #journal.samples < 650 then journal.samples[#journal.samples+1] = {time=now(), data=active.trace} end
     end
-    if active and now()-last_flush >= 2 then flush() end
+    if target_record and not c.properties.isPaused then
+        local rec=target_record
+        if now()>=rec.deadline or rec.spawn.deleted or rec.spawn.delete_requested then
+            target_record=nil;target_status="目标坐标记录已结束，日志已保存。";event("target_record_stopped",true)
+        elseif now()>=rec.next_sample then
+            rec.next_sample=now()+0.5
+            local ok,value=pcall(target_snapshot,rec.spawn)
+            if ok then
+                rotate()
+                journal.samples[#journal.samples+1]={time=now(),data={kind="target_record",target_probe=value}}
+            else
+                target_record=nil;target_status="目标记录停止："..tostring(value);event("target_record_error",target_status)
+            end
+        end
+    end
+    if (active or target_record) and now()-last_flush >= 2 then flush() end
 end)
 re.on_application_entry("UpdateHID",function()
     if not active or not alive then return end
@@ -669,6 +728,7 @@ _G.GriffinFlightBetaBridge = bridge
 re.on_script_reset(function()
     stop_driver("脚本重置")
     alive = false
+    target_record=nil
     skip_think_enabled=false;skip_think_expected=nil;block_player_fall=false
     if rawget(_G, "GriffinFlightBetaBridge") == bridge then _G.GriffinFlightBetaBridge = nil end
     for _, r in ipairs(state.spawns) do r.friend = false; r.ready = false; r.destroy_queued = false end
@@ -741,6 +801,13 @@ re.on_draw_ui(function()
             imgui.text("狮鹫目标是玩家："..(probe.target_is_player and "是" or "否")..
                 "；玩家 FSM："..(probe.player_fsm_enabled and "运行" or "暂停"))
         elseif probe and probe.error then imgui.text("目标探针读取失败；驾驶仍运行，详情已记录。") end
+    end
+    if imgui.tree_node("【新增】飞行目标坐标测试") then
+        if beta_button("【新增】记录目标坐标60秒（不改位置）###BetaRecordTarget") then target_test(false) end
+        if beta_button("【新增】飞行目标对准玩家（仅一次）###BetaSyncTargetOnce") then target_test(true) end
+        imgui.text("先冲刺，观察异常后再同步；不会改变目标角色或重新播放动作。")
+        imgui.text(target_status)
+        imgui.tree_pop()
     end
     if imgui.tree_node("玩家距离与镜头设置") then
         if type(imgui.slider_float)=="function" then
