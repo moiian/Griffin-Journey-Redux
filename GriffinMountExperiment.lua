@@ -1,7 +1,7 @@
 -- Griffin Mount Experiment: stage 2 relationship query experiment.
 -- Requires the installed aaaNickCore.lua and _NickCore/EnemySpawner.lua.
 -- Keeps spawn_enemy's returned table; never searches by Character ID.
-local VERSION = "0.2.0-stage2"
+local VERSION = "0.2.1-stage2"
 local state = "Idle"
 local detail = "Ready for one ordinary Griffin request per script session."
 local shared = nil
@@ -19,6 +19,9 @@ local party = {}
 local relation_status = "Disabled. No relationship override."
 local relation_rows = {}
 local hits = {Character = {0, 0}, Holder = {0, 0}}
+local early_mode = false
+local think_status = "Spawn ThinkStop flag: not inspected"
+local release_attempted = false
 
 local function disable_friendship(message)
     friendly = false
@@ -101,7 +104,20 @@ local function report(next_state, message)
     log.error("[GriffinMountExperiment " .. VERSION .. "] " .. state .. ": " .. detail)
 end
 
-local function request_spawn()
+local function enable_party_friend(core)
+    assert(not aggro_conflict(), "Turn OFF NicksDevtools Disable/Force Aggro first")
+    assert(core.object and type(core.object.get_party) == "function", "NickCore.get_party unavailable")
+    local members = core.object.get_party()
+    assert(type(members) == "table" and members[1] == owner, "Party snapshot unavailable")
+    disable_friendship()
+    install_relation_hooks()
+    party = members
+    hits = {Character = {0, 0}, Holder = {0, 0}}
+    friendly = true
+    relation_status = "Enabled for returned Griffin + " .. #party .. " party members."
+end
+
+local function request_spawn(early)
     if submitted then return end
     local core = dependency()
     if not core then
@@ -114,6 +130,7 @@ local function request_spawn()
         return
     end
     submitted = true
+    early_mode = early == true
     report("Queued", "One request queued via NickCore run_once. Close REFramework UI.")
     run_once(function()
         -- NickCore runs this in LateUpdateBehavior, matching NicksDevtools.
@@ -125,12 +142,22 @@ local function request_spawn()
         owner = p.player
         started = p.gameTime
         -- pcall handles Lua errors only. NickCore's deferred native work is outside it.
-        local ok, result = pcall(core.enemySpawner.spawn_enemy, "Griffin", nil, false)
+        local ok, result = pcall(function()
+            if early_mode then
+                -- Arm exact-reference filter before asking NickCore to spawn.
+                -- It cannot match during synchronous initialization until shared.chara is filled.
+                enable_party_friend(core)
+                relation_status = "Armed before spawn; waiting for returned Character reference."
+            end
+            return core.enemySpawner.spawn_enemy("Griffin", nil, early_mode)
+        end)
         if not ok then
+            disable_friendship("Disabled after spawn preparation error.")
             report("Lua error", tostring(result) .. "; no automatic retry.")
             return
         end
         if type(result) ~= "table" then
+            disable_friendship("Disabled: unexpected spawn return.")
             report("Unexpected return", "No returned table; no automatic retry.")
             return
         end
@@ -154,6 +181,9 @@ re.on_frame(function()
     -- Only Lua table reads here: no repeated native validity/AI calls.
     if (state == "Waiting" or state == "Delayed") and shared.go and shared.chara then
         report("References ready", "Returned go and chara are present. Visually verify the Griffin.")
+        if early_mode and friendly then
+            relation_status = "Bound to returned Griffin + " .. #party .. " party members; ThinkStop requested at spawn."
+        end
     elseif state == "Waiting" and started and core.properties.gameTime - started > 20 then
         report("Delayed", "20 gameplay seconds elapsed. Still observing the same request; do not spawn again.")
     end
@@ -171,16 +201,7 @@ local function queue_relation_action(enable)
             assert(expected.go:get_Valid(), "Spawned GameObject is invalid")
             assert(expected.chara:get_CharaIDString() == "ch253000_00", "Unexpected prefab")
             if enable then
-                assert(not aggro_conflict(), "Turn OFF NicksDevtools Disable/Force Aggro first")
-                assert(core.object and type(core.object.get_party) == "function", "NickCore.get_party unavailable")
-                local members = core.object.get_party()
-                assert(type(members) == "table" and members[1] == owner, "Party snapshot unavailable")
-                disable_friendship()
-                install_relation_hooks()
-                party = members
-                hits = {Character = {0, 0}, Holder = {0, 0}}
-                friendly = true
-                relation_status = "Enabled for returned Griffin + " .. #party .. " party members."
+                enable_party_friend(core)
             end
             relation_rows = {}
             local members = friendly and party or core.object.get_party()
@@ -196,6 +217,48 @@ local function queue_relation_action(enable)
         if not ok then
             disable_friendship("Disabled after Lua error: " .. tostring(err))
             log.error("[GriffinMountExperiment] " .. relation_status)
+        end
+        relation_pending = false
+    end)
+end
+
+local function queue_think_flag(release)
+    if relation_pending or not shared or not shared.go or not shared.chara then return end
+    if release and (not early_mode or release_attempted) then return end
+    relation_pending = true
+    local expected = shared
+    run_once(function()
+        local ok, err = pcall(function()
+            local core = dependency()
+            assert(core and core.properties.player == owner and shared == expected, "Instance context changed")
+            assert(expected.go:get_Valid(), "Spawned GameObject is invalid")
+            local info = expected.chara:call("get_GenerateInfo()")
+            assert(info, "GenerateInfo unavailable")
+            local container = info:call("get_Container()")
+            local char_info = container and container._CharaInfo
+            assert(char_info, "GenerateInfo container CharacterInfo unavailable")
+            local before = char_info:call("get_IsThinkStop()")
+            if release then
+                assert(friendly and not aggro_conflict(), "Friend override must remain enabled")
+                -- Validate both directions immediately before the single flag write.
+                for _, member in ipairs(party) do
+                    assert(expected.chara:call("getBattleRelationshipTo(app.Character)", member) == friend_value,
+                        "Griffin -> party is not Friend; read again after gameplay runs")
+                    assert(member:call("getBattleRelationshipTo(app.Character)", expected.chara) == friend_value,
+                        "Party -> Griffin is not Friend; read again after gameplay runs")
+                end
+                assert(before == true, "Spawn ThinkStop flag is not true; no write performed")
+                release_attempted = true
+                char_info:call("set_IsThinkStop(System.Boolean)", false)
+            end
+            local after = char_info:call("get_IsThinkStop()")
+            think_status = "Spawn ThinkStop flag: " .. tostring(before) .. " -> " .. tostring(after)
+                .. (release and " | Release requested; verify actual AI movement." or " | Read only.")
+            log.error("[GriffinMountExperiment] " .. think_status)
+        end)
+        if not ok then
+            think_status = "ThinkStop inspection/release error: " .. tostring(err)
+            log.error("[GriffinMountExperiment] " .. think_status)
         end
         relation_pending = false
     end)
@@ -218,11 +281,14 @@ re.on_draw_ui(function()
     if not imgui.tree_node("Griffin Mount Experiment - Stage 2") then return end
     imgui.text("Version: " .. VERSION)
     imgui.text("Dependency: installed NickCore enemySpawner + run_once")
-    imgui.text("Ordinary Griffin / ch253000_00 / thinkStop=false")
+    imgui.text("Ordinary Griffin / ch253000_00 / requested thinkStop=" .. tostring(early_mode))
     imgui.text("Status: " .. state)
     imgui.text(detail)
     if not dependency() then imgui.text("NickCore is not ready. No standalone fallback.") end
-    if not submitted and imgui.button("Spawn ONE ordinary Griffin") then request_spawn() end
+    if not submitted then
+        if imgui.button("Spawn ONE ordinary Griffin") then request_spawn(false) end
+        if not submitted and imgui.button("Spawn ThinkStop Griffin + PRE-ARM Friend") then request_spawn(true) end
+    end
     if shared and shared.go and shared.chara then
         if imgui.button("Inspect returned instance (read only)") then inspect_instance() end
         if imgui.button("Read BOTH relationship directions") then queue_relation_action(false) end
@@ -230,9 +296,17 @@ re.on_draw_ui(function()
             queue_relation_action(true)
         end
         if friendly and imgui.button("Disable Friend override") then disable_friendship() end
+        if imgui.button("Read spawn ThinkStop flag") then queue_think_flag(false) end
+        if early_mode and friendly and not release_attempted
+            and imgui.button("Release spawn ThinkStop flag (test)") then queue_think_flag(true) end
     end
     imgui.text(identity)
     imgui.text(relation_status)
+    imgui.text(think_status)
+    if early_mode then
+        imgui.text("Pre-armed filter binds only when NickCore fills returned chara; initialization gap is unproven.")
+        imgui.text("ThinkStop release changes only this instance's generation flag; AI resume is unverified.")
+    end
     imgui.text("Friend enum (runtime metadata): " .. tostring(friend_value or "not read yet"))
     if relation_pending then imgui.text("Relationship action queued. Close UI and let gameplay run.") end
     imgui.text("Hits Griffin->party / party->Griffin | Character: " .. hits.Character[1] .. "/" .. hits.Character[2]
