@@ -1,7 +1,7 @@
 -- Griffin Mount Experiment: stage 3 player-as-target flight control experiment.
 -- Requires the installed aaaNickCore.lua and _NickCore/EnemySpawner.lua.
 -- Keeps an explicit spawn return or user-confirmed instance; never selects by Character ID.
-local VERSION = "0.3.11-stage3-camera"
+local VERSION = "0.3.12-stage3-slow"
 local state = "Idle"
 local detail = "Ready for one ordinary Griffin request per script session."
 local shared = nil
@@ -87,6 +87,9 @@ local function save_camera_settings()
     if not ok or result==false then camera_status="镜头参数保存失败；本次调整仍有效。" end
 end
 local test_actions = {
+    {key = "Test hover turn target", label = "悬停朝目标转向", node = "HoverTurnTarget", phase = "air", slow_probe = true},
+    {key = "Test hover homing height", label = "目标高度悬停（待验证）", node = "Ch253HoverWaitHoHomingHeight", phase = "air", slow_probe = true},
+    {key = "Test hover backward", label = "悬停后移", node = "HoverBackward", phase = "air", slow_probe = true},
     {key = "Test takeoff", label = "起飞", node = "Ch253TakeoffBackJump", phase = "ground"},
     {key = "Test hover", label = "悬停", node = "HoverWait", phase = "air"},
     {key = "Test forward", label = "悬停前移（慢速候选）", node = "HoverForward", phase = "air"},
@@ -1221,7 +1224,7 @@ local button_labels = {
     ["Unbind THIS Griffin (no despawn)"] = "解除绑定（不删除狮鹫）",
  }
 for _, action in ipairs(test_actions) do
-    button_labels[action.key] = "【本轮测试】" .. action.label .. "（一次）"
+    button_labels[action.key] = (action.slow_probe and "【本轮新增】" or "【动作测试】") .. action.label .. "（一次）"
 end
 button_labels["Toggle cross phase"] = "切换跨阶段测试（允许地面直接请求空中动作）"
 button_labels["Yaw left"] = "【本轮转向】左转（一次）"
@@ -1246,7 +1249,7 @@ end
 re.on_draw_ui(function()
     if not imgui.tree_node("狮鹫坐骑实验 - 阶段3###Griffin Mount Experiment - Stage 3 Observe") then return end
     imgui.text("版本：" .. VERSION)
-    imgui.text("本轮：固定玩家 → 开启摇杆 → 手动请求目标导向飞行")
+    imgui.text("本轮：验证慢速候选动作；不自动组合或重复请求")
     imgui.text("录制会自动包含动作名和原生请求，不必另开探针。")
     if not dependency() then imgui.text("等待 NickCore 加载完成。") end
     imgui.text("绑定来源：" .. (target_origin == "selected" and "现有狮鹫" or target_origin == "spawned" and "本脚本生成" or "尚未绑定"))
@@ -1272,7 +1275,13 @@ re.on_draw_ui(function()
             recording = false
             log_event("recording_stopped", "Manual stop")
         end
-        if imgui.tree_node("动作按钮（固定玩家后点目标导向飞行）") then
+        imgui.text("【本轮新增】慢速驾驶候选（每次只点一个，至少间隔3秒）")
+        imgui.text("先用原有起飞／悬停进入空中；新按钮沿用跨阶段开关。")
+        for _, action in ipairs(test_actions) do
+            if action.slow_probe and ui_button(action.key) then queue_action_test(action) end
+        end
+        imgui.text(action_test_status)
+        if imgui.tree_node("已有动作按钮（起飞／前移／快速飞行／落地）") then
             imgui.text("每次只点一个动作，关闭界面观察；至少间隔3秒。")
             imgui.text("跨阶段测试：" .. (cross_phase and "已开启" or "关闭（按地面/空中检查）"))
             if ui_button("Toggle cross phase") then
@@ -1280,7 +1289,7 @@ re.on_draw_ui(function()
                 log_event("cross_phase_mode", tostring(cross_phase))
             end
             for _, action in ipairs(test_actions) do
-                if ui_button(action.key) then queue_action_test(action) end
+                if not action.slow_probe and ui_button(action.key) then queue_action_test(action) end
             end
             imgui.text("落地按钮是已捕获的下冲攻击，不是平稳降落。")
             imgui.text(action_test_status)
