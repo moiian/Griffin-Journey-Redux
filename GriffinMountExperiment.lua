@@ -1,7 +1,7 @@
--- Griffin Mount Experiment: stage 2 relationship query experiment.
+-- Griffin Mount Experiment: stage 3 read-only flight observation.
 -- Requires the installed aaaNickCore.lua and _NickCore/EnemySpawner.lua.
 -- Keeps spawn_enemy's returned table; never searches by Character ID.
-local VERSION = "0.2.2-stage2"
+local VERSION = "0.3.0-stage3-observe"
 local state = "Idle"
 local detail = "Ready for one ordinary Griffin request per script session."
 local shared = nil
@@ -25,6 +25,8 @@ local release_attempted = false
 local hate_clear_attempted = false
 local hate_status = "Hate: not inspected; no entries cleared."
 local hate_rows = {}
+local flight_rows = {}
+local flight_status = "Flight: not inspected. No flight commands are implemented."
 
 local function disable_friendship(message)
     friendly = false
@@ -344,8 +346,58 @@ local function queue_hate_action(clear)
     end)
 end
 
+local function queue_flight_snapshot()
+    if relation_pending or not shared or not shared.go or not shared.chara then return end
+    relation_pending = true
+    local expected = shared
+    run_once(function()
+        flight_rows = {}
+        local ok, err = pcall(function()
+            local core = dependency()
+            assert(core and core.properties.player == owner and shared == expected, "Instance context changed")
+            assert(expected.go:get_Valid(), "Spawned GameObject is invalid")
+            local function row(label, getter)
+                local success, value = pcall(getter)
+                local text = label .. " = " .. (success and tostring(value) or ("READ ERROR: " .. tostring(value)))
+                flight_rows[#flight_rows + 1] = text
+                log.error("[GriffinMountExperiment] Flight " .. text)
+                return success and value or nil
+            end
+            for _, name in ipairs({"IsCanFly", "IsFlight", "IsGround", "IsHover"}) do
+                row("Character." .. name, function() return expected.chara:call("get_" .. name .. "()") end)
+            end
+            local char_ctrl = row("Character.FlightCtrl", function() return expected.chara:call("get_FlightCtrl()") end)
+            local ch253 = row("Ch253 component", function()
+                return core.object.get_component(expected.go, "app.Ch253")
+            end)
+            local monster_ctrl = ch253 and row("Ch253.FlightControl", function()
+                return ch253:call("get_FlightControl()")
+            end) or nil
+            row("Both controller references equal", function()
+                return char_ctrl ~= nil and monster_ctrl ~= nil and char_ctrl == monster_ctrl
+            end)
+            local function inspect_controller(label, ctrl)
+                if not ctrl then return end
+                row(label .. ".CachedCharacter is returned Griffin", function()
+                    return ctrl:call("get_CachedCharacter()") == expected.chara
+                end)
+                for _, name in ipairs({"IsFlightAction", "ESTStatusId", "FlightAngleY", "TargetAngleRad",
+                    "GroundHeight", "AirTargetPosY"}) do
+                    row(label .. "." .. name, function() return ctrl:call("get_" .. name .. "()") end)
+                end
+            end
+            inspect_controller("Character.FlightCtrl", char_ctrl)
+            if monster_ctrl ~= char_ctrl then inspect_controller("Ch253.FlightControl", monster_ctrl) end
+            flight_status = "Snapshot complete. Read errors, if any, are shown below. No flight state was written."
+        end)
+        if not ok then flight_status = "Flight snapshot error: " .. tostring(err) end
+        log.error("[GriffinMountExperiment] " .. flight_status)
+        relation_pending = false
+    end)
+end
+
 re.on_draw_ui(function()
-    if not imgui.tree_node("Griffin Mount Experiment - Stage 2") then return end
+    if not imgui.tree_node("Griffin Mount Experiment - Stage 3 Observe") then return end
     imgui.text("Version: " .. VERSION)
     imgui.text("Dependency: installed NickCore enemySpawner + run_once")
     imgui.text("Ordinary Griffin / ch253000_00 / requested thinkStop=" .. tostring(early_mode))
@@ -357,6 +409,7 @@ re.on_draw_ui(function()
         if not submitted and imgui.button("Spawn ThinkStop Griffin + PRE-ARM Friend") then request_spawn(true) end
     end
     if shared and shared.go and shared.chara then
+        if imgui.button("Read THIS Griffin flight snapshot (no control)") then queue_flight_snapshot() end
         if imgui.button("Inspect returned instance (read only)") then inspect_instance() end
         if imgui.button("Read BOTH relationship directions") then queue_relation_action(false) end
         if not friendly and imgui.button("Enable Friend for THIS Griffin + current party") then
@@ -371,11 +424,13 @@ re.on_draw_ui(function()
             and imgui.button("Clear ONLY party/Griffin hate (once)") then queue_hate_action(true) end
     end
     imgui.text(identity)
+    imgui.text(flight_status)
+    for _, row in ipairs(flight_rows) do imgui.text(row) end
     imgui.text(relation_status)
     imgui.text(think_status)
     if early_mode then
         imgui.text("Pre-armed filter binds only when NickCore fills returned chara; initialization gap is unproven.")
-        imgui.text("ThinkStop release changes only this instance's generation flag; AI resume is unverified.")
+        imgui.text("ThinkStop release resumed AI in prior tests; check movement in this session.")
     end
     imgui.text("Friend enum (runtime metadata): " .. tostring(friend_value or "not read yet"))
     if relation_pending then imgui.text("Relationship action queued. Close UI and let gameplay run.") end
