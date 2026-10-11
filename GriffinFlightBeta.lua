@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.17. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.18. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.17-beta"
+local VERSION = "0.1.18-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -17,7 +17,7 @@ local yaw_state, yaw_hook_ready = nil, false
 local yaw_status = "自动转向镜头：未开启"
 local masks = nil
 local input = {x = 0, y = 0, buttons = 0}
-local settings = {distance = 30, fov = 90, player_distance = 20, player_height = 0, freeze_player = true, rider_height=1.0, rider_forward=0, rider_side=0, camera_x=0, camera_y=0, camera_z=0, sphere_navigation=true, navigation_radius=4.019, steering_yaw=50.276, steering_pitch=22.018, navigation_height=0.991, bumper_pitch=69, controls_revision=1, camera_auto_yaw=false, camera_yaw_speed=120}
+local settings = {distance = 30, fov = 90, player_distance = 20, player_height = 0, freeze_player = true, rider_height=1.0, rider_forward=0, rider_side=0, camera_x=0, camera_y=0, camera_z=0, sphere_navigation=true, navigation_radius=4.019, steering_yaw=50.276, steering_pitch=22.018, navigation_height=0.991, bumper_pitch=69, controls_revision=1, camera_auto_yaw=false, camera_yaw_speed=120, camera_pitch_speed=90, camera_manual_threshold=0.55}
 local settings_path = "GriffinFlightBeta_Settings.json"
 local log_id = os.date("!%Y%m%dT%H%M%SZ") .. "_" .. math.floor(os.clock() * 1000)
 local part, last_flush, next_sample = 1, -math.huge, 0
@@ -68,6 +68,8 @@ if type(json.load_file) == "function" then
     local ok, saved = pcall(json.load_file, settings_path)
     if ok and type(saved) == "table" then
         if type(saved.camera_auto_yaw)=="boolean" then settings.camera_auto_yaw=saved.camera_auto_yaw end
+        if finite(saved.camera_pitch_speed) then settings.camera_pitch_speed=math.max(15,math.min(180,saved.camera_pitch_speed)) end
+        if finite(saved.camera_manual_threshold) then settings.camera_manual_threshold=math.max(0.25,math.min(0.95,saved.camera_manual_threshold)) end
         if finite(saved.camera_yaw_speed) then settings.camera_yaw_speed=math.max(15,math.min(360,saved.camera_yaw_speed)) end
         if type(saved.freeze_player) == "boolean" then settings.freeze_player = saved.freeze_player end
         if type(saved.sphere_navigation)=="boolean" then settings.sphere_navigation=saved.sphere_navigation end
@@ -468,6 +470,13 @@ local function tick_camera_yaw(controller)
             local span,deg_span=math.abs(range.y-range.x),math.abs(degrees.y-degrees.x)
             assert(span>0.001 and deg_span>0.001,"镜头角度范围无效")
             local scale=(span/deg_span)*(180/math.pi)
+            local prange=controller:call("get_PitchRange()")
+            local pdegrees=controller:call("get_PitchRangeDeg()")
+            assert(prange and pdegrees and finite(prange.x) and finite(prange.y) and finite(pdegrees.x) and finite(pdegrees.y),"镜头俯仰范围不可用")
+            local pspan,pdeg_span=math.abs(prange.y-prange.x),math.abs(pdegrees.y-pdegrees.x)
+            assert(pspan>0.001 and pdeg_span>0.001,"镜头俯仰范围无效")
+            local pscale=(pspan/pdeg_span)*(180/math.pi)
+            assert(math.abs(pscale-1)<0.02 or math.abs(pscale-180/math.pi)<0.1,"未知俯仰角度单位")
             assert(math.abs(scale-1)<0.02 or math.abs(scale-180/math.pi)<0.1,"未知镜头角度单位")
             -- Calibrate the native orbit-angle offset from the actual camera-to-target ray.
             local pos=vector(s.main:call("get_Position()"))
@@ -475,28 +484,62 @@ local function tick_camera_yaw(controller)
             local dx,dz=target.x-pos.x,target.z-pos.z
             assert(dx*dx+dz*dz>0.01,"镜头过于垂直，暂不能确定水平朝向")
             yaw_state={controller=controller,last_time=t,resume_at=t,
-                scale=scale,offset=wrap_yaw(angle.y/scale-math.atan(dx,dz))}
+                scale=scale,offset=wrap_yaw(angle.y/scale-math.atan(dx,dz)),
+                pitch_scale=pscale,pitch_base=angle.x/pscale,pitch_min=math.min(prange.x,prange.y)/pscale,
+                pitch_max=math.max(prange.x,prange.y)/pscale,manual_yaw=0,manual_pitch=0,
+                previous_yaw=angle.y/scale,previous_pitch=angle.x/pscale}
             event("camera_yaw_bound",{scale=scale,offset=yaw_state.offset,original_yaw=angle.y})
         end
         local y=yaw_state
         local dt=math.max(0,math.min(0.1,t-y.last_time));y.last_time=t
-        if input.rx*input.rx+input.ry*input.ry>0.04 then y.resume_at=t+0.8 end
-        if t<y.resume_at then
-            yaw_status="右摇杆观察中；松开后自动回正"
-            d.trace.camera_yaw={manual=true,current=angle.y,scale=y.scale};return
+        local magnitude=math.min(1,math.sqrt(input.rx*input.rx+input.ry*input.ry))
+        local threshold=settings.camera_manual_threshold
+        if magnitude>=threshold then y.manual_latched=true; y.resume_at=t+0.8
+        elseif y.manual_latched then
+            if magnitude>threshold-0.08 then y.resume_at=t+0.8
+            else y.manual_latched=false end
         end
+        local current,current_pitch=angle.y/y.scale,angle.x/y.pitch_scale
+        local steering=input.x~=0 or input.y~=0
+        local paused=y.manual_latched or t<y.resume_at
+        if not steering or paused then
+            y.previous_yaw=current;y.previous_pitch=current_pitch
+            yaw_status=not steering and "左摇杆回中：自动跟随暂停" or "右摇杆接管；释放后延迟恢复"
+            d.trace.camera_yaw={manual=paused,steering=steering,current=angle.y,pitch=angle.x,
+                right_magnitude=magnitude,threshold=threshold,weight=0,scale=y.scale}
+            return
+        end
+        -- Original manual input has already updated Angle. Carry its actual delta into
+        -- the follow target as well, so automatic correction doesn't erase that input.
+        if magnitude>0.1 then
+            y.manual_yaw=wrap_yaw(y.manual_yaw+wrap_yaw(current-y.previous_yaw))
+            y.manual_pitch=math.max(y.pitch_min-y.pitch_base,math.min(y.pitch_max-y.pitch_base,y.manual_pitch+(current_pitch-y.previous_pitch)))
+        end
+        local fraction=math.max(0,math.min(1,(magnitude-0.1)/(threshold-0.1)))
+        local weight=1-fraction*fraction*(3-2*fraction)
         assert(d.heading and finite(d.heading.x) and finite(d.heading.z),"狮鹫朝向不可用")
-        local desired=wrap_yaw(math.atan(d.heading.x,d.heading.z)+y.offset)
-        local current=angle.y/y.scale
-        local difference=wrap_yaw(desired-current)
-        -- Exponential easing with an angular speed cap, taking the shortest arc at +/-180.
-        local max_step=math.rad(settings.camera_yaw_speed)*dt
-        local step=math.max(-max_step,math.min(max_step,difference*(1-math.exp(-5*dt))))
-        local output=current+step
+        local desired=wrap_yaw(math.atan(d.heading.x,d.heading.z)+y.offset+y.manual_yaw)
+        local sphere=d.trace.navigation_sphere
+        -- Navigation elevation is stable even when the flight animation keeps the body level.
+        local elevation=sphere and (sphere.pitch_degrees-sphere.neutral_pitch_degrees) or input.y*settings.steering_pitch
+        local desired_pitch=y.pitch_base-math.rad(elevation)+y.manual_pitch
+        desired_pitch=math.max(y.pitch_min,math.min(y.pitch_max,desired_pitch))
+        local function eased_step(error,speed)
+            local maximum=math.rad(speed)*dt*weight
+            return math.max(-maximum,math.min(maximum,error*(1-math.exp(-5*dt))*weight))
+        end
+        local step=eased_step(wrap_yaw(desired-current),settings.camera_yaw_speed)
+        local pstep=eased_step(desired_pitch-current_pitch,settings.camera_pitch_speed)
+        local output,poutput=current+step,math.max(y.pitch_min,math.min(y.pitch_max,current_pitch+pstep))
         if dt>0 and math.abs(step)>0.00001 then controller:call("setYaw(System.Single)",output*y.scale) end
-        yaw_status="3档镜头自动跟随中；右摇杆可自由观察"
-        d.trace.camera_yaw={manual=false,current=angle.y,requested=output*y.scale,target=desired*y.scale,
-            speed=settings.camera_yaw_speed,scale=y.scale,dt=dt}
+        if dt>0 and math.abs(pstep)>0.00001 then controller:call("setPitch(System.Single)",poutput*y.pitch_scale) end
+        y.previous_yaw=output;y.previous_pitch=poutput
+        yaw_status="3档摇杆转向／升降跟随；右摇杆小幅叠加、大幅接管"
+        d.trace.camera_yaw={manual=false,steering=true,current=angle.y,requested=output*y.scale,target=desired*y.scale,
+            pitch=angle.x,pitch_requested=poutput*y.pitch_scale,pitch_target=desired_pitch*y.pitch_scale,
+            pitch_scale=y.pitch_scale,elevation=elevation,right_magnitude=magnitude,threshold=threshold,weight=weight,
+            manual_yaw=y.manual_yaw,manual_pitch=y.manual_pitch,speed=settings.camera_yaw_speed,scale=y.scale,dt=dt}
+
     end)
     if not ok then yaw_failed(err) end
 end
@@ -506,7 +549,8 @@ local function install_yaw_hook()
         local def=assert(sdk.find_type_definition("app.RotateCameraControllerBase"),"镜头旋转类型不可用")
         local method=assert(def:get_method("updateManualCameraControl()"),"镜头手动更新接口不可用")
         assert(def:get_method("setYaw(System.Single)") and def:get_method("get_Angle()") and
-            def:get_method("get_YawRange()") and def:get_method("get_YawRangeDeg()"),"镜头水平角接口不可用")
+            def:get_method("get_YawRange()") and def:get_method("get_YawRangeDeg()") and
+            def:get_method("setPitch(System.Single)") and def:get_method("get_PitchRange()") and def:get_method("get_PitchRangeDeg()"),"镜头水平角接口不可用")
         sdk.hook(method,function(args)
             local storage=thread.get_hook_storage()
             storage.griffin_yaw_controller=nil
@@ -1428,7 +1472,7 @@ re.on_draw_ui(function()
     if type(imgui.checkbox)=="function" then
         local styled=type(imgui.push_style_color)=="function" and type(imgui.pop_style_color)=="function"
         if styled then imgui.push_style_color(0,0xff40e8ff) end
-        local changed,value=imgui.checkbox("【新增】3档镜头自动跟随转向###BetaCameraYaw",settings.camera_auto_yaw)
+        local changed,value=imgui.checkbox("【新增】3档镜头跟随转向／升降###BetaCameraYaw",settings.camera_auto_yaw)
         if styled then imgui.pop_style_color(1) end
         if changed then
             settings.camera_auto_yaw=value; yaw_state=nil
@@ -1440,6 +1484,11 @@ re.on_draw_ui(function()
     if settings.camera_auto_yaw and type(imgui.slider_float)=="function" then
         local changed,value=imgui.slider_float("【新增】镜头跟随速度（度／秒）",settings.camera_yaw_speed,15,360)
         if changed and finite(value) then settings.camera_yaw_speed=math.max(15,math.min(360,value));pcall(json.dump_file,settings_path,settings) end
+        local pc,pv=imgui.slider_float("【新增】上下镜头跟随速度（度／秒）",settings.camera_pitch_speed,15,180)
+        if pc and finite(pv) then settings.camera_pitch_speed=math.max(15,math.min(180,pv));pcall(json.dump_file,settings_path,settings) end
+        local tc,tv=imgui.slider_float("【新增】右摇杆接管阈值",settings.camera_manual_threshold,0.25,0.95)
+        if tc and finite(tv) then settings.camera_manual_threshold=math.max(0.25,math.min(0.95,tv));pcall(json.dump_file,settings_path,settings) end
+        imgui.text("左摇杆回中立即停止跟随；右摇杆阈值以下叠加，以上接管。")
     end
     imgui.text(yaw_status)
     if imgui.tree_node("【本轮】独立镜头测试") then
