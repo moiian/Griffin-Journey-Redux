@@ -1,7 +1,7 @@
 -- Griffin Mount Experiment: stage 3 player-as-target flight control experiment.
 -- Requires the installed aaaNickCore.lua and _NickCore/EnemySpawner.lua.
 -- Keeps an explicit spawn return or user-confirmed instance; never selects by Character ID.
-local VERSION = "0.3.15-stage3-gears"
+local VERSION = "0.3.16-stage3-beta-bridge"
 local state = "Idle"
 local detail = "Ready for one ordinary Griffin request per script session."
 local shared = nil
@@ -46,7 +46,7 @@ local request_listener_key = "GriffinMountExperiment action observer"
 local request_listener_status = "Native request observer: not attached"
 local request_event_count = 0
 local request_last = {}
-local cross_phase = false
+local cross_phase = true
 local last_action_request = -math.huge
 local action_test_status = "尚未提交动作请求。"
 local target_probe = true
@@ -838,7 +838,23 @@ local function start_recording()
     log_event("recording_started", "60 gameplay seconds, at most 5 Hz; flight + action names + passive native requests")
 end
 
+local function beta_bridge()
+    local b = rawget(_G, "GriffinFlightBetaBridge")
+    if b and type(b.get_instance) == "function" and type(b.request_action) == "function"
+        and b.get_instance() then return b end
+end
+
 local function queue_action_test(action, pilot_token)
+    local b = not pilot_token and beta_bridge()
+    if b then
+        if game_time() - last_action_request < 3 then action_test_status = "请等待至少3个游戏运行秒。"; return end
+        local ok, accepted, err = pcall(b.request_action, action.node, cross_phase, action.phase)
+        if ok and accepted then
+            last_action_request = game_time()
+            action_test_status = "已提交至 Beta 狮鹫：" .. action.label .. "（记录在 Beta 日志）"
+        else action_test_status = "Beta 动作未提交：" .. tostring(ok and err or accepted) end
+        return
+    end
     if pilot and not pilot_token then action_test_status="请先关闭四档驾驶，再用单次动作按钮。";return end
     if lure_restore_pending then action_test_status = "请先恢复玩家位置。"; return end
     if relation_pending or not shared or not shared.go or not shared.chara then return end
@@ -1125,6 +1141,8 @@ local function validate_lure_griffin(d)
 end
 
 local function start_lure_test(unlimited)
+    local b = rawget(_G, "GriffinFlightBetaBridge")
+    if b and b.is_driving() then lure_status = "请先结束 Beta 驾驶。"; return end
     if lure or lure_restore_pending or lure_start_pending or relation_pending then return end
     if not shared or not shared.go or not shared.chara then return end
     lure_start_pending = true
@@ -1327,7 +1345,10 @@ if type(re.on_application_entry)=="function" and type(re.on_pre_application_entr
     re.on_pre_application_entry("UpdateBehavior",tick_lure_test)
 end
 
+local control_bridge = {is_driving=function() return lure ~= nil or lure_start_pending or lure_restore_pending end}
+_G.GriffinMountExperimentControl = control_bridge
 re.on_script_reset(function()
+    if rawget(_G, "GriffinMountExperimentControl") == control_bridge then _G.GriffinMountExperimentControl = nil end
     lure_start_cancelled=true
     if lure or lure_restore_pending then stop_lure("脚本重置") end
     restore_lure_camera()
@@ -1419,8 +1440,11 @@ re.on_draw_ui(function()
             recording = false
             log_event("recording_stopped", "Manual stop")
         end
+    end
+    if beta_bridge() or shared and shared.go and shared.chara then
+        imgui.text(beta_bridge() and "动作目标：Beta 当前狮鹫（优先）；无需在工具内另行生成。" or "动作目标：实验工具绑定的狮鹫。")
         imgui.text("已测试动作（每次只点一个，至少间隔3秒）")
-        imgui.text("先用原有起飞／悬停进入空中；新按钮沿用跨阶段开关。")
+        imgui.text("默认允许跨阶段；可直接测试空中或地面动作。")
         for _, action in ipairs(test_actions) do
             if action.slow_probe and ui_button(action.key) then queue_action_test(action) end
         end
