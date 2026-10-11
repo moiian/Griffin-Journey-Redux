@@ -1,7 +1,7 @@
 -- Griffin Mount Experiment: stage 3 read-only flight observation.
 -- Requires the installed aaaNickCore.lua and _NickCore/EnemySpawner.lua.
 -- Keeps an explicit spawn return or user-confirmed instance; never selects by Character ID.
-local VERSION = "0.3.5-stage3-test"
+local VERSION = "0.3.6-stage3-target"
 local state = "Idle"
 local detail = "Ready for one ordinary Griffin request per script session."
 local shared = nil
@@ -49,11 +49,13 @@ local request_last = {}
 local cross_phase = false
 local last_action_request = -math.huge
 local action_test_status = "尚未提交动作请求。"
+local target_probe = true
+local target_probe_status = "目标与坐标记录随动作探针开启；只读。"
 local test_actions = {
     {key = "Test takeoff", label = "起飞", node = "Ch253TakeoffBackJump", phase = "ground"},
     {key = "Test hover", label = "悬停", node = "HoverWait", phase = "air"},
     {key = "Test forward", label = "悬停前移", node = "HoverForward", phase = "air"},
-    {key = "Test circle", label = "盘旋", node = "Ch253WrapAroundStartLoop", phase = "air"},
+    {key = "Test circle", label = "目标导向飞行（原盘旋）", node = "Ch253WrapAroundStartLoop", phase = "air"},
     {key = "Test landing attack", label = "下冲落地攻击", node = "Ch253AirLandingPressStartLoop", phase = "air"}
 }
 flight_log.request_observer = {repeated_requests_omitted = 0, capacity_dropped = 0}
@@ -534,7 +536,8 @@ local function queue_flight_snapshot(source)
         local sample = {
             sequence = #flight_log.samples + 1, source = source, game_time = game_time(),
             utc = os.date("!%Y-%m-%dT%H:%M:%SZ"), friend_enabled = friendly,
-            values = {}, errors = {}, action_probe_enabled = action_probe, target_origin = target_origin
+            values = {}, errors = {}, action_probe_enabled = action_probe, target_origin = target_origin,
+            target_probe_enabled = action_probe and target_probe
         }
         local ok, err = pcall(function()
             local core = dependency()
@@ -619,6 +622,59 @@ local function queue_flight_snapshot(source)
                 if probe_failed then
                     action_probe = false
                     log_event("action_probe_disabled", "Read error; see sample " .. sample.sequence .. ". Original flight recording continues.")
+                end
+                if target_probe then
+                    local target_failed = false
+                    local function target_row(label, getter)
+                        local value = row(label, getter)
+                        if sample.errors[label] then target_failed = true end
+                        return value
+                    end
+                    -- Keep scalar row behavior, while storing vectors in a separate typed table.
+                    sample.vectors = {}
+                    local function capture_vector(label, getter)
+                        target_row(label, function()
+                            local v = getter()
+                            assert(v and type(v.x) == "number" and type(v.y) == "number" and type(v.z) == "number",
+                                "Vector components unavailable")
+                            sample.vectors[label] = {x = v.x, y = v.y, z = v.z}
+                            return true
+                        end)
+                    end
+                    capture_vector("Griffin.Position", function()
+                        return expected.chara:call("get_Transform()"):call("get_Position()")
+                    end)
+                    capture_vector("Player.Position", function() return core.properties.transform:call("get_Position()") end)
+                    if char_ctrl then
+                        capture_vector("FlightControl.TargetPosition", function() return char_ctrl:call("get_TargetPosition()") end)
+                        capture_vector("FlightControl.ForwardTargetFront", function() return char_ctrl:call("get_ForwardTargetFront()") end)
+                    end
+                    local tc = ch253 and target_row("Ch253.TargetController", function()
+                        return ch253:call("get_TargetController()")
+                    end)
+                    if tc then
+                        local correct_owner = target_row("TargetController bound to Griffin", function()
+                            assert(tc:call("get_Owner()") == expected.go and tc:call("get_Chara()") == expected.chara,
+                                "TargetController owner mismatch")
+                            return true
+                        end)
+                        if correct_owner then
+                            target_row("TargetController.TargetType", function() return tc:call("get_TargetType()") end)
+                            local target_character = target_row("TargetController.TargetCharacter", function()
+                                return tc:call("get_TargetCharacter()")
+                            end)
+                            target_row("TargetController.TargetIsPlayer", function() return target_character == owner end)
+                            target_row("TargetController.HasTargetGameObject", function()
+                                return tc:call("get_TargetGameObject()") ~= nil
+                            end)
+                            capture_vector("TargetController.TargetPosition", function() return tc:call("get_TargetPosition()") end)
+                        end
+                    end
+                    if target_failed then
+                        target_probe = false
+                        target_probe_status = "新增目标读取出现错误，已停用；原动作测试和记录保留。"
+                        log_event("target_probe_disabled", "Read error; see sample " .. sample.sequence)
+                    end
                 end
             end
             flight_status = "Snapshot complete. Read errors, if any, are shown below. No flight state was written."
@@ -850,6 +906,7 @@ re.on_draw_ui(function()
         imgui.text(flight_status)
         imgui.text(log_status)
         imgui.text(request_listener_status)
+        imgui.text(target_probe_status)
         imgui.text(relation_status)
         imgui.text(think_status)
         imgui.text(hate_status)
