@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.1. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.2. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.1-beta"
+local VERSION = "0.1.2-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -13,7 +13,7 @@ local status = "先生成狮鹫，再开始驾驶。"
 local hooks_ready, hooks_tried, friend_value = false, false, nil
 local masks = nil
 local input = {x = 0, y = 0, buttons = 0}
-local settings = {distance = 30, fov = 90, player_distance = 20}
+local settings = {distance = 30, fov = 90, player_distance = 20, player_height = 0}
 local settings_path = "GriffinFlightBeta_Settings.json"
 local log_id = os.date("!%Y%m%dT%H%M%SZ") .. "_" .. math.floor(os.clock() * 1000)
 local part, last_flush, next_sample = 1, -math.huge, 0
@@ -61,6 +61,7 @@ end
 if type(json.load_file) == "function" then
     local ok, saved = pcall(json.load_file, settings_path)
     if ok and type(saved) == "table" then
+        if finite(saved.player_height) then settings.player_height = math.max(-80, math.min(80, saved.player_height)) end
         if finite(saved.player_distance) then settings.player_distance = math.max(2, math.min(80, saved.player_distance)) end
         if finite(saved.distance) then settings.distance = math.max(0, math.min(80, saved.distance)) end
         if finite(saved.fov) then settings.fov = math.max(40, math.min(120, saved.fov)) end
@@ -149,6 +150,7 @@ end
 local function sync_player(d)
     local pos = d.transform:call("get_UniversalPosition()")
     d.context:call("setPos(via.Position)", pos)
+    -- Runs on every anchored UpdateBehavior, including centered input and an open UI.
     d.fall:call("resetBaseHeight(via.Position)", pos)
     d.fall:call("resetFallHeight()")
     d.controller:call("warp()")
@@ -303,7 +305,7 @@ local function start_driver()
                 set_intent(d, "Ch253HoverWaitHoHomingHeight", "hover")
             end
             status = "驾驶中：A 起飞／降落，RT 冲刺，LT 悬停。"
-            event("driver_started", {ahead = settings.player_distance, lateral = 12, vertical = 10})
+            event("driver_started", {ahead = settings.player_distance, height = settings.player_height, lateral = 12, vertical = 10})
         end)
         if not ok then
             if active then stop_driver("Start failed") end
@@ -332,7 +334,7 @@ local function tick_driver()
         local length = math.sqrt(fx*fx+fz*fz)
         assert(length > 0.2, "Griffin is too vertical")
         fx,fz = fx/length,fz/length
-        local target = {x=pos.x+fx*settings.player_distance+fz*input.x*12, y=pos.y+input.y*10,
+        local target = {x=pos.x+fx*settings.player_distance+fz*input.x*12, y=pos.y+settings.player_height+input.y*10,
             z=pos.z+fz*settings.player_distance-fx*input.x*12}
         d.moved = true
         d.transform:call("set_Position(via.vec3)", Vector3f.new(target.x,target.y,target.z))
@@ -363,7 +365,7 @@ local function tick_driver()
         dispatch(d)
         d.trace = {griffin = pos, player = vector(d.transform:call("get_Position()")), target = target,
             physical = vector(d.controller:call("get_Position()")), flight = flying, ground = ground,
-            action = tostring(action_name), mode = d.mode, stick = {x=input.x,y=input.y}}
+            action = tostring(action_name), mode = d.mode, anchor_height = settings.player_height, stick = {x=input.x,y=input.y}}
     end)
     if not ok then stop_driver("驾驶检查或位置同步失败"); failed("驾驶已停止", err) end
 end
@@ -575,7 +577,10 @@ re.on_draw_ui(function()
     end
     if imgui.tree_node("玩家距离与镜头设置") then
         if type(imgui.slider_float)=="function" then
-            local changed,v = imgui.slider_float("玩家与狮鹫距离",settings.player_distance,2,80)
+            local changed,v = imgui.slider_float("【新增】玩家相对高度（米）",settings.player_height,-80,80)
+            if changed and finite(v) then settings.player_height=math.max(-80,math.min(80,v));pcall(json.dump_file,settings_path,settings) end
+            imgui.text("相对狮鹫根位置；基础高度再叠加摇杆上下偏移。")
+            changed,v = imgui.slider_float("玩家与狮鹫距离",settings.player_distance,2,80)
             if changed and finite(v) then settings.player_distance=math.max(2,math.min(80,v));pcall(json.dump_file,settings_path,settings) end
             changed,v = imgui.slider_float("相机距离偏移",settings.distance,0,80)
             if changed and finite(v) then settings.distance=math.max(0,math.min(80,v));pcall(json.dump_file,settings_path,settings) end
