@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.23. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.24. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.23-beta"
+local VERSION = "0.1.24-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -657,7 +657,16 @@ controls.rows={
 controls.enums={keyboard={},gamepad={}}
 controls.choices={keyboard={"None"},gamepad={"None"}}
 controls.previous={}
-controls.save=function() pcall(json.dump_file,settings_path,settings) end
+controls.save=function()
+    local ok,result=pcall(json.dump_file,settings_path,settings)
+    if not ok or result==false then
+        menu.save_error="设置保存失败，当前修改尚未写入文件："..tostring(result)
+        status=menu.save_error
+        return false
+    end
+    menu.save_error=nil
+    return true
+end
 controls.enum=function(type_name,target,prefix)
     local def=sdk.find_type_definition(type_name)
     if not def then return end
@@ -1364,11 +1373,12 @@ passengers.refresh=function(force)
         end
     end
 end
-passengers.seat=function(group,index)
-    local key=group=="pawns" and "pawn_seats" or "companion_seats"
-    settings[key]=settings[key] or {}
-    local seat=settings[key][index]
-    if type(seat)~="table" then seat={};settings[key][index]=seat end
+passengers.seat=function(group,index,preset)
+    local key=preset and group or (group=="pawns" and "pawn_seats" or "companion_seats")
+    local store=preset or settings
+    if type(store[key])~="table" then store[key]={} end
+    local seat=store[key][index]
+    if type(seat)~="table" then seat={};store[key][index]=seat end
     if seat.enabled==nil then seat.enabled=true end
     if type(seat.anim)~="string" then seat.anim="" end
     for _,spec in ipairs({{"lookX",0,-1,1},{"lookZ",1,-1,1},{"tilt_follow",1,0,1},{"pitch_offset",0,-45,45}}) do
@@ -1485,6 +1495,10 @@ passengers.tick_pose=function(a)
     end
 end
 
+passengers.visual_seat=function(group,index)
+    if settings.seat_index==1 then return settings.seat_presets[1].player end
+    return passengers.seat(group,index)
+end
 passengers.restore_one=function(a)
     if not a.player:get_Valid() then
         a.bones_applied=nil;a.moved=false;a.fsm_touched=false;return
@@ -1531,7 +1545,7 @@ passengers.bind=function(d,ch,group,index)
     assert(a.original_position and type(a.original_fsm)=="boolean","Passenger original state unavailable")
     discover_joints(a)
     assert(a.hip_joint and a.hip_joint:get_Valid(),"Passenger Hip unavailable")
-    a.pose_pending=passengers.seat(group,index).anim
+    a.pose_pending=settings.seat_index~=1 and passengers.seat(group,index).anim or nil
     d.passengers[ch]=a -- recovery registered before the first native mutation
     event("passenger_bound",{group=group,slot=index})
     return a
@@ -1578,7 +1592,7 @@ passengers.tick=function(d)
             local physical=rider_seat(a,settings.seat_presets[1].player)
             a.moved=true;a.anchor_target=physical;a.neutral_anchor=physical
             a.transform:call("set_Position(via.vec3)",Vector3f.new(physical.x,physical.y,physical.z))
-            passengers.orient(a,passengers.seat(a.group,a.slot))
+            passengers.orient(a,passengers.visual_seat(a.group,a.slot))
             sync_player(a)
             passengers.tick_pose(a)
             d.passenger_trace[#d.passenger_trace+1]={group=a.group,slot=a.slot,physical=physical,fsm_enabled=a.fsm:call("get_Enabled()"),protection=a.protection_counts,orientation=a.orientation_trace,orientation_failed=a.orientation_failed or false}
@@ -1606,7 +1620,7 @@ passengers.pre=function()
     for _,a in pairs(active.passengers or {}) do
         local ok,err=pcall(function()
             restore_bone(a)
-            if a.anchor_target then passengers.orient(a,passengers.seat(a.group,a.slot)) end
+            if a.anchor_target then passengers.orient(a,passengers.visual_seat(a.group,a.slot)) end
         end)
         if not ok then event("passenger_bone_restore_error",tostring(err)) end
     end
@@ -1620,7 +1634,7 @@ passengers.post=function()
                 assert(owned_player(a,false),"Passenger changed")
                 restore_bone(a)
                 local actor=vector(a.transform:call("get_Position()"))
-                local seat=rider_seat(a,passengers.seat(a.group,a.slot))
+                local seat=rider_seat(a,passengers.visual_seat(a.group,a.slot))
                 local items={}
                 for _,spec in ipairs({{joint=a.root_joint,key="root"},{joint=a.hip_joint,key="hip"}}) do
                     local joint=spec.joint
@@ -1795,7 +1809,7 @@ re.on_application_entry("UpdateHID",function()
     end
 end)
 
-re.on_pre_application_entry("UpdateBehavior",function() passengers.frame=passengers.frame+1;passengers.refresh();tick_skip_think();tick_driver();tick_camera_follow() end)
+re.on_pre_application_entry("UpdateBehavior",function() passengers.frame=passengers.frame+1;if menu.apply_pending_preset then menu.apply_pending_preset() end;passengers.refresh();tick_skip_think();tick_driver();tick_camera_follow() end)
 re.on_pre_application_entry("UpdateJointExpression",function()
     passengers.pre()
     local d=active
@@ -1948,12 +1962,19 @@ menu.clone=function(value)
     if type(value)~="table" then return value end
     local result={};for k,v in pairs(value) do result[k]=menu.clone(v) end;return result
 end
-menu.preset_name="新座位预设"
+-- OJR preset contract: edit the persisted layout itself, never a second draft.
 menu.snapshot=function(name,source)
-    return {schema=4,name=name,player=passengers.player_config(),
-        camera={distance=settings.distance,fov=settings.fov},pawns=menu.clone(settings.pawn_seats or source and source.pawns or {}),
-        companions=menu.clone(settings.companion_seats or source and source.companions or {})}
+    local preset=menu.clone(source or {})
+    preset.schema=5;preset.name=name
+    preset.player=preset.player or {}
+    for k,v in pairs(passengers.player_config()) do preset.player[k]=v end
+    preset.camera=preset.camera or {};preset.camera.distance=settings.distance;preset.camera.fov=settings.fov
+    preset.pawns=menu.clone(settings.pawn_seats or preset.pawns or {})
+    preset.companions=menu.clone(settings.companion_seats or preset.companions or {})
+    return preset
 end
+settings.pawn_seats=menu.clone(loaded_settings and loaded_settings.pawn_seats or {})
+settings.companion_seats=menu.clone(loaded_settings and loaded_settings.companion_seats or {})
 settings.seat_presets={}
 if loaded_settings and type(loaded_settings.seat_presets)=="table" then
     for _,preset in ipairs(loaded_settings.seat_presets) do
@@ -1963,54 +1984,106 @@ if loaded_settings and type(loaded_settings.seat_presets)=="table" then
         end
     end
 end
-if #settings.seat_presets==0 then settings.seat_presets[1]=menu.snapshot("默认座位（当前设置）") end
--- Slot [1] is reserved for debug physical anchoring and never participates in cycling.
+if #settings.seat_presets==0 then settings.seat_presets[1]=menu.snapshot("实体位置校正") end
 if #settings.seat_presets==1 then
     settings.seat_presets[2]=menu.clone(settings.seat_presets[1]);settings.seat_presets[2].name="默认乘坐座位"
 end
+settings.seat_index=math.max(2,math.min(#settings.seat_presets,math.floor(tonumber(loaded_settings and loaded_settings.seat_index) or 2)))
+-- Recover legacy edits that were written only to the runtime mirrors, once.
+if loaded_settings and loaded_settings.preset_store_revision~=1 and loaded_settings.seat_index~=1 then
+    local preset=settings.seat_presets[settings.seat_index]
+    for key,value in pairs(passengers.player_config()) do
+        if loaded_settings["rider_"..key]~=nil then preset.player[key]=value end
+    end
+    preset.camera=type(preset.camera)=="table" and preset.camera or {}
+    for _,key in ipairs({"distance","fov"}) do if loaded_settings[key]~=nil then preset.camera[key]=settings[key] end end
+    for _,entry in ipairs({{"pawn_seats","pawns"},{"companion_seats","companions"}}) do
+        if type(loaded_settings[entry[1]])=="table" then preset[entry[2]]=menu.clone(loaded_settings[entry[1]]) end
+    end
+end
 if not finite(settings.seat_presets[1].player.tilt_follow) then settings.seat_presets[1].player.tilt_follow=0 end
 if not finite(settings.seat_presets[1].player.pitch_offset) then settings.seat_presets[1].player.pitch_offset=0 end
-settings.seat_index=math.max(2,math.min(#settings.seat_presets,math.floor(tonumber(loaded_settings and loaded_settings.seat_index) or 2)))
-settings.pawn_seats=menu.clone(loaded_settings and loaded_settings.pawn_seats or settings.seat_presets[settings.seat_index].pawns or {})
-settings.companion_seats=menu.clone(loaded_settings and loaded_settings.companion_seats or settings.seat_presets[settings.seat_index].companions or {})
-menu.next_preset=function()
-    local index=settings.seat_index+1
-    menu.apply_preset(index>#settings.seat_presets and 2 or index)
-end
+settings.preset_store_revision=1
 menu.show_physical=false
+menu.selected_index=settings.seat_index
+menu.last_normal=settings.seat_index
+menu.reindex=function()
+    for i,preset in ipairs(settings.seat_presets) do
+        preset.name="["..i.."] "..preset.name:gsub("^%[%d+%]%s*","")
+        preset.enabled=true
+        if type(preset.pawns)~="table" then preset.pawns={} end
+        if type(preset.companions)~="table" then preset.companions={} end
+    end
+end
+menu.pull_values=function(index)
+    local preset=settings.seat_presets[index]
+    local player=preset.player
+    player.anchor=player.anchor=="neck" and "neck" or "head"
+    player.neck_joint=type(player.neck_joint)=="string" and player.neck_joint or ""
+    player.anim=type(player.anim)=="string" and player.anim or ""
+    for _,spec in ipairs({{"height",1,-5,15},{"forward",0,-15,15},{"side",0,-10,10},
+        {"lookX",0,-1,1},{"lookZ",1,-1,1},{"tilt_follow",index==1 and 0 or 1,0,1},{"pitch_offset",0,-45,45}}) do
+        local value=player[spec[1]]
+        local coordinate=spec[1]=="height" or spec[1]=="forward" or spec[1]=="side"
+        player[spec[1]]=finite(value) and (index==1 and coordinate and value or math.max(spec[3],math.min(spec[4],value))) or spec[2]
+    end
+    for key,value in pairs(player) do
+        if ({anchor=true,neck_joint=true,anim=true,height=true,forward=true,side=true,lookX=true,lookZ=true,tilt_follow=true,pitch_offset=true})[key] then
+            settings["rider_"..key]=value
+        end
+    end
+    if index~=1 then
+        -- Runtime references alias the authoritative layout; no clone/draft can diverge.
+        settings.pawn_seats=preset.pawns;settings.companion_seats=preset.companions
+        preset.camera=type(preset.camera)=="table" and preset.camera or {}
+        for _,spec in ipairs({{"distance",30,0,80},{"fov",90,40,120}}) do
+            local value=preset.camera[spec[1]]
+            preset.camera[spec[1]]=finite(value) and math.max(spec[3],math.min(spec[4],value)) or spec[2]
+            settings[spec[1]]=preset.camera[spec[1]]
+        end
+    end
+end
+menu.persist_preset=function(preset)
+    for index,entry in ipairs(settings.seat_presets) do
+        if entry==preset and index==settings.seat_index then menu.pull_values(index);break end
+    end
+    menu.reindex()
+    controls.save()
+end
 menu.apply_preset=function(index)
     local preset=settings.seat_presets[index]
     if not preset or index==1 and not menu.show_physical then return end
     if index~=1 then menu.last_normal=index end
-    if index~=1 then
-        settings.pawn_seats=menu.clone(preset.pawns or {})
-        settings.companion_seats=menu.clone(preset.companions or {})
-    end
-    settings.seat_index=index
-    settings.rider_anim=type(preset.player.anim)=="string" and preset.player.anim or ""
-    settings.rider_anchor=preset.player.anchor=="neck" and "neck" or "head"
-    settings.rider_neck_joint=type(preset.player.neck_joint)=="string" and preset.player.neck_joint or ""
-    settings.rider_height=math.max(-5,math.min(15,preset.player.height))
-    settings.rider_forward=math.max(-15,math.min(15,preset.player.forward))
-    settings.rider_side=math.max(-10,math.min(10,preset.player.side))
-    for _,spec in ipairs({{"lookX",0,-1,1},{"lookZ",1,-1,1},{"tilt_follow",1,0,1},{"pitch_offset",0,-45,45}}) do
-        local value=preset.player[spec[1]]
-        settings["rider_"..spec[1]]=finite(value) and math.max(spec[3],math.min(spec[4],value)) or spec[2]
-    end
-    if type(preset.camera)=="table" then
-        if finite(preset.camera.distance) then settings.distance=math.max(0,math.min(80,preset.camera.distance)) end
-        if finite(preset.camera.fov) then settings.fov=math.max(40,math.min(120,preset.camera.fov)) end
-    end
+    settings.seat_index=index;menu.selected_index=index
+    menu.pull_values(index)
     if active then
-        active.fall_reset_pending=true
-        active.pose_pending=settings.rider_anim
+        active.fall_reset_pending=true;active.pose_pending=index~=1 and settings.rider_anim or nil
         for _,a in pairs(active.passengers or {}) do
-            a.fall_reset_pending=true;a.pose_pending=passengers.seat(a.group,a.slot).anim
+            a.fall_reset_pending=true;a.pose_pending=index~=1 and passengers.seat(a.group,a.slot).anim or nil
         end
     end
-    controls.save();status="已应用座位预设："..preset.name
+    controls.save();status="当前生效预设："..preset.name
 end
-if loaded_settings and loaded_settings.seat_index==1 then menu.apply_preset(settings.seat_index) end
+menu.apply_pending_preset=function()
+    local preset=menu.pending_preset
+    if not preset or not core() or core().properties.isPaused then return end
+    menu.pending_preset=nil
+    for index,entry in ipairs(settings.seat_presets) do if entry==preset then menu.apply_preset(index);return end end
+end
+menu.queue_preset=function(index)
+    local preset=settings.seat_presets[index]
+    if not preset or index==1 and not menu.show_physical then return end
+    menu.selected_index=index;menu.confirm_delete=nil;menu.pending_preset=preset
+    if type(run_once)=="function" then run_once(function() if alive then menu.apply_pending_preset() end end) end
+end
+menu.next_preset=function()
+    local index=settings.seat_index+1
+    menu.queue_preset(index>#settings.seat_presets and 2 or index)
+end
+menu.reindex();menu.pull_values(settings.seat_index)
+-- No settings file is overwritten during deployment. This migration runs on script load.
+if loaded_settings then controls.save() end
+
 menu.edit_facing=function(seat,id)
     local dirty=false
     for _,spec in ipairs({{"lookX","【新增】Look At X（右正／左负）",0,-1,1},
@@ -2026,13 +2099,13 @@ menu.edit_facing=function(seat,id)
     imgui.text("Look At X左右面向、Z前后面向；(0, 1)朝狮鹫前方。倾斜仅作用于角色身体。")
     return dirty
 end
-menu.animation=function(seat,id)
+menu.animation=function(seat,id,preset)
     if type(seat.anim)~="string" then seat.anim="" end
     if type(imgui.input_text)=="function" then
-        local changed,value=imgui.input_text("【新增】动作名称###"..id.."Anim",seat.anim)
-        if changed and type(value)=="string" then seat.anim=value:sub(1,160);controls.save() end
+        local changed,value=imgui.input_text("动作名称###"..id.."Anim",seat.anim)
+        if changed and type(value)=="string" then seat.anim=value:sub(1,160);menu.persist_preset(preset) end
     end
-    if beta_button("【新增】播放动画###"..id.."Play") then
+    if beta_button("播放动画###"..id.."Play") then
         local d=active
         local a=id=="BetaPlayerPose" and d or nil
         for _,member in pairs(d and d.passengers or {}) do
@@ -2041,73 +2114,113 @@ menu.animation=function(seat,id)
         if not a then status="请先开始驾驶并启用该座位。"
         else a.pose_pending=seat.anim end
     end
-    imgui.text("使用动作节点名，例如 SitOnChairActions；留空不自动播放。随预设保存，落座／换预设时请求一次。")
 end
-
-menu.edit_seat=function(seat,id)
+menu.number=function(label,value,step,lo,hi)
+    if type(imgui.drag_float)=="function" then return imgui.drag_float(label,value,step,lo,hi) end
+    return imgui.slider_float(label,value,lo,hi)
+end
+menu.edit_seat=function(seat,id,preset)
+    local dirty=false
     if type(imgui.combo)=="function" then
         local changed,index=imgui.combo("骨骼锚点###"..id.."Anchor",seat.anchor=="neck" and 2 or 1,{"头部","颈部"})
-        if changed then seat.anchor=index==2 and "neck" or "head";controls.save() end
+        if changed then seat.anchor=index==2 and "neck" or "head";dirty=true end
         if seat.anchor=="neck" then
             local names={"自动（首个颈部骨骼）"};local selected=1
             for _,entry in ipairs(active and active.rider_necks or {}) do
                 names[#names+1]=entry.name;if entry.name==seat.neck_joint then selected=#names end
             end
             local changed,index=imgui.combo("颈部骨骼###"..id.."Neck",selected,names)
-            if changed then seat.neck_joint=index==1 and "" or names[index];controls.save() end
+            if changed then seat.neck_joint=index==1 and "" or names[index];dirty=true end
         end
     end
-    for _,spec in ipairs({{"height","上下偏移",-5,15},{"forward","前后偏移",-15,15},{"side","左右偏移",-10,10}}) do
+    for _,spec in ipairs({{"side","X（左右）",-10,10},{"forward","Z（前后）",-15,15},{"height","Y（高度）",-5,15}}) do
         if not finite(seat[spec[1]]) then seat[spec[1]]=0 end
-        local changed,value=imgui.slider_float(spec[2].."###"..id..spec[1],seat[spec[1]],spec[3],spec[4])
-        if changed and finite(value) then seat[spec[1]]=math.max(spec[3],math.min(spec[4],value));controls.save() end
+        if id=="BetaPhysical" then spec[3],spec[4]=-100,100 end
+        local changed,value=menu.number(spec[2].."###"..id..spec[1],seat[spec[1]],0.05,spec[3],spec[4])
+        if changed and finite(value) then seat[spec[1]]=math.max(spec[3],math.min(spec[4],value));dirty=true end
     end
-    if id~="BetaPhysical" then
-        if menu.edit_facing(seat,id) then controls.save() end
-        menu.animation(seat,id)
+    if id~="BetaPhysical" and menu.edit_facing(seat,id=="BetaPlayerSeat" and "BetaPlayerFacing" or id) then dirty=true end
+    if dirty then
+        menu.persist_preset(preset)
+        if id=="BetaPhysical" and active then
+            for _,a in pairs(active.passengers or {}) do a.fall_reset_pending=true end
+        end
     end
+    if id~="BetaPhysical" then menu.animation(seat,id=="BetaPlayerSeat" and "BetaPlayerPose" or id,preset) end
 end
-menu.passenger_seats=function()
-    imgui.text("【新增】乘客实体位置固定取预设[1]，Hip分别使用以下座位；开始驾驶后自动冻结乘客FSM。")
-    for _,spec in ipairs({{"pawns","【新增】随从座位"},{"companions","【新增】同行NPC座位"}}) do
-        if imgui.tree_node(spec[2]) then
-            local group=spec[1]
-            local roster=(passengers.roster or {})[group] or {}
-            local key=group=="pawns" and "pawn_seats" or "companion_seats"
-            local count=math.max(3,#roster,#(settings[key] or {}))
-            imgui.text("当前识别："..#roster.."；按当前名单顺序分配座位。")
-            for i=1,count do
-                if imgui.tree_node((group=="pawns" and "随从 " or "同伴NPC ")..i.."###BetaSeat"..group..i) then
-                    local seat=passengers.seat(group,i)
-                    local changed,value=menu.toggle("自动携带／冻结FSM###BetaSeatEnabled"..group..i,seat.enabled~=false)
-                    if changed then seat.enabled=value;controls.save() end
-                    menu.edit_seat(seat,"BetaSeat"..group..i)
-                    imgui.tree_pop()
-                end
+menu.passenger_seats=function(preset)
+    for _,group in ipairs({"pawns","companions"}) do
+        local roster=(passengers.roster or {})[group] or {}
+        local count=math.max(group=="pawns" and 3 or 0,#roster,#preset[group])
+        for i=1,count do
+            if imgui.tree_node((group=="pawns" and "随从 " or "同伴NPC ")..i.."###BetaSeat"..group..i) then
+                local seat=passengers.seat(group,i,preset)
+                local changed,value=menu.toggle("自动携带／冻结FSM###BetaSeatEnabled"..group..i,seat.enabled~=false)
+                if changed then seat.enabled=value;menu.persist_preset(preset) end
+                menu.edit_seat(seat,"BetaSeat"..group..i,preset)
+                imgui.tree_pop()
             end
-            imgui.tree_pop()
         end
     end
-    if active then
-        local count=0;for _ in pairs(active.passengers or {}) do count=count+1 end
-        imgui.text("当前接管乘客："..count)
-    end
-    if passengers.last_error then imgui.text("乘客控制提示："..passengers.last_error) end
 end
-menu.physical_preset=function()
-    if imgui.tree_node("【新增】预设[1]：实体位置校正（不参与切换）") then
-        imgui.text("此项直接修改预设[1]；所有乘客Transform／碰撞体共用，不响应摇杆。")
-        local seat=settings.seat_presets[1].player
-        local before=tostring(seat.anchor)..tostring(seat.neck_joint)..tostring(seat.height)..tostring(seat.forward)..tostring(seat.side)
-        menu.edit_seat(seat,"BetaPhysical")
-        local after=tostring(seat.anchor)..tostring(seat.neck_joint)..tostring(seat.height)..tostring(seat.forward)..tostring(seat.side)
-        if before~=after then
-            if settings.seat_index==1 then menu.apply_preset(1)
-            elseif active then for _,a in pairs(active.passengers or {}) do a.fall_reset_pending=true end end
+menu.presets=function()
+    imgui.text("当前生效预设："..settings.seat_presets[settings.seat_index].name)
+    if imgui.separator then imgui.separator() end
+    local first=menu.show_physical and 1 or 2
+    local names={};for i=first,#settings.seat_presets do names[#names+1]=settings.seat_presets[i].name end
+    menu.selected_index=math.max(first,math.min(#settings.seat_presets,menu.selected_index or settings.seat_index))
+    if type(imgui.combo)=="function" then
+        local changed,index=imgui.combo("当前布局###BetaPresetSelect",menu.selected_index-first+1,names)
+        if changed and names[index] then menu.queue_preset(index+first-1) end
+    end
+    local index=menu.selected_index
+    local preset=settings.seat_presets[index]
+    if index~=1 then
+        if #settings.seat_presets<15 and beta_button("＋新增预设（最多15项）###BetaPresetNew") then
+            local clone=menu.clone(preset)
+            clone.name="狮鹫座位 - "..(#settings.seat_presets+1)
+            settings.seat_presets[#settings.seat_presets+1]=clone
+            menu.reindex();controls.save();menu.queue_preset(#settings.seat_presets)
+            return
         end
-        imgui.text(passengers.npc_status or "同行NPC等待扫描")
+        if #settings.seat_presets>2 then
+            if imgui.same_line then imgui.same_line() end
+            if menu.confirm_delete~=preset then
+                if beta_button("删除预设###BetaPresetDelete") then menu.confirm_delete=preset end
+            else
+                if beta_button("确认删除###BetaPresetConfirmDelete") then
+                    table.remove(settings.seat_presets,index)
+                    if settings.seat_index>index then settings.seat_index=settings.seat_index-1
+                    elseif settings.seat_index==index then settings.seat_index=math.max(2,math.min(index,#settings.seat_presets)) end
+                    menu.last_normal=math.max(2,math.min(menu.last_normal or 2,#settings.seat_presets))
+                    menu.selected_index=math.max(2,math.min(index,#settings.seat_presets));menu.confirm_delete=nil
+                    menu.reindex();menu.pull_values(settings.seat_index);controls.save();menu.queue_preset(settings.seat_index)
+                    return
+                end
+                if imgui.same_line then imgui.same_line() end
+                if beta_button("取消###BetaPresetCancelDelete") then menu.confirm_delete=nil end
+            end
+        end
+        if type(imgui.input_text)=="function" then
+            local changed,name=imgui.input_text("预设名称###BetaPresetName",preset.name)
+            if changed and type(name)=="string" and name:match("%S") then preset.name=name:sub(1,120);menu.persist_preset(preset) end
+        end
+    else imgui.text("调试[1]：随从实体始终使用此位置，当前Hip也放到此位置。玩家实体仍由摇杆控制。") end
+    if imgui.tree_node("玩家参数###BetaPlayerParameters") then
+        menu.edit_seat(preset.player,index==1 and "BetaPhysical" or "BetaPlayerSeat",preset)
+        if index~=1 then
+            preset.camera=type(preset.camera)=="table" and preset.camera or {distance=settings.distance,fov=settings.fov}
+            for _,spec in ipairs({{"distance","相机距离偏移",0,80},{"fov","FOV",40,120}}) do
+                local changed,value=menu.number(spec[2].."###BetaPresetCamera"..spec[1],preset.camera[spec[1]],0.1,spec[3],spec[4])
+                if changed and finite(value) then preset.camera[spec[1]]=math.max(spec[3],math.min(spec[4],value));menu.persist_preset(preset) end
+            end
+        end
         imgui.tree_pop()
     end
+    if index~=1 then menu.passenger_seats(preset) end
+    imgui.text("与牛车MOD相同：调整立即保存；新增复制当前布局，删除需确认。")
+    if menu.pending_preset then imgui.text("布局切换已排队，游戏继续后应用。") end
+    if menu.save_error then imgui.text(menu.save_error) end
 end
 
 menu.stop=function()
@@ -2186,6 +2299,7 @@ end
 re.on_draw_ui(function()
     if not imgui.tree_node("狮鹫旅程 Redux###GriffinFlightBeta") then return end
     imgui.text("Beta "..VERSION)
+    if menu.save_error then imgui.text(menu.save_error) end
     if imgui.tree_node("一般设置") then
         if beta_button("一键生成狮鹫###BetaSpawn") then spawn() end
         if beta_button("开始驾驶###BetaStart") then start_driver() end
@@ -2217,74 +2331,12 @@ re.on_draw_ui(function()
             if value and install_yaw_hook() then settings.head_camera=true;change_camera_mode("griffin") end
             controls.save()
         end
-        menu.slider("distance","相机距离偏移",0,80);menu.slider("fov","FOV",40,120)
         menu.slider("camera_yaw_speed","【新增】镜头跟随速度（度／秒）",15,360)
         menu.slider("camera_manual_threshold","【新增】右摇杆接管阈值",0.25,0.95)
         imgui.tree_pop()
     end
     if imgui.tree_node("座位预设") then
-        local names={};for _,preset in ipairs(settings.seat_presets) do names[#names+1]=preset.name end
-        if type(imgui.combo)=="function" then
-            local first=menu.show_physical and 1 or 2
-            local cycle_names={};for i=first,#names do cycle_names[#cycle_names+1]="["..i.."] "..names[i] end
-            local changed,index=imgui.combo("当前预设",settings.seat_index-first+1,cycle_names)
-            if changed then menu.apply_preset(index+first-1) end
-        else imgui.text("当前预设："..names[settings.seat_index]) end
-        if settings.seat_index==1 then imgui.text("调试预览[1]：实体坐标在DEBUG中修改；该项不参与轮询。") end
-        if beta_button("下一预设###BetaPresetNext") then menu.next_preset() end
-        if type(imgui.combo)=="function" then
-            local changed,index=imgui.combo("【新增】座位骨骼锚点",settings.rider_anchor=="neck" and 2 or 1,{"头部","颈部"})
-            if changed then settings.rider_anchor=index==2 and "neck" or "head";controls.save() end
-            if settings.rider_anchor=="neck" then
-                local names={"自动（首个颈部骨骼）"};local selected=1
-                for _,entry in ipairs(active and active.rider_necks or {}) do
-                    names[#names+1]=entry.name
-                    if entry.name==settings.rider_neck_joint then selected=#names end
-                end
-                local changed,index=imgui.combo("【新增】颈部骨骼",selected,names)
-                if changed then settings.rider_neck_joint=index==1 and "" or names[index];controls.save() end
-            end
-        end
-        if active and active.rider_seat_joint_name then imgui.text("当前座位骨骼："..active.rider_seat_joint_name) end
-        if active and settings.rider_anchor=="neck" and active.rider_neck_missing then imgui.text("未找到可用颈部骨骼，暂用头部。") end
-        imgui.text("骨骼锚点随预设保存；导航目标与镜头仍跟随头部。")
-        menu.slider("rider_height","【新增】座位上下偏移",-5,15)
-        menu.slider("rider_forward","【新增】座位前后偏移",-15,15)
-        menu.slider("rider_side","【新增】座位左右偏移",-10,10)
-        local pose=passengers.player_config()
-        menu.animation(pose,"BetaPlayerPose")
-        if settings.rider_anim~=pose.anim then settings.rider_anim=pose.anim;controls.save() end
-        local facing=passengers.player_config()
-        if menu.edit_facing(facing,"BetaPlayerFacing") then
-            for _,key in ipairs({"lookX","lookZ","tilt_follow","pitch_offset"}) do settings["rider_"..key]=facing[key] end
-            controls.save()
-        end
-        if active and active.orientation_failed then imgui.text("座位朝向写入失败，本次驾驶已停用朝向修正；位置与驾驶继续。") end
-        if type(imgui.input_text)=="function" then
-            local changed,name=imgui.input_text("预设名称",menu.preset_name)
-            if changed and type(name)=="string" then menu.preset_name=name:sub(1,120) end
-        end
-        if beta_button("保存到当前预设###BetaPresetSave") then
-            if settings.seat_index==1 then status="预设[1]请用DEBUG实体位置编辑器直接修改。"
-            else
-                local old=settings.seat_presets[settings.seat_index]
-                settings.seat_presets[settings.seat_index]=menu.snapshot(old.name,old);controls.save();status="座位预设已保存。"
-            end
-        end
-        if beta_button("另存为新预设###BetaPresetNew") then
-            local name=menu.preset_name:match("^%s*(.-)%s*$")
-            if name~="" then settings.seat_presets[#settings.seat_presets+1]=menu.snapshot(name);settings.seat_index=#settings.seat_presets;controls.save() end
-        end
-        if beta_button("重命名当前预设###BetaPresetRename") then
-            local name=menu.preset_name:match("^%s*(.-)%s*$")
-            if name~="" and settings.seat_index~=1 then settings.seat_presets[settings.seat_index].name=name;controls.save() end
-        end
-        if beta_button("删除当前预设###BetaPresetDelete") then
-            if settings.seat_index~=1 and #settings.seat_presets>2 then table.remove(settings.seat_presets,settings.seat_index);menu.apply_preset(math.min(settings.seat_index,#settings.seat_presets))
-            else status="除DEBUG预设[1]外，至少保留一个乘坐预设。" end
-        end
-        menu.passenger_seats()
-        imgui.text("调整实时预览；保存包含玩家、随从与同行NPC座位。预设[1]仅DEBUG，不参与切换。")
+        menu.presets()
         imgui.tree_pop()
     end
     if imgui.tree_node("按键设置") then menu.bindings();imgui.tree_pop() end
@@ -2292,9 +2344,12 @@ re.on_draw_ui(function()
         local changed,value=menu.toggle("【新增】显示预设[1]（仅手动调试）",menu.show_physical)
         if changed then
             menu.show_physical=value
-            if not value and settings.seat_index==1 then menu.apply_preset(menu.last_normal or 2) end
+            if not value then
+                if settings.seat_index==1 or menu.selected_index==1 then menu.queue_preset(menu.last_normal or 2) end
+                if menu.pending_preset==settings.seat_presets[1] then menu.pending_preset=nil end
+            end
         end
-        if menu.show_physical then menu.physical_preset() end
+        if menu.show_physical then imgui.text("在座位预设的当前布局中选择[1]，编辑实体位置。") end
         changed,value=menu.toggle("【新增】落座乘客伤害免疫",passengers.protection.damage)
         if changed then passengers.protection.damage=value end
         changed,value=menu.toggle("【新增】阻止落座乘客自动传送／丢失",passengers.protection.relocation)
