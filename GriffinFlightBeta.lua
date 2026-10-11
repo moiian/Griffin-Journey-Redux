@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.25. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.26. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.25-beta"
+local VERSION = "0.1.26-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -33,6 +33,21 @@ local skip_think_status = "跳过思考：默认开启，等待狮鹫就绪"
 local function core()
     local c = rawget(_G, "NickCore")
     if c and c.properties and c.object and c.enemySpawner and type(run_once) == "function" then return c end
+end
+-- Same native Photo Mode flag used by OJR. Failure keeps ordinary pause behavior.
+menu.photo_active=function()
+    local ok,value=pcall(function()
+        local gui=sdk.get_managed_singleton("app.GuiManager")
+        return gui and gui["<IsDispPhotoModeAll>k__BackingField"]==true
+    end)
+    return ok and value==true
+end
+menu.gameplay_paused=function()
+    local c=core()
+    return not c or c.properties.isPaused or menu.photo_active()
+end
+menu.visual_allowed=function()
+    return core() and (not menu.gameplay_paused() or menu.photo_active())
 end
 local function now()
     local c = core()
@@ -150,9 +165,9 @@ local function capture_party(c, player)
     assert(type(party) == "table" and party[1] == player, "Party unavailable")
     return party
 end
-local function validate_spawn(r)
+local function validate_spawn(r,visual_only)
     local c = assert(core(), "NickCore unavailable")
-    assert(c.properties.player == r.owner and not c.properties.isPaused, "Player changed or game paused")
+    assert(c.properties.player == r.owner and (not menu.gameplay_paused() or visual_only and menu.photo_active()), "Player changed or game paused")
     local result = r.result
     assert(result and result.go and result.chara, "等待狮鹫生成完成")
     assert(result.go:get_Valid() and result.chara:get_Valid(), "Griffin no longer valid")
@@ -409,7 +424,7 @@ local function change_camera_mode(key)
 end
 local function tick_camera_follow()
     local d,c=active,core()
-    if not alive or not d or camera_mode=="original" or not c or c.properties.isPaused then return end
+    if not alive or not d or camera_mode=="original" or not c or menu.gameplay_paused() then return end
     local ok,err=pcall(function()
         assert(owned_player(d,true),"玩家实例变化")
         local manager=assert(sdk.get_managed_singleton("app.CameraManager"),"CameraManager不可用")
@@ -471,7 +486,7 @@ local function tick_camera_yaw(controller)
     if controller~=s.controller then return end
     local ok,err=pcall(function()
         local c=core()
-        if not c or c.properties.isPaused then yaw_state=nil;return end
+        if not c or menu.gameplay_paused() then yaw_state=nil;return end
         assert(owned_player(d,true) and s.main:get_Valid(),"驾驶玩家或镜头失效")
         assert(s.main:call("get_TargetCharacter()")==d.player and s.main._CurrentCameraController==controller,
             "镜头归属或控制器变化")
@@ -774,13 +789,13 @@ local function set_intent(d, node, mode)
 end
 local function dispatch(d)
     local c=core()
-    if not c or c.properties.isPaused or not d.intent or d.pending or now() - d.last_request < 0.35 then return end
+    if not c or menu.gameplay_paused() or not d.intent or d.pending or now() - d.last_request < 0.35 then return end
     local intent = d.intent
     d.pending = true
     run_once(function()
         if not alive or active ~= d or d.intent ~= intent then d.pending = false; return end
         local c=core()
-        if c and c.properties.isPaused then d.pending=false;return end -- keep intent until resume
+        if c and menu.gameplay_paused() then d.pending=false;return end -- keep intent until resume
         local ok, err = pcall(function()
             local ch = validate_spawn(d.spawn)
             assert(owned_player(d, true) and player_fsm(d.player) == d.fsm, "Player binding changed")
@@ -967,7 +982,7 @@ end
 local function tick_skip_think()
     if not skip_think_enabled or not alive then return end
     local c,r=core(),skip_think_expected
-    if not c or c.properties.isPaused then return end
+    if not c or menu.gameplay_paused() then return end
     if not r or r.owner~=c.properties.player or r.delete_requested or state.spawns[#state.spawns]~=r then
         skip_think_enabled=false;skip_think_expected=nil;skip_think_status="跳过思考：实例已退出";return
     end
@@ -999,7 +1014,7 @@ local function install_fall_hook()
         assert(method and sdk.PreHookResult and sdk.PreHookResult.SKIP_ORIGINAL,"Fall request hook unavailable")
         sdk.hook(method,function(args)
             local d,c=active,core()
-            if alive and d and c and not c.properties.isPaused and c.properties.player==d.player then
+            if alive and d and c and not menu.gameplay_paused() and c.properties.player==d.player then
                 local ch=sdk.to_managed_object(args[2])
                 local member=d.passengers and d.passengers[ch]
                 if ch==d.player and d.moved or member and member.moved and member.anchor_target and not member.recovery_pending then
@@ -1122,7 +1137,7 @@ local function tick_driver()
     if not d or not alive then return end
     local c = core()
     if not c then stop_driver("游戏上下文不可用");return end
-    if c.properties.isPaused then
+    if menu.gameplay_paused() then
         if not d.menu_paused then event("driver_menu_paused",true) end
         d.menu_paused=true;d.previous_buttons=input.buttons
         return -- preserve player position, FSM, bones, camera and pending intent
@@ -1283,7 +1298,7 @@ end
 -- Seat calculation only. Bone writes use the original Hip experiment callback below.
 local function rider_seat(d,config)
     config=config or passengers.player_config()
-    local ch=validate_spawn(d.spawn)
+    local ch=validate_spawn(d.spawn,true)
     assert(ch:call("get_Transform()")==d.rider_griffin_transform,"Griffin anchor changed")
     local base
     if d.rider_head then
@@ -1318,7 +1333,7 @@ end
 -- Passenger ownership uses live character instances, never character IDs for control.
 passengers.refresh=function(force)
     local c=core()
-    if not alive or not c or c.properties.isPaused or not c.properties.player then return end
+    if not alive or not c or menu.gameplay_paused() or not c.properties.player then return end
     if not force and now()<(passengers.next_roster or -math.huge) then return end
     passengers.next_roster=now()+0.25
     local ok,party=pcall(c.object.get_party)
@@ -1470,7 +1485,7 @@ passengers.install_protection=function()
     event("passenger_protection_installed",{errors=errors})
 end
 passengers.play_pose=function(a,node)
-    assert(active and alive and not core().properties.isPaused,"请开始驾驶并关闭暂停菜单后播放")
+    assert(active and alive and not menu.gameplay_paused(),"请开始驾驶并关闭暂停菜单后播放")
     assert(owned_player(a,false) and player_fsm(a.player)==a.fsm,"Animation actor binding changed")
     node=type(node)=="string" and node:match("^%s*(.-)%s*$") or ""
     if node=="" then return end
@@ -1626,7 +1641,7 @@ passengers.tick=function(d)
     if d.trace then d.trace.passengers=d.passenger_trace end
 end
 passengers.pre=function()
-    if not active or not core() or core().properties.isPaused then return end
+    if not alive or not active or not menu.visual_allowed() then return end
     for _,a in pairs(active.passengers or {}) do
         local ok,err=pcall(function()
             restore_bone(a)
@@ -1637,7 +1652,7 @@ passengers.pre=function()
 end
 passengers.post=function()
     local d=active
-    if not alive or not d or not core() or core().properties.isPaused then return end
+    if not alive or not d or not menu.visual_allowed() then return end
     for _,a in pairs(d.passengers or {}) do
         if a.anchor_target then
             local ok,err=pcall(function()
@@ -1678,7 +1693,7 @@ local function spawn()
         if not alive then return end
         local ok, err = pcall(function()
             local c = assert(core(), "等待 NickCore 加载")
-            assert(c.properties.player and not c.properties.isPaused, "请进入游戏")
+            assert(c.properties.player and not menu.gameplay_paused(), "请进入游戏")
             install_hooks()
             local r = {owner = c.properties.player, party = capture_party(c,c.properties.player), friend = true}
             -- NickCore returns a mutable instance-reference table; never search by Character ID.
@@ -1722,7 +1737,7 @@ end
 re.on_frame(function()
     if not alive then return end
     local c = core()
-    if not c or c.properties.isPaused then return end
+    if not c or menu.gameplay_paused() then return end
     local pending=passengers.protection.pending or {}
     passengers.protection.pending={}
     for _,detail in ipairs(pending) do event("rider_protection",detail) end
@@ -1738,7 +1753,7 @@ re.on_frame(function()
             r.ready = true
             run_once(function()
                 if not alive or r.deleted or r.delete_requested then return end
-                if core() and core().properties.isPaused then r.ready=false;return end
+                if core() and menu.gameplay_paused() then r.ready=false;return end
                 local ok, err = pcall(function()
                     install_hooks()
                     local ch = validate_spawn(r)
@@ -1771,7 +1786,7 @@ re.on_frame(function()
         rotate()
         if #journal.samples < 650 then journal.samples[#journal.samples+1] = {time=now(), data=active.trace} end
     end
-    if target_record and not c.properties.isPaused then
+    if target_record and not menu.gameplay_paused() then
         local rec=target_record
         if now()>=rec.deadline or rec.spawn.deleted or rec.spawn.delete_requested then
             target_record=nil;target_status="目标坐标记录已结束，日志已保存。";event("target_record_stopped",true)
@@ -1792,12 +1807,12 @@ re.on_application_entry("UpdateHID",function()
     if not alive then return end
     local ok,result=pcall(read_pad)
     if not ok then
-        if core() and core().properties.isPaused then return end
+        if core() and menu.gameplay_paused() then return end
         if active then stop_driver("输入读取失败");failed("输入读取失败",result) end
         return
     end
     input=result
-    if core() and core().properties.isPaused then
+    if core() and menu.gameplay_paused() then
         if active then active.previous_buttons=result.buttons end
         return -- menu navigation must not invoke gameplay hotkeys
     end
@@ -1820,21 +1835,19 @@ re.on_application_entry("UpdateHID",function()
 end)
 
 re.on_pre_application_entry("UpdateBehavior",function() passengers.frame=passengers.frame+1;if menu.apply_pending_preset then menu.apply_pending_preset() end;passengers.refresh();tick_skip_think();tick_driver();tick_camera_follow() end)
-re.on_pre_application_entry("UpdateJointExpression",function()
-    passengers.pre()
+menu.player_visual_pre=function()
     local d=active
-    if not d or not alive or not d.bones_applied or not core() or core().properties.isPaused then return end
+    if not d or not alive or not d.bones_applied or not menu.visual_allowed() then return end
     local ok,err=pcall(function()
         assert(owned_player(d,true),"Player binding changed")
         restore_bone(d)
         passengers.orient(d,passengers.player_config())
     end)
-    if not ok then stop_driver("骨骼恢复失败");failed("骨骼恢复失败",err) end
-end)
-re.on_application_entry("UpdateJointExpression",function()
-    passengers.post()
+    if not ok then menu.visual_error("骨骼恢复失败",err) end
+end
+menu.player_visual_post=function()
     local d,c=active,core()
-    if not d or not alive or not c or c.properties.isPaused or not d.anchor_target then return end
+    if not d or not alive or not menu.visual_allowed() or not d.anchor_target then return end
     if d.anchor_mode=="full" or not d.neutral_anchor then return end
     local ok,err=pcall(function()
         assert(owned_player(d,true),"Player binding changed")
@@ -1868,10 +1881,31 @@ re.on_application_entry("UpdateJointExpression",function()
             if d.trace then d.trace.rider=d.rider_trace end
         end
     end)
-    if not ok then stop_driver("骨骼位置实验失败");failed("骨骼位置实验失败",err) end
+    if not ok then menu.visual_error("骨骼位置实验失败",err) end
+end
+menu.visual_error=function(label,err)
+    -- A paused render callback must not release actors or invoke gameplay cleanup.
+    if menu.photo_active() then
+        local message=label..": "..tostring(err)
+        if menu.photo_error~=message then menu.photo_error=message;failed(label,err) end
+    else stop_driver(label);failed(label,err) end
+end
+re.on_pre_application_entry("UpdateJointExpression",function()
+    passengers.pre();menu.player_visual_pre()
+end)
+re.on_application_entry("UpdateJointExpression",function()
+    passengers.post();menu.player_visual_post()
+end)
+re.on_pre_application_entry("PrepareRendering",function()
+    if not alive or not active or not menu.photo_active() then return end
+    -- Photo Mode may skip UpdateBehavior/UpdateJointExpression entirely. Reuse the
+    -- verified capture/restore Hip path, with no physics, AI, input or FSM updates.
+    menu.apply_pending_preset()
+    passengers.pre();menu.player_visual_pre()
+    passengers.post();menu.player_visual_post()
 end)
 re.on_application_entry("PrepareRendering",function()
-    if not core() or core().properties.isPaused then return end
+    if not core() or menu.gameplay_paused() then return end
     read_camera_follow()
     local d = active
     if not d or d.camera_failed then return end
@@ -2092,7 +2126,7 @@ menu.apply_preset=function(index)
 end
 menu.apply_pending_preset=function()
     local preset=menu.pending_preset
-    if not preset or not core() or core().properties.isPaused then return end
+    if not preset or not menu.visual_allowed() then return end
     menu.pending_preset=nil
     for index,entry in ipairs(settings.seat_presets) do if entry==preset then menu.apply_preset(index);return end end
 end
@@ -2248,7 +2282,8 @@ menu.presets=function()
     end
     menu.passenger_seats(preset)
     imgui.text("与牛车MOD相同：调整立即保存；新增复制当前布局，删除需确认。")
-    if menu.pending_preset then imgui.text("布局切换已排队，游戏继续后应用。") end
+    if menu.pending_preset then imgui.text("布局切换已排队，继续游戏或进入照片模式后应用。") end
+    if active and menu.photo_active() then imgui.text("照片模式：保持座位显示；飞行输入和动画请求暂停。") end
     if menu.save_error then imgui.text(menu.save_error) end
 end
 
