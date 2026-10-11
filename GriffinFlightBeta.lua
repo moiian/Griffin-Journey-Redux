@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.11. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.12. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.11-beta"
+local VERSION = "0.1.12-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -177,8 +177,7 @@ end
 local anchor_mode="full"
 local anchor_modes={
     {key="full",label="完整同步（已验证基线）"},
-    {key="rider",label="【新增】头顶骑乘显示（Hip固定）"},
-    {key="rider_root",label="【新增】头顶骑乘显示（旧相机偏移方式）"},
+    {key="rider",label="【本轮】仅Hip固定头顶（复用已验证路径）"},
     {key="transform",label="仅 Transform／对象根位置响应摇杆"},
     {key="context",label="仅位置上下文响应摇杆"},
     {key="controller",label="仅物理控制器响应摇杆"},
@@ -189,41 +188,17 @@ local function close_position(a,b)
     return math.abs(a.x-b.x)+math.abs(a.y-b.y)+math.abs(a.z-b.z)<0.001
 end
 local function restore_bone(d)
-    -- Joint world writes may persist independently of the actor matrix while FSM is frozen.
-    -- Reattach from the captured actor-relative pose, never from a stale local/world cache.
-    if d.rider_pose and d.rider_touched and owned_player(d,false) then
-        local actor=vector(d.transform:call("get_Position()"))
-        for _,a in ipairs(d.rider_pose.roots) do
-            if a.joint:get_Valid() then
-                a.joint:call("set_Position(via.vec3)",Vector3f.new(actor.x+a.offset.x,actor.y+a.offset.y,actor.z+a.offset.z))
-            end
-        end
-        local h=d.rider_pose.hip
-        if h and h.joint:get_Valid() then
-            h.joint:call("set_Position(via.vec3)",Vector3f.new(actor.x+h.offset.x,actor.y+h.offset.y,actor.z+h.offset.z))
-        end
-        d.bones_applied=nil
-        return
-    end
     local items=d.bones_applied
     if not items then return end
     if not owned_player(d,false) then d.bones_applied=nil;return end
     -- Decide ownership before any parent write changes a child's world position.
     local matches={}
     for i,a in ipairs(items) do
-        if a.joint:get_Valid() then
-            if a.local_original and a.local_written then
-                matches[i]=close_position(vector(a.joint:call("get_LocalPosition()")),a.local_written)
-            else matches[i]=close_position(vector(a.joint:call("get_Position()")),a.written) end
-        end
+        matches[i]=a.joint:get_Valid() and close_position(vector(a.joint:call("get_Position()")),a.written)
     end
     -- Restore parent first, then child, using the pose captured before either write.
     for i,a in ipairs(items) do
-        if matches[i] then
-            local p=a.local_original or a.original
-            local method=a.local_original and "set_LocalPosition(via.vec3)" or "set_Position(via.vec3)"
-            a.joint:call(method,Vector3f.new(p.x,p.y,p.z))
-        end
+        if matches[i] then a.joint:call("set_Position(via.vec3)",Vector3f.new(a.original.x,a.original.y,a.original.z)) end
     end
     d.bones_applied=nil
 end
@@ -250,22 +225,7 @@ local function discover_joints(d)
 end
 local function prepare_rider(d,key)
     discover_joints(d)
-    assert(d.display_roots and #d.display_roots>0,"玩家骨架根不可用，未开启骑乘显示")
-    if key=="rider" then assert(d.hip_joint and d.hip_joint:get_Valid(),"玩家Hip骨骼不可用，未开启骑乘显示")
-    else assert(d.display_roots and #d.display_roots>0,"没有独立骨架根，未开启旧相机偏移方式") end
-    if not d.rider_pose then
-        -- Use skeleton-internal differences: an old world-pinned root can already be
-        -- far from the actor when this version starts. That distance is not a pose.
-        local root=d.root_joint or d.display_roots[1]
-        local reference=vector(root:call("get_Position()"))
-        local function pose(joint)
-            local p=vector(joint:call("get_Position()"))
-            return {joint=joint,offset={x=p.x-reference.x,y=p.y-reference.y,z=p.z-reference.z}}
-        end
-        local roots={}
-        for _,joint in ipairs(d.display_roots) do roots[#roots+1]=pose(joint) end
-        d.rider_pose={roots=roots,hip=d.hip_joint and pose(d.hip_joint) or nil}
-    end
+    assert(d.hip_joint and d.hip_joint:get_Valid(),"玩家Hip骨骼不可用，未开启固定")
     local ch=d.spawn.result.chara
     local tr=ch:call("get_Transform()")
     assert(tr,"Griffin Transform unavailable")
@@ -291,7 +251,7 @@ local function prepare_rider(d,key)
         fallback=not d.rider_head and "Griffin root + forward 3m / up 4m" or nil})
 end
 local function prepare_anchor_mode(d,key)
-    if key=="rider" or key=="rider_root" then prepare_rider(d,key);return end
+    if key=="rider" then prepare_rider(d,key);return end
     if key~="full" then
         local td=sdk.find_type_definition("via.physics.CharacterController")
         assert(td and td:get_method("applyWorldOffset(via.vec3)"),"Controller world-offset interface unavailable")
@@ -333,7 +293,7 @@ local function write_anchor(d,target,neutral)
     restore_bone(d) -- remove last frame's pose correction before moving the actor
     d.anchor_target=target;d.neutral_anchor=neutral
     d.moved=true
-    if key=="full" or key=="rider" or key=="rider_root" then
+    if key=="full" or key=="rider" then
         d.transform:call("set_Position(via.vec3)",Vector3f.new(target.x,target.y,target.z))
         sync_player(d)
         d.anchor_plan={transform=target,context=target,controller=target}
@@ -409,7 +369,6 @@ stop_driver = function(reason)
             if owned_player(d, true) then
                 d.transform:call("set_UniversalPosition(via.Position)", d.original_position)
                 sync_player(d)
-                restore_bone(d) -- world-pinned skeleton must follow the restored actor too
             end
             d.moved = false
         end)
@@ -798,59 +757,22 @@ local function tick_driver()
     if not ok then stop_driver("驾驶检查或位置同步失败"); failed("驾驶已停止", err) end
 end
 
--- Visual-only late Hip override. Navigation Transform is never moved to the seat.
-local function renew_rider_visual(phase)
-    local d,c=active,core()
-    if not alive or not d or not d.heading or not c or c.properties.isPaused then return end
-    if d.anchor_mode~="rider" and d.anchor_mode~="rider_root" then
-        if d.anchor_mode=="full" and d.rider_touched then
-            local ok,err=pcall(restore_bone,d)
-            if not ok then stop_driver("显示骨架恢复失败");failed("显示骨架恢复失败",err) end
-        end
-        return
+-- Seat calculation only. Bone writes use the original Hip experiment callback below.
+local function rider_seat(d)
+    local ch=validate_spawn(d.spawn)
+    assert(ch:call("get_Transform()")==d.rider_griffin_transform,"Griffin anchor changed")
+    local base
+    if d.rider_head then
+        assert(d.rider_head:get_Valid(),"Griffin Head unavailable")
+        base=vector(d.rider_head:call("get_Position()"))
+    else
+        base=vector(d.rider_griffin_transform:call("get_Position()"))
+        base={x=base.x+d.heading.x*3,y=base.y+4,z=base.z+d.heading.z*3}
     end
-    local ok,err=pcall(function()
-        local ch=validate_spawn(d.spawn)
-        assert(owned_player(d,true) and player_fsm(d.player)==d.fsm,"Player binding changed")
-        assert(ch:call("get_Transform()")==d.rider_griffin_transform,"Griffin display anchor changed")
-        local hip=d.hip_joint
-        if d.anchor_mode=="rider" then assert(hip and hip:get_Valid(),"Player Hip unavailable") end
-        restore_bone(d)
-        local base
-        local fallback=not d.rider_head
-        if d.rider_head then
-            assert(d.rider_head:get_Valid(),"Griffin head joint unavailable")
-            base=vector(d.rider_head:call("get_Position()"))
-        else
-            base=vector(d.rider_griffin_transform:call("get_Position()"))
-            base={x=base.x+d.heading.x*3,y=base.y+4,z=base.z+d.heading.z*3}
-        end
-        local fx,fz=d.heading.x,d.heading.z
-        local seat={x=base.x+fx*settings.rider_forward+fz*settings.rider_side,
-            y=base.y+settings.rider_height,z=base.z+fz*settings.rider_forward-fx*settings.rider_side}
-        local items={}
-        local hip_offset=d.rider_pose.hip and d.rider_pose.hip.offset or {x=0,y=0,z=0}
-        local shift=d.anchor_mode=="rider" and hip_offset or {x=0,y=0,z=0}
-        for i,a in ipairs(d.rider_pose.roots) do
-            assert(a.joint:get_Valid(),"Player skeleton root unavailable")
-            items[#items+1]={joint=a.joint,key="display_root_"..i,
-                written={x=seat.x+a.offset.x-shift.x,y=seat.y+a.offset.y-shift.y,z=seat.z+a.offset.z-shift.z}}
-        end
-        if d.anchor_mode=="rider" then items[#items+1]={joint=hip,key="hip",written=seat} end
-        d.rider_touched=true
-        d.bones_applied=items
-        for _,a in ipairs(items) do
-            a.joint:call("set_Position(via.vec3)",Vector3f.new(a.written.x,a.written.y,a.written.z))
-            if d.anchor_plan then d.anchor_plan[a.key]=a.written end
-        end
-        d.rider_trace={phase=phase,mode=d.anchor_mode,head_joint=d.rider_head_name,fallback=fallback,head=base,seat=seat,
-            hip=hip and hip:get_Valid() and vector(hip:call("get_Position()")) or nil,
-            root=vector(d.rider_pose.roots[1].joint:call("get_Position()")),
-            transform=vector(d.transform:call("get_Position()")),root_count=#items}
-
-        if d.trace then d.trace.rider=d.rider_trace end
-    end)
-    if not ok then stop_driver("骑乘显示写入失败");failed("骑乘显示写入失败",err) end
+    local fx,fz=d.heading.x,d.heading.z
+    local seat={x=base.x+fx*settings.rider_forward+fz*settings.rider_side,
+        y=base.y+settings.rider_height,z=base.z+fz*settings.rider_forward-fx*settings.rider_side}
+    return seat,base
 end
 local function spawn()
     if queued or #state.spawns > 0 or state.recovery then return end
@@ -910,7 +832,6 @@ re.on_frame(function()
     if not alive then return end
     local c = core()
     if not c then return end
-    renew_rider_visual("on_frame")
     if fall_hits~=fall_logged and now()-fall_log_at>=1 then
         fall_logged=fall_hits;fall_log_at=now();event("player_fall_request",{hits=fall_hits,blocked=fall_blocked})
     end
@@ -986,19 +907,21 @@ end)
 re.on_application_entry("UpdateJointExpression",function()
     local d,c=active,core()
     if not d or not alive or not c or c.properties.isPaused or not d.anchor_target then return end
-    if d.anchor_mode=="rider" or d.anchor_mode=="rider_root" then renew_rider_visual("UpdateJointExpression");return end
     if d.anchor_mode=="full" or not d.neutral_anchor then return end
     local ok,err=pcall(function()
         assert(owned_player(d,true),"Player binding changed")
         restore_bone(d)
         local actor=vector(d.transform:call("get_Position()"))
+        local seat,head
+        if d.anchor_mode=="rider" then seat,head=rider_seat(d) end
         local items={}
-        -- Capture both original world positions before moving either parent/child.
+        -- Same capture/write/restore ordering as the user-validated Hip stick mode.
         for _,spec in ipairs({{joint=d.root_joint,key="root_bone"},{joint=d.hip_joint,key="hip"}}) do
             local joint=spec.joint
             if joint and joint:get_Valid() then
                 local original=vector(joint:call("get_Position()"))
                 local anchor=d.anchor_mode==spec.key and d.anchor_target or d.neutral_anchor
+                if seat and spec.key=="hip" then anchor=seat end
                 local target={x=anchor.x+original.x-actor.x,y=anchor.y+original.y-actor.y,z=anchor.z+original.z-actor.z}
                 items[#items+1]={joint=joint,key=spec.key,original=original,written=target}
             end
@@ -1008,11 +931,18 @@ re.on_application_entry("UpdateJointExpression",function()
             a.joint:call("set_Position(via.vec3)",Vector3f.new(a.written.x,a.written.y,a.written.z))
             if d.anchor_plan then d.anchor_plan[a.key]=a.written end
         end
+        if seat then
+            d.rider_trace={phase="UpdateJointExpression",mode="rider",head_joint=d.rider_head_name,
+                fallback=not d.rider_head,head=head,seat=seat,
+                hip=vector(d.hip_joint:call("get_Position()")),
+                root=d.root_joint and vector(d.root_joint:call("get_Position()")) or nil,
+                transform=actor}
+            if d.trace then d.trace.rider=d.rider_trace end
+        end
     end)
     if not ok then stop_driver("骨骼位置实验失败");failed("骨骼位置实验失败",err) end
 end)
 re.on_application_entry("PrepareRendering",function()
-    renew_rider_visual("PrepareRendering")
     local d = active
     if not d or d.camera_failed then return end
     local ok, err = pcall(function()
@@ -1186,8 +1116,8 @@ re.on_draw_ui(function()
         imgui.tree_pop()
     end
     if imgui.tree_node("【新增】头顶座位偏移（仅骑乘显示模式）") then
-        imgui.text("头顶显示不移动导航Transform；Hip方式固定髋部，旧方式平移完整骨架。")
-        if active and (active.anchor_mode=="rider" or active.anchor_mode=="rider_root") then
+        imgui.text("本轮复用仅Hip实验：保留自然姿势偏移，只更换Hip的锚点。")
+        if active and active.anchor_mode=="rider" then
             imgui.text("座位基准："..(active.rider_head_name or "未找到Head，使用狮鹫根位置＋前3米／上4米"))
         end
         if type(imgui.slider_float)=="function" then
