@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.18. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.19. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.18-beta"
+local VERSION = "0.1.19-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -15,9 +15,11 @@ local status = "先生成狮鹫，再开始驾驶。"
 local hooks_ready, hooks_tried, friend_value = false, false, nil
 local yaw_state, yaw_hook_ready = nil, false
 local yaw_status = "自动转向镜头：未开启"
+local controls,menu = {},{}
 local masks = nil
 local input = {x = 0, y = 0, buttons = 0}
-local settings = {distance = 30, fov = 90, player_distance = 20, player_height = 0, freeze_player = true, rider_height=1.0, rider_forward=0, rider_side=0, camera_x=0, camera_y=0, camera_z=0, sphere_navigation=true, navigation_radius=4.019, steering_yaw=50.276, steering_pitch=22.018, navigation_height=0.991, bumper_pitch=69, controls_revision=1, camera_auto_yaw=false, camera_yaw_speed=120, camera_pitch_speed=90, camera_manual_threshold=0.55}
+local settings = {distance = 30, fov = 90, player_distance = 20, player_height = 0, freeze_player = true, rider_height=1.0, rider_forward=0, rider_side=0, camera_x=0, camera_y=0, camera_z=0, sphere_navigation=true, navigation_radius=4.019, steering_yaw=50.276, steering_pitch=22.018, navigation_height=0.991, bumper_pitch=59, controls_revision=1, camera_auto_yaw=false, camera_yaw_speed=120, camera_manual_threshold=0.55}
+local loaded_settings=nil
 local settings_path = "GriffinFlightBeta_Settings.json"
 local log_id = os.date("!%Y%m%dT%H%M%SZ") .. "_" .. math.floor(os.clock() * 1000)
 local part, last_flush, next_sample = 1, -math.huge, 0
@@ -67,8 +69,8 @@ end
 if type(json.load_file) == "function" then
     local ok, saved = pcall(json.load_file, settings_path)
     if ok and type(saved) == "table" then
+        loaded_settings=saved
         if type(saved.camera_auto_yaw)=="boolean" then settings.camera_auto_yaw=saved.camera_auto_yaw end
-        if finite(saved.camera_pitch_speed) then settings.camera_pitch_speed=math.max(15,math.min(180,saved.camera_pitch_speed)) end
         if finite(saved.camera_manual_threshold) then settings.camera_manual_threshold=math.max(0.25,math.min(0.95,saved.camera_manual_threshold)) end
         if finite(saved.camera_yaw_speed) then settings.camera_yaw_speed=math.max(15,math.min(360,saved.camera_yaw_speed)) end
         if type(saved.freeze_player) == "boolean" then settings.freeze_player = saved.freeze_player end
@@ -78,7 +80,7 @@ if type(json.load_file) == "function" then
         if finite(saved.steering_yaw) then settings.steering_yaw=math.max(1,math.min(85,saved.steering_yaw)) end
         -- First controls migration adopts the user's screenshot, not an older cached pitch.
         if saved.controls_revision == 1 and finite(saved.steering_pitch) then settings.steering_pitch=math.max(1,math.min(80,saved.steering_pitch)) end
-        if finite(saved.bumper_pitch) then settings.bumper_pitch=math.max(1,math.min(80,saved.bumper_pitch)) end
+        if finite(saved.bumper_pitch) then settings.bumper_pitch=math.max(1,math.min(59,saved.bumper_pitch)) end
         if finite(saved.player_height) then settings.player_height = math.max(-80, math.min(80, saved.player_height)) end
         if finite(saved.player_distance) then settings.player_distance = math.max(2, math.min(80, saved.player_distance)) end
         if finite(saved.distance) then settings.distance = math.max(0, math.min(80, saved.distance)) end
@@ -192,16 +194,12 @@ local function sync_player(d)
 end
 -- All layers follow a neutral Griffin anchor; only the selected layer gets stick offset.
 -- Engine coupling is observed through readback, not assumed away.
-local anchor_mode="full"
+local anchor_mode="rider"
 local anchor_modes={
-    {key="full",label="完整同步（已验证基线）"},
-    {key="rider",label="【本轮】仅Hip固定头顶（复用已验证路径）"},
-    {key="transform",label="仅 Transform／对象根位置响应摇杆"},
-    {key="context",label="仅位置上下文响应摇杆"},
-    {key="controller",label="仅物理控制器响应摇杆"},
-    {key="root_bone",label="仅骨架根节点响应摇杆"},
-    {key="hip",label="仅 Hip 髋部响应摇杆"},
+    {key="full",label="完整同步"},
+    {key="rider",label="仅Hip头顶"},
 }
+
 local function close_position(a,b)
     return math.abs(a.x-b.x)+math.abs(a.y-b.y)+math.abs(a.z-b.z)<0.001
 end
@@ -333,7 +331,7 @@ end
 
 local function change_anchor_mode(key)
     local d=active
-    if not d then anchor_mode=key;event("anchor_mode_selected",key);return end
+    if not d then anchor_mode=key;settings.anchor_mode=key;pcall(json.dump_file,settings_path,settings);event("anchor_mode_selected",key);return end
     run_once(function()
         if not alive or active~=d then return end
         local mutating=false
@@ -345,7 +343,7 @@ local function change_anchor_mode(key)
             restore_bone(d)
             -- Normalize layers to the current player Transform once, at the boundary.
             sync_player(d)
-            d.anchor_mode=key;anchor_mode=key;d.anchor_target=nil;d.neutral_anchor=nil;d.anchor_plan=nil;d.target_probe_failed=nil
+            d.anchor_mode=key;anchor_mode=key;settings.anchor_mode=key;pcall(json.dump_file,settings_path,settings);d.anchor_target=nil;d.neutral_anchor=nil;d.anchor_plan=nil;d.target_probe_failed=nil
             event("anchor_mode_changed",{mode=key,baseline=anchor_positions(d)})
         end)
         if not ok then
@@ -470,13 +468,6 @@ local function tick_camera_yaw(controller)
             local span,deg_span=math.abs(range.y-range.x),math.abs(degrees.y-degrees.x)
             assert(span>0.001 and deg_span>0.001,"镜头角度范围无效")
             local scale=(span/deg_span)*(180/math.pi)
-            local prange=controller:call("get_PitchRange()")
-            local pdegrees=controller:call("get_PitchRangeDeg()")
-            assert(prange and pdegrees and finite(prange.x) and finite(prange.y) and finite(pdegrees.x) and finite(pdegrees.y),"镜头俯仰范围不可用")
-            local pspan,pdeg_span=math.abs(prange.y-prange.x),math.abs(pdegrees.y-pdegrees.x)
-            assert(pspan>0.001 and pdeg_span>0.001,"镜头俯仰范围无效")
-            local pscale=(pspan/pdeg_span)*(180/math.pi)
-            assert(math.abs(pscale-1)<0.02 or math.abs(pscale-180/math.pi)<0.1,"未知俯仰角度单位")
             assert(math.abs(scale-1)<0.02 or math.abs(scale-180/math.pi)<0.1,"未知镜头角度单位")
             -- Calibrate the native orbit-angle offset from the actual camera-to-target ray.
             local pos=vector(s.main:call("get_Position()"))
@@ -485,9 +476,7 @@ local function tick_camera_yaw(controller)
             assert(dx*dx+dz*dz>0.01,"镜头过于垂直，暂不能确定水平朝向")
             yaw_state={controller=controller,last_time=t,resume_at=t,
                 scale=scale,offset=wrap_yaw(angle.y/scale-math.atan(dx,dz)),
-                pitch_scale=pscale,pitch_base=angle.x/pscale,pitch_min=math.min(prange.x,prange.y)/pscale,
-                pitch_max=math.max(prange.x,prange.y)/pscale,manual_yaw=0,manual_pitch=0,
-                previous_yaw=angle.y/scale,previous_pitch=angle.x/pscale}
+                manual_yaw=0,previous_yaw=angle.y/scale}
             event("camera_yaw_bound",{scale=scale,offset=yaw_state.offset,original_yaw=angle.y})
         end
         local y=yaw_state
@@ -499,11 +488,11 @@ local function tick_camera_yaw(controller)
             if magnitude>threshold-0.08 then y.resume_at=t+0.8
             else y.manual_latched=false end
         end
-        local current,current_pitch=angle.y/y.scale,angle.x/y.pitch_scale
+        local current=angle.y/y.scale
         local steering=input.x~=0 or input.y~=0
         local paused=y.manual_latched or t<y.resume_at
         if not steering or paused then
-            y.previous_yaw=current;y.previous_pitch=current_pitch
+            y.previous_yaw=current
             yaw_status=not steering and "左摇杆回中：自动跟随暂停" or "右摇杆接管；释放后延迟恢复"
             d.trace.camera_yaw={manual=paused,steering=steering,current=angle.y,pitch=angle.x,
                 right_magnitude=magnitude,threshold=threshold,weight=0,scale=y.scale}
@@ -513,32 +502,23 @@ local function tick_camera_yaw(controller)
         -- the follow target as well, so automatic correction doesn't erase that input.
         if magnitude>0.1 then
             y.manual_yaw=wrap_yaw(y.manual_yaw+wrap_yaw(current-y.previous_yaw))
-            y.manual_pitch=math.max(y.pitch_min-y.pitch_base,math.min(y.pitch_max-y.pitch_base,y.manual_pitch+(current_pitch-y.previous_pitch)))
         end
         local fraction=math.max(0,math.min(1,(magnitude-0.1)/(threshold-0.1)))
         local weight=1-fraction*fraction*(3-2*fraction)
         assert(d.heading and finite(d.heading.x) and finite(d.heading.z),"狮鹫朝向不可用")
         local desired=wrap_yaw(math.atan(d.heading.x,d.heading.z)+y.offset+y.manual_yaw)
-        local sphere=d.trace.navigation_sphere
-        -- Navigation elevation is stable even when the flight animation keeps the body level.
-        local elevation=sphere and (sphere.pitch_degrees-sphere.neutral_pitch_degrees) or input.y*settings.steering_pitch
-        local desired_pitch=y.pitch_base-math.rad(elevation)+y.manual_pitch
-        desired_pitch=math.max(y.pitch_min,math.min(y.pitch_max,desired_pitch))
         local function eased_step(error,speed)
             local maximum=math.rad(speed)*dt*weight
             return math.max(-maximum,math.min(maximum,error*(1-math.exp(-5*dt))*weight))
         end
         local step=eased_step(wrap_yaw(desired-current),settings.camera_yaw_speed)
-        local pstep=eased_step(desired_pitch-current_pitch,settings.camera_pitch_speed)
-        local output,poutput=current+step,math.max(y.pitch_min,math.min(y.pitch_max,current_pitch+pstep))
+        local output=current+step
         if dt>0 and math.abs(step)>0.00001 then controller:call("setYaw(System.Single)",output*y.scale) end
-        if dt>0 and math.abs(pstep)>0.00001 then controller:call("setPitch(System.Single)",poutput*y.pitch_scale) end
-        y.previous_yaw=output;y.previous_pitch=poutput
-        yaw_status="3档摇杆转向／升降跟随；右摇杆小幅叠加、大幅接管"
+        y.previous_yaw=output
+        yaw_status="3档转向跟随；右摇杆小幅叠加、大幅接管"
         d.trace.camera_yaw={manual=false,steering=true,current=angle.y,requested=output*y.scale,target=desired*y.scale,
-            pitch=angle.x,pitch_requested=poutput*y.pitch_scale,pitch_target=desired_pitch*y.pitch_scale,
-            pitch_scale=y.pitch_scale,elevation=elevation,right_magnitude=magnitude,threshold=threshold,weight=weight,
-            manual_yaw=y.manual_yaw,manual_pitch=y.manual_pitch,speed=settings.camera_yaw_speed,scale=y.scale,dt=dt}
+            right_magnitude=magnitude,threshold=threshold,weight=weight,
+            manual_yaw=y.manual_yaw,speed=settings.camera_yaw_speed,scale=y.scale,dt=dt}
 
     end)
     if not ok then yaw_failed(err) end
@@ -549,8 +529,7 @@ local function install_yaw_hook()
         local def=assert(sdk.find_type_definition("app.RotateCameraControllerBase"),"镜头旋转类型不可用")
         local method=assert(def:get_method("updateManualCameraControl()"),"镜头手动更新接口不可用")
         assert(def:get_method("setYaw(System.Single)") and def:get_method("get_Angle()") and
-            def:get_method("get_YawRange()") and def:get_method("get_YawRangeDeg()") and
-            def:get_method("setPitch(System.Single)") and def:get_method("get_PitchRange()") and def:get_method("get_PitchRangeDeg()"),"镜头水平角接口不可用")
+            def:get_method("get_YawRange()") and def:get_method("get_YawRangeDeg()"),"镜头水平角接口不可用")
         sdk.hook(method,function(args)
             local storage=thread.get_hook_storage()
             storage.griffin_yaw_controller=nil
@@ -643,35 +622,122 @@ stop_driver = function(reason)
     return #errors == 0
 end
 
-local function read_pad()
-    local singleton = sdk.get_native_singleton("via.hid.Gamepad")
-    local def = sdk.find_type_definition("via.hid.GamePad")
-    local device = singleton and def and sdk.call_native_func(singleton, def, "get_MergedDevice")
-    assert(device, "手柄未连接")
-    if not masks then
-        local enum = sdk.find_type_definition("via.hid.GamePadButton")
-        masks = {}
-        for name, field in pairs({a = "RDown", rt = "RTrigBottom", lt = "LTrigBottom", rb = "RTrigTop", lb = "LTrigTop"}) do
-            local f = enum and enum:get_field(field)
-            local n = f and f:get_data(nil)
-            assert(finite(n) and n > 0 and n == math.floor(n), "Gamepad button unavailable: " .. field)
-            masks[name] = n
+-- Independent HID mapping, following OJR's capture/release-gate layout (no OJR/Hotkeys dependency).
+controls.rows={
+    {"spawn","召唤狮鹫","None","None"},{"start","开始驾驶","F","None"},
+    {"stop","结束驾驶","X","None"},{"delete","删除狮鹫","None","None"},
+    {"listen","让狮鹫听话","H","None"},{"a","起飞","Space","RDown"},
+    {"rt","冲刺／3档","LShift","RTrigBottom"},{"lt","减速／降档","LControl","LTrigBottom"},
+    {"rb","爬升／悬停","E","RTrigTop"},{"lb","俯冲／降落","Q","LTrigTop"},
+    {"left","向左","A","None"},{"right","向右","D","None"},
+    {"up","向上／前","W","None"},{"down","向下／后","S","None"},
+    {"preset_next","切换座位预设","None","None"},
+}
+controls.enums={keyboard={},gamepad={}}
+controls.choices={keyboard={"None"},gamepad={"None"}}
+controls.previous={}
+controls.save=function() pcall(json.dump_file,settings_path,settings) end
+controls.enum=function(type_name,target,prefix)
+    local def=sdk.find_type_definition(type_name)
+    if not def then return end
+    if def.get_fields then
+        for _,field in ipairs(def:get_fields()) do
+            if field:is_static() then
+                local value,name=field:get_data(nil),field:get_name()
+                if finite(value) and value>0 and value==math.floor(value) and name~="All" then target[(prefix or "")..name]=value end
+            end
+        end
+    else -- Minimal/mock runtimes: resolve only concrete defaults.
+        for _,row in ipairs(controls.rows) do
+            local name=type_name=="via.hid.KeyboardKey" and row[3] or row[4]
+            local field=def:get_field(name);local value=field and field:get_data(nil)
+            if finite(value) and value>0 then target[(prefix or "")..name]=value end
         end
     end
-    local axis, bits = device:call("get_AxisL()"), device:call("get_Button")
-    assert(axis and finite(axis.x) and finite(axis.y) and finite(bits) and bits == math.floor(bits), "Invalid gamepad input")
-    local x, y = math.max(-1, math.min(1, axis.x)), math.max(-1, math.min(1, axis.y))
-    local length = math.sqrt(x*x + y*y)
-    if length <= 0.2 then x, y = 0, 0
-    else local scale = math.min(1, (length - 0.2)/0.8)/length; x, y = -x*scale, y*scale end
-    local rx,ry,right_error=0,0,nil
-    if settings.camera_auto_yaw then
-        local ok,right=pcall(function() return device:call("get_AxisR()") end)
-        if ok and right and finite(right.x) and finite(right.y) then rx,ry=right.x,right.y
-        else right_error="右摇杆读取失败" end
-    end
-    return {x = x, y = y, buttons = bits,rx=rx,ry=ry,right_error=right_error}
 end
+controls.enum("via.hid.KeyboardKey",controls.enums.keyboard)
+controls.enum("via.hid.MouseButton",controls.enums.keyboard,"Mouse:")
+controls.enum("via.hid.GamePadButton",controls.enums.gamepad)
+for device,values in pairs(controls.enums) do
+    for name in pairs(values) do controls.choices[device][#controls.choices[device]+1]=name end
+    table.sort(controls.choices[device],function(a,b) if a==b then return false end;if a=="None" then return true end;if b=="None" then return false end;return a<b end)
+end
+settings.bindings={}
+for _,row in ipairs(controls.rows) do
+    settings.bindings[row[1]]={}
+    for i,device in ipairs({"keyboard","gamepad"}) do
+        local stored=loaded_settings and loaded_settings.bindings and loaded_settings.bindings[row[1]]
+        stored=type(stored)=="table" and stored[device]
+        settings.bindings[row[1]][device]=(stored=="None" or controls.enums[device][stored]) and stored or row[i+2]
+    end
+end
+masks={a=1,rt=2,lt=4,rb=8,lb=16} -- Logical actions; physical enum values remain runtime-resolved above.
+controls.device=function(singleton_name,type_name,method)
+    local singleton=sdk.get_native_singleton(singleton_name)
+    local def=sdk.find_type_definition(type_name)
+    return singleton and def and sdk.call_native_func(singleton,def,method)
+end
+local function read_pad()
+    local pad=controls.device("via.hid.Gamepad","via.hid.GamePad","get_MergedDevice")
+    local kb=controls.device("via.hid.Keyboard","via.hid.Keyboard","get_Device")
+    local mouse=controls.device("via.hid.Mouse","via.hid.Mouse","get_Device")
+    assert(pad or kb,"未检测到手柄或键盘")
+    local bits=pad and pad:call("get_Button") or 0
+    local mbits=mouse and mouse:call("get_Button") or 0
+    assert(finite(bits) and finite(mbits),"输入按键不可用")
+    local function down(device,name)
+        local code=controls.enums[device][name]
+        if not code or code==0 or name=="None" then return false end
+        if device=="gamepad" then return (bits & code)==code end
+        if name:sub(1,6)=="Mouse:" then return (mbits & code)==code end
+        return kb and kb:call("isDown",code)==true or false
+    end
+    local current={}
+    for name,binding in pairs(settings.bindings) do current[name]=down("keyboard",binding.keyboard) or down("gamepad",binding.gamepad) end
+    local suppressed=false
+    if controls.capture then
+        local capture,pressed=controls.capture,{}
+        for _,name in ipairs(controls.choices[capture.device]) do pressed[name]=down(capture.device,name) end
+        if capture.previous then
+            for _,name in ipairs(controls.choices[capture.device]) do
+                if pressed[name] and not capture.previous[name] then
+                    settings.bindings[capture.action][capture.device]=name
+                    controls.capture=nil;controls.release_gate=true;controls.save();break
+                end
+            end
+        end
+        capture.previous=pressed;suppressed=true
+    end
+    if controls.release_gate then
+        local any=false
+        for device,names in pairs(controls.choices) do
+            for _,name in ipairs(names) do if down(device,name) then any=true;break end end
+        end
+        if not any then controls.release_gate=false end
+        suppressed=true
+    end
+    local logical,edges=0,{}
+    for name,value in pairs(current) do
+        edges[name]=not suppressed and value and controls.previous[name]~=nil and not controls.previous[name]
+        if not suppressed and value and masks[name] then logical=logical|masks[name] end
+    end
+    controls.previous=current
+    local axis=pad and pad:call("get_AxisL()") or {x=0,y=0}
+    assert(axis and finite(axis.x) and finite(axis.y),"摇杆不可用")
+    local x,y=math.max(-1,math.min(1,axis.x)),math.max(-1,math.min(1,axis.y))
+    local length=math.sqrt(x*x+y*y)
+    if length<=0.2 then x,y=0,0 else local scale=math.min(1,(length-0.2)/0.8)/length;x,y=-x*scale,y*scale end
+    x=math.max(-1,math.min(1,x+(current.left and 1 or 0)-(current.right and 1 or 0)))
+    y=math.max(-1,math.min(1,y+(current.up and 1 or 0)-(current.down and 1 or 0)))
+    if suppressed then x,y=0,0 end
+    local rx,ry,right_error=0,0,nil
+    if settings.camera_auto_yaw and pad then
+        local ok,right=pcall(function() return pad:call("get_AxisR()") end)
+        if ok and right and finite(right.x) and finite(right.y) then rx,ry=right.x,right.y else right_error="右摇杆读取失败" end
+    end
+    return {x=x,y=y,buttons=logical,rx=rx,ry=ry,right_error=right_error,edges=edges}
+end
+
 local function held(bits, mask) return (bits & mask) == mask end
 local function set_intent(d, node, mode)
     d.intent = {node = node, mode = mode}
@@ -858,6 +924,7 @@ local function set_skip_think(enabled)
     if not enabled then skip_think_status="已停止请求跳过狮鹫思考。";event("skip_think_disabled",true);return true end
     local r=active and active.spawn or state.spawns[#state.spawns]
     if not alive or not r or not r.ready or r.delete_requested then return false,"请先生成并等待狮鹫就绪" end
+    r.skip_retry_at=nil
     skip_think_expected=r
     skip_think_enabled=true
     skip_think_status="已开启逐帧跳过思考，等待首次请求。"
@@ -868,12 +935,22 @@ local function tick_skip_think()
     if not skip_think_enabled or not alive then return end
     local c,r=core(),skip_think_expected
     if not c or c.properties.isPaused then return end
-    local ok,err=pcall(function()
-        assert(r and r.owner==c.properties.player and not r.delete_requested and state.spawns[#state.spawns]==r,"Griffin context changed")
-        request_instance_skip(r.result,r.owner)
-    end)
-    if ok then skip_think_status="跳过思考：已请求；模块标志=true（动作仍可单独请求）"
-    else skip_think_enabled=false;skip_think_expected=nil;skip_think_status="跳过思考已关闭："..tostring(err);event("skip_think_error",skip_think_status) end
+    if not r or r.owner~=c.properties.player or r.delete_requested or state.spawns[#state.spawns]~=r then
+        skip_think_enabled=false;skip_think_expected=nil;skip_think_status="跳过思考：实例已退出";return
+    end
+    if now()<(r.skip_retry_at or 0) then return end
+    local ok,err=pcall(request_instance_skip,r.result,r.owner)
+    if ok then
+        r.skip_retry_at=nil;r.skip_last_error=nil;r.skip_applied=true
+        skip_think_status="跳过思考：已生效"
+    else
+        r.skip_applied=false;r.skip_retry_at=now()+0.25
+        skip_think_status="跳过思考：等待模块就绪，自动重试"
+        if not r.skip_error_time or now()-r.skip_error_time>=5 then
+            r.skip_error_time=now();event("skip_think_retry",tostring(err))
+        end
+    end
+
 end
 
 local fall_hook_installed,fall_hook_tried=false,false
@@ -937,7 +1014,8 @@ local function start_driver()
             input = read_pad()
             d.previous_buttons = input.buttons -- holding A/RT on enable is not a fresh press
             active = d
-            if settings.camera_auto_yaw and install_yaw_hook() then change_camera_mode("griffin") end
+            if settings.camera_auto_yaw then install_yaw_hook() end
+            if settings.head_camera~=false then change_camera_mode("griffin") end
             install_fall_hook()
             apply_player_freeze(d, settings.freeze_player)
             local joint_ok,joint_err=pcall(discover_joints,d)
@@ -1104,6 +1182,7 @@ local function rider_seat(d)
 end
 local function spawn()
     if queued or #state.spawns > 0 or state.recovery then return end
+    settings.freeze_player=true;block_player_fall=true
     if not core() then status = "等待 NickCore 加载。"; return end
     local token = {}
     operation = token
@@ -1222,11 +1301,27 @@ re.on_frame(function()
     if (active or target_record) and now()-last_flush >= 2 then flush() end
 end)
 re.on_application_entry("UpdateHID",function()
-    if not active or not alive then return end
-    local ok, result = pcall(read_pad)
-    if ok then input = result
-    else stop_driver("手柄读取失败"); failed("手柄读取失败", result) end
+    if not alive then return end
+    local ok,result=pcall(read_pad)
+    if not ok then
+        if active then stop_driver("输入读取失败");failed("输入读取失败",result) end
+        return
+    end
+    input=result
+    if controls.capture or controls.release_gate then return end
+    for _,name in ipairs({"stop","delete","spawn","start","listen","preset_next"}) do
+        if result.edges[name] then
+            if name=="spawn" then spawn()
+            elseif name=="start" then start_driver()
+            elseif name=="stop" then menu.stop()
+            elseif name=="delete" then menu.delete()
+            elseif name=="listen" then menu.listen()
+            elseif name=="preset_next" then menu.apply_preset(settings.seat_index%#settings.seat_presets+1) end
+            break
+        end
+    end
 end)
+
 re.on_pre_application_entry("UpdateBehavior",function() tick_skip_think();tick_driver();tick_camera_follow() end)
 re.on_pre_application_entry("UpdateJointExpression",function()
     local d=active
@@ -1368,186 +1463,209 @@ local function beta_button(label)
     if styled then imgui.pop_style_color(2) end
     return clicked
 end
+-- Player-facing menu. Debug controls share this script and are collapsed by default.
+settings.anchor_mode=loaded_settings and loaded_settings.anchor_mode=="full" and "full" or "rider"
+anchor_mode=settings.anchor_mode
+settings.head_camera=not loaded_settings or loaded_settings.head_camera~=false
+menu.clone=function(value)
+    if type(value)~="table" then return value end
+    local result={};for k,v in pairs(value) do result[k]=menu.clone(v) end;return result
+end
+menu.preset_name="新座位预设"
+menu.snapshot=function(name,source)
+    return {schema=1,name=name,player={height=settings.rider_height,forward=settings.rider_forward,side=settings.rider_side},
+        camera={distance=settings.distance,fov=settings.fov},pawns=menu.clone(source and source.pawns or {}),
+        companions=menu.clone(source and source.companions or {})}
+end
+settings.seat_presets={}
+if loaded_settings and type(loaded_settings.seat_presets)=="table" then
+    for _,preset in ipairs(loaded_settings.seat_presets) do
+        if type(preset)=="table" and type(preset.name)=="string" and type(preset.player)=="table"
+            and finite(preset.player.height) and finite(preset.player.forward) and finite(preset.player.side) then
+            settings.seat_presets[#settings.seat_presets+1]=menu.clone(preset)
+        end
+    end
+end
+if #settings.seat_presets==0 then settings.seat_presets[1]=menu.snapshot("默认座位（当前设置）") end
+settings.seat_index=math.max(1,math.min(#settings.seat_presets,math.floor(tonumber(loaded_settings and loaded_settings.seat_index) or 1)))
+menu.apply_preset=function(index)
+    local preset=settings.seat_presets[index]
+    if not preset then return end
+    settings.seat_index=index
+    settings.rider_height=math.max(-5,math.min(15,preset.player.height))
+    settings.rider_forward=math.max(-15,math.min(15,preset.player.forward))
+    settings.rider_side=math.max(-10,math.min(10,preset.player.side))
+    if type(preset.camera)=="table" then
+        if finite(preset.camera.distance) then settings.distance=math.max(0,math.min(80,preset.camera.distance)) end
+        if finite(preset.camera.fov) then settings.fov=math.max(40,math.min(120,preset.camera.fov)) end
+    end
+    controls.save();status="已应用座位预设："..preset.name
+end
+menu.stop=function()
+    operation=nil;queued=false
+    if type(run_once)~="function" then stop_driver("手动结束");return end
+    run_once(function() if alive then stop_driver("手动结束") end end)
+end
+menu.delete=function()
+    operation=nil;queued=false
+    if type(run_once)~="function" then status="等待依赖加载后再删除。";return end
+    run_once(function()
+        if not alive or not stop_driver("删除狮鹫") then return end
+        set_skip_think(false)
+        for _,r in ipairs(state.spawns) do r.delete_requested=true;delete_one(r) end
+    end)
+end
+menu.listen=function()
+    local r=active and active.spawn or state.spawns[#state.spawns]
+    if not r or not r.ready or r.delete_requested then status="请先召唤狮鹫。";return end
+    run_once(function()
+        if not alive or r.deleted or r.delete_requested then return end
+        local ok,err=pcall(select_player_target,r)
+        if ok then status="狮鹫已重新锁定玩家。" else failed("未能重新锁定玩家",err) end
+    end)
+end
+menu.slider=function(key,label,low,high)
+    if type(imgui.slider_float)~="function" then return end
+    local changed,value=imgui.slider_float(label,math.max(low,math.min(high,settings[key])),low,high)
+    if changed and finite(value) then settings[key]=math.max(low,math.min(high,value));controls.save() end
+end
+menu.toggle=function(label,value)
+    if type(imgui.checkbox)~="function" then return false,value end
+    return imgui.checkbox(label,value)
+end
+menu.bindings=function()
+    local table_open=type(imgui.begin_table)=="function" and imgui.begin_table("GriffinBindings",3,1)
+    if table_open then
+        imgui.table_next_row()
+        for _,label in ipairs({"动作","手柄","键盘／鼠标"}) do imgui.table_next_column();imgui.table_header(label) end
+    end
+    for _,row in ipairs(controls.rows) do
+        if table_open then imgui.table_next_row();imgui.table_next_column() end
+        imgui.text(row[2])
+        for _,device in ipairs({"gamepad","keyboard"}) do
+            if table_open then imgui.table_next_column() end
+            local capture=controls.capture
+            local label=capture and capture.action==row[1] and capture.device==device and "请按新按键…" or settings.bindings[row[1]][device]
+            if beta_button(label.."###BetaBind_"..row[1].."_"..device) then
+                controls.capture={action=row[1],device=device};controls.previous={}
+            end
+        end
+    end
+    if table_open then imgui.end_table() end
+    if controls.capture then
+        imgui.text("先松开已按住的键，再按新键。录入期间暂停驾驶输入。")
+        if beta_button("取消录入###BetaBindCancel") then controls.capture=nil;controls.release_gate=true end
+        if beta_button("清除此绑定###BetaBindClear") then
+            settings.bindings[controls.capture.action][controls.capture.device]="None"
+            controls.capture=nil;controls.release_gate=true;controls.save()
+        end
+    end
+    if beta_button("恢复默认按键###BetaBindDefaults") then
+        for _,row in ipairs(controls.rows) do settings.bindings[row[1]]={keyboard=row[3],gamepad=row[4]} end
+        controls.capture=nil;controls.release_gate=true;controls.previous={};controls.save()
+    end
+    local used={}
+    for _,row in ipairs(controls.rows) do
+        for _,device in ipairs({"keyboard","gamepad"}) do
+            local name=settings.bindings[row[1]][device];local key=device..":"..name
+            if name~="None" then
+                if used[key] then imgui.text("重复绑定："..used[key].."／"..row[2].." → "..name) else used[key]=row[2] end
+            end
+        end
+    end
+end
 re.on_draw_ui(function()
-    if not imgui.tree_node("狮鹫飞行 Beta###GriffinFlightBeta") then return end
-    imgui.text("版本 "..VERSION.." | A 仅起飞 · RT 3档 · LT 逐档减速")
-    if beta_button("一键生成狮鹫并设为友方###BetaSpawn") then spawn() end
-    if beta_button((skip_think_enabled and "关闭跳过狮鹫思考" or "【新增】开启跳过狮鹫思考").."###BetaThinkToggle") then
-        local ok,err=set_skip_think(not skip_think_enabled)
-        if not ok then skip_think_status=tostring(err) end
+    if not imgui.tree_node("狮鹫旅程 Redux###GriffinFlightBeta") then return end
+    imgui.text("Beta "..VERSION)
+    if imgui.tree_node("一般设置") then
+        if beta_button("一键生成狮鹫###BetaSpawn") then spawn() end
+        if beta_button("开始驾驶###BetaStart") then start_driver() end
+        if beta_button("结束驾驶###BetaStop") then menu.stop() end
+        if beta_button("删除狮鹫###BetaDelete") then menu.delete() end
+        if beta_button("让狮鹫听话###BetaSelectPlayerTarget") then menu.listen() end
+        for _,mode in ipairs(anchor_modes) do
+            local changed,value=menu.toggle(mode.label.."###BetaAnchor_"..mode.key,anchor_mode==mode.key)
+            if changed then change_anchor_mode(value and mode.key or (mode.key=="full" and "rider" or "full")) end
+        end
+        imgui.text(status)
+        if active then imgui.text("当前档位："..active.gear.."档") end
+        imgui.tree_pop()
     end
-    imgui.text(skip_think_status)
-    if type(imgui.checkbox)=="function" then
-        local styled=type(imgui.push_style_color)=="function" and type(imgui.pop_style_color)=="function"
-        if styled then imgui.push_style_color(0,0xffa8ecff) end
-        local changed,value=imgui.checkbox("【测试】拦截玩家坠落死亡请求",block_player_fall)
-        if styled then imgui.pop_style_color(1) end
+    if imgui.tree_node("飞行设置") then
+        menu.slider("steering_yaw","【本轮】左右转向灵敏度（最大角度）",1,85)
+        menu.slider("steering_pitch","【本轮】摇杆上下微调（最大角度）",1,80)
+        menu.slider("bumper_pitch","RB／LB 升降角度（最高59°）",1,59)
+        menu.slider("navigation_radius","【本轮】头部导航半径（米）",2,30)
+        menu.slider("navigation_height","【本轮】球面回中高度（米）",-settings.navigation_radius*0.9,settings.navigation_radius*0.9)
+        imgui.tree_pop()
+    end
+    if imgui.tree_node("镜头设置") then
+        local changed,value=menu.toggle("镜头跟随狮鹫头部",settings.head_camera)
+        if changed then settings.head_camera=value;change_camera_mode(value and "griffin" or "original");controls.save() end
+        changed,value=menu.toggle("3档转向时跟随镜头###BetaCameraYaw",settings.camera_auto_yaw)
         if changed then
-            block_player_fall=value
-            if active then install_fall_hook() end
-            event("fall_request_block_mode",value)
+            settings.camera_auto_yaw=value;yaw_state=nil
+            if value and install_yaw_hook() then settings.head_camera=true;change_camera_mode("griffin") end
+            controls.save()
         end
-    end
-    imgui.text("坠落死亡请求："..fall_hits.."；已拦截："..fall_blocked)
-    if fall_hook_tried and not fall_hook_installed then imgui.text(fall_hook_status) end
-    if type(imgui.checkbox) == "function" then
-        local styled = type(imgui.push_style_color)=="function" and type(imgui.pop_style_color)=="function"
-        if styled then imgui.push_style_color(0,0xffa8ecff) end
-        local changed, freeze = imgui.checkbox("【对照测试】冻结玩家 FSM", settings.freeze_player)
-        if styled then imgui.pop_style_color(1) end
-        if changed and type(freeze)=="boolean" then change_player_freeze(freeze) end
-    end
-    if beta_button((settings.freeze_player and "开始驾驶（固定玩家＋冻结 FSM＋玩家目标）" or "开始驾驶（固定玩家＋玩家目标）").."###BetaStart") then start_driver() end
-    if beta_button("结束驾驶／恢复玩家###BetaStop") then
-        operation = nil; queued = false
-        if type(run_once)~="function" then stop_driver("手动结束");imgui.tree_pop();return end
-        run_once(function() if alive then stop_driver("手动结束") end end)
-    end
-    if beta_button("删除本 Beta 生成的狮鹫###BetaDelete") then
-        operation = nil; queued = false
-        if type(run_once)~="function" then status="等待 NickCore 加载后再删除。";imgui.tree_pop();return end
-        run_once(function()
-            if not alive or not stop_driver("删除狮鹫") then return end
-            set_skip_think(false)
-            for _, r in ipairs(state.spawns) do r.delete_requested=true; delete_one(r) end
-        end)
-    end
-    imgui.text(status)
-    for _,mode in ipairs(anchor_modes) do
-        if mode.key==anchor_mode then imgui.text("当前摇杆位置层："..mode.label);break end
-    end
-    if active then
-        local labels={ground="等待起飞",taking_off="起飞",external="实验工具接管",hover="原地悬停",dash="冲刺",coast="惯性平移",fine="精细移动",landing="原地降落",control="切档中"}
-        imgui.text("当前档位："..active.gear.."档；请求模式："..(labels[active.mode] or active.mode).."；左摇杆左右转向／上下调整目标高度。")
-    end
-    imgui.text("3档 RB爬升／LB俯冲；1、2档 RB悬停／LB降落。")
-    if active and active.trace then
-        imgui.text("实际动作："..active.trace.action)
-        local probe = active.trace.target_probe
-        if probe and probe.target_is_player ~= nil then
-            imgui.text("狮鹫目标是玩家："..(probe.target_is_player and "是" or "否")..
-                "；玩家 FSM："..(probe.player_fsm_enabled and "运行" or "暂停"))
-        elseif probe and probe.error then imgui.text("目标探针读取失败；驾驶仍运行，详情已记录。") end
-    end
-    if imgui.tree_node("【新增】玩家追逐来源实验（互斥开关）") then
-        imgui.text("头顶骑乘：真实位置在前方导航，显示骨架固定头顶。其他选项为分层实验。")
-        if type(imgui.checkbox)=="function" then
-            for _,mode in ipairs(anchor_modes) do
-                local styled=type(imgui.push_style_color)=="function" and type(imgui.pop_style_color)=="function"
-                if styled then imgui.push_style_color(0,0xffa8ecff) end
-                local changed,value=imgui.checkbox(mode.label.."###BetaAnchor_"..mode.key,anchor_mode==mode.key)
-                if styled then imgui.pop_style_color(1) end
-                if changed then change_anchor_mode(value and mode.key or "full") end
-            end
-        end
-        imgui.text("分层实验：未选层跟随中立锚点；引擎可能联动各层。")
-        imgui.text("中立锚点、各层期望/实际位置自动记录；骨架保留自然姿势偏移。")
+        menu.slider("distance","相机距离偏移",0,80);menu.slider("fov","FOV",40,120)
+        menu.slider("camera_yaw_speed","【新增】镜头跟随速度（度／秒）",15,360)
+        menu.slider("camera_manual_threshold","【新增】右摇杆接管阈值",0.25,0.95)
         imgui.tree_pop()
     end
-    if imgui.tree_node("【新增】飞行目标坐标测试") then
-        if beta_button("【新增】记录目标坐标60秒（不改位置）###BetaRecordTarget") then target_test(false) end
-        if beta_button("【新增】切换目标到玩家（仅一次）###BetaSelectPlayerTarget") then target_test(false,true) end
-        if beta_button("【新增】飞行目标对准玩家（仅一次）###BetaSyncTargetOnce") then target_test(true) end
-        imgui.text("先切换玩家目标，再用工具请求冲刺；坐标同步作为独立测试。")
-        imgui.text(target_status)
+    if imgui.tree_node("座位预设") then
+        local names={};for _,preset in ipairs(settings.seat_presets) do names[#names+1]=preset.name end
+        if type(imgui.combo)=="function" then
+            local changed,index=imgui.combo("当前预设",settings.seat_index,names)
+            if changed then menu.apply_preset(index) end
+        else imgui.text("当前预设："..names[settings.seat_index]) end
+        if beta_button("下一预设###BetaPresetNext") then menu.apply_preset(settings.seat_index%#settings.seat_presets+1) end
+        menu.slider("rider_height","【新增】座位上下偏移",-5,15)
+        menu.slider("rider_forward","【新增】座位前后偏移",-15,15)
+        menu.slider("rider_side","【新增】座位左右偏移",-10,10)
+        if type(imgui.input_text)=="function" then
+            local changed,name=imgui.input_text("预设名称",menu.preset_name)
+            if changed and type(name)=="string" then menu.preset_name=name:sub(1,120) end
+        end
+        if beta_button("保存到当前预设###BetaPresetSave") then
+            local old=settings.seat_presets[settings.seat_index]
+            settings.seat_presets[settings.seat_index]=menu.snapshot(old.name,old);controls.save();status="座位预设已保存。"
+        end
+        if beta_button("另存为新预设###BetaPresetNew") then
+            local name=menu.preset_name:match("^%s*(.-)%s*$")
+            if name~="" then settings.seat_presets[#settings.seat_presets+1]=menu.snapshot(name);settings.seat_index=#settings.seat_presets;controls.save() end
+        end
+        if beta_button("重命名当前预设###BetaPresetRename") then
+            local name=menu.preset_name:match("^%s*(.-)%s*$")
+            if name~="" then settings.seat_presets[settings.seat_index].name=name;controls.save() end
+        end
+        if beta_button("删除当前预设###BetaPresetDelete") then
+            if #settings.seat_presets>1 then table.remove(settings.seat_presets,settings.seat_index);menu.apply_preset(math.min(settings.seat_index,#settings.seat_presets))
+            else status="至少保留一个座位预设。" end
+        end
+        imgui.text("调整实时预览；保存后写入预设。当前仅玩家座位。")
         imgui.tree_pop()
     end
-    if imgui.tree_node("【新增】头顶座位偏移（仅骑乘显示模式）") then
-        imgui.text("本轮复用仅Hip实验：保留自然姿势偏移，只更换Hip的锚点。")
-        if active and active.anchor_mode=="rider" then
-            imgui.text("座位基准："..(active.rider_head_name or "未找到Head，使用狮鹫根位置＋前3米／上4米"))
+    if imgui.tree_node("按键设置") then menu.bindings();imgui.tree_pop() end
+    if imgui.tree_node("DEBUG") then
+        if beta_button((skip_think_enabled and "关闭跳过狮鹫思考" or "开启跳过狮鹫思考").."###BetaThinkToggle") then set_skip_think(not skip_think_enabled) end
+        imgui.text(skip_think_status)
+        local changed,value=menu.toggle("【测试】拦截玩家坠落死亡请求",block_player_fall)
+        if changed then block_player_fall=value;if active then install_fall_hook() end;event("fall_request_block_mode",value) end
+        changed,value=menu.toggle("【对照测试】冻结玩家 FSM",settings.freeze_player)
+        if changed then change_player_freeze(value) end
+        changed,value=menu.toggle("【本轮】限制导航目标在头部球面",settings.sphere_navigation)
+        if changed then settings.sphere_navigation=value;controls.save() end
+        menu.slider("player_height","【新增】玩家相对高度（米）",-80,80)
+        menu.slider("player_distance","玩家与狮鹫距离",2,80)
+        for _,mode in ipairs({{key="original",label="恢复原镜头"},{key="griffin",label="跟随狮鹫头部"}}) do
+            changed,value=menu.toggle(mode.label.."###BetaCamera_"..mode.key,camera_mode==mode.key)
+            if changed then change_camera_mode(value and mode.key or "original") end
         end
-        if type(imgui.slider_float)=="function" then
-            for _,spec in ipairs({{key="rider_height",label="【新增】座位上下偏移",low=-5,high=15},
-                {key="rider_forward",label="【新增】座位前后偏移",low=-15,high=15},
-                {key="rider_side",label="【新增】座位左右偏移",low=-10,high=10}}) do
-                local changed,value=imgui.slider_float(spec.label,settings[spec.key],spec.low,spec.high)
-                if changed and finite(value) then
-                    settings[spec.key]=math.max(spec.low,math.min(spec.high,value));pcall(json.dump_file,settings_path,settings)
-                end
-            end
-        end
-        imgui.tree_pop()
-    end
-    if type(imgui.checkbox)=="function" then
-        local styled=type(imgui.push_style_color)=="function" and type(imgui.pop_style_color)=="function"
-        if styled then imgui.push_style_color(0,0xff40e8ff) end
-        local changed,value=imgui.checkbox("【新增】3档镜头跟随转向／升降###BetaCameraYaw",settings.camera_auto_yaw)
-        if styled then imgui.pop_style_color(1) end
-        if changed then
-            settings.camera_auto_yaw=value; yaw_state=nil
-            if value and install_yaw_hook() then change_camera_mode("griffin")
-            elseif not value then yaw_status="自动转向镜头：已关闭，恢复自由观察" end
-            pcall(json.dump_file,settings_path,settings)
-        end
-    end
-    if settings.camera_auto_yaw and type(imgui.slider_float)=="function" then
-        local changed,value=imgui.slider_float("【新增】镜头跟随速度（度／秒）",settings.camera_yaw_speed,15,360)
-        if changed and finite(value) then settings.camera_yaw_speed=math.max(15,math.min(360,value));pcall(json.dump_file,settings_path,settings) end
-        local pc,pv=imgui.slider_float("【新增】上下镜头跟随速度（度／秒）",settings.camera_pitch_speed,15,180)
-        if pc and finite(pv) then settings.camera_pitch_speed=math.max(15,math.min(180,pv));pcall(json.dump_file,settings_path,settings) end
-        local tc,tv=imgui.slider_float("【新增】右摇杆接管阈值",settings.camera_manual_threshold,0.25,0.95)
-        if tc and finite(tv) then settings.camera_manual_threshold=math.max(0.25,math.min(0.95,tv));pcall(json.dump_file,settings_path,settings) end
-        imgui.text("左摇杆回中立即停止跟随；右摇杆阈值以下叠加，以上接管。")
-    end
-    imgui.text(yaw_status)
-    if imgui.tree_node("【本轮】独立镜头测试") then
-        imgui.text("互斥选择；取消或结束驾驶恢复。默认原跟随，模式不跨重置保存。")
-        if type(imgui.checkbox)=="function" then
-            for _,mode in ipairs(camera_modes) do
-                local styled=type(imgui.push_style_color)=="function" and type(imgui.pop_style_color)=="function"
-                if styled then imgui.push_style_color(0,0xffa8ecff) end
-                local changed,value=imgui.checkbox(mode.label.."###BetaCamera_"..mode.key,camera_mode==mode.key)
-                if styled then imgui.pop_style_color(1) end
-                if changed then change_camera_mode(value and mode.key or "original") end
-            end
-        end
-        if type(imgui.slider_float)=="function" then
-            for _,spec in ipairs({{key="camera_x",label="【本轮】镜头偏移X"},
-                {key="camera_y",label="【本轮】镜头偏移Y"},{key="camera_z",label="【本轮】镜头偏移Z"}}) do
-                local changed,value=imgui.slider_float(spec.label,settings[spec.key],-80,80)
-                if changed and finite(value) then settings[spec.key]=math.max(-80,math.min(80,value));pcall(json.dump_file,settings_path,settings) end
-            end
-        end
-        imgui.text("滑条仅在偏移模式生效；跟随模式只更换镜头骨骼。")
-        imgui.text(camera_follow_status)
-        imgui.tree_pop()
-    end
-    if imgui.tree_node("【本轮】头部球面导航与转向") then
-        if type(imgui.checkbox)=="function" then
-            local styled=type(imgui.push_style_color)=="function" and type(imgui.pop_style_color)=="function"
-            if styled then imgui.push_style_color(0,0xffa8ecff) end
-            local changed,value=imgui.checkbox("【本轮】限制导航目标在头部球面",settings.sphere_navigation)
-            if styled then imgui.pop_style_color(1) end
-            if changed then settings.sphere_navigation=value;pcall(json.dump_file,settings_path,settings);event("sphere_navigation",value) end
-        end
-        if type(imgui.slider_float)=="function" then
-            for _,spec in ipairs({{key="navigation_radius",label="【本轮】头部导航半径（米）",low=2,high=30},
-                {key="navigation_height",label="【本轮】球面回中高度（米）",low=-settings.navigation_radius*0.9,high=settings.navigation_radius*0.9},
-                {key="steering_yaw",label="【本轮】左右转向灵敏度（最大角度）",low=1,high=85},
-                {key="steering_pitch",label="【本轮】摇杆上下微调（最大角度）",low=1,high=80},
-                {key="bumper_pitch",label="【新增】3档 RB／LB 升降角度",low=1,high=80}}) do
-                local changed,value=imgui.slider_float(spec.label,math.max(spec.low,math.min(spec.high,settings[spec.key])),spec.low,spec.high)
-                if changed and finite(value) then settings[spec.key]=math.max(spec.low,math.min(spec.high,value));pcall(json.dump_file,settings_path,settings) end
-            end
-        end
-        imgui.text("以头部为球心；回中高度沿球面抬升，不突破半径。")
-        imgui.text("回中高度调导航目标；可见模型用座位上下偏移。旧距离／高度仅旧模式生效。")
-        imgui.text("角度越大通常转向越强，实际转弯速度仍取决于飞行动作。")
-        imgui.tree_pop()
-    end
-    if imgui.tree_node("玩家距离与镜头设置") then
-        if type(imgui.slider_float)=="function" then
-            local changed,v = imgui.slider_float("【新增】玩家相对高度（米）",settings.player_height,-80,80)
-            if changed and finite(v) then settings.player_height=math.max(-80,math.min(80,v));pcall(json.dump_file,settings_path,settings) end
-            imgui.text("相对狮鹫根位置；基础高度再叠加摇杆上下偏移。")
-            changed,v = imgui.slider_float("玩家与狮鹫距离",settings.player_distance,2,80)
-            if changed and finite(v) then settings.player_distance=math.max(2,math.min(80,v));pcall(json.dump_file,settings_path,settings) end
-            changed,v = imgui.slider_float("相机距离偏移",settings.distance,0,80)
-            if changed and finite(v) then settings.distance=math.max(0,math.min(80,v));pcall(json.dump_file,settings_path,settings) end
-            changed,v = imgui.slider_float("FOV",settings.fov,40,120)
-            if changed and finite(v) then settings.fov=math.max(40,math.min(120,v));pcall(json.dump_file,settings_path,settings) end
-        end
+        imgui.text("坠落请求："..fall_hits.."；拦截："..fall_blocked)
+        imgui.text(yaw_status);imgui.text(camera_follow_status)
+        if active and active.trace then imgui.text("当前动作："..active.trace.action) end
+        imgui.text("LB／RB超过59°时曾出现黑屏；是否由过快坠落引起尚未确认。")
         imgui.tree_pop()
     end
     imgui.tree_pop()
