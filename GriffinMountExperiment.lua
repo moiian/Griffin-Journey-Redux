@@ -1,7 +1,7 @@
 -- Griffin Mount Experiment: stage 3 read-only flight observation.
 -- Requires the installed aaaNickCore.lua and _NickCore/EnemySpawner.lua.
 -- Keeps an explicit spawn return or user-confirmed instance; never selects by Character ID.
-local VERSION = "0.3.4-stage3-record"
+local VERSION = "0.3.5-stage3-test"
 local state = "Idle"
 local detail = "Ready for one ordinary Griffin request per script session."
 local shared = nil
@@ -46,6 +46,16 @@ local request_listener_key = "GriffinMountExperiment action observer"
 local request_listener_status = "Native request observer: not attached"
 local request_event_count = 0
 local request_last = {}
+local cross_phase = false
+local last_action_request = -math.huge
+local action_test_status = "尚未提交动作请求。"
+local test_actions = {
+    {key = "Test takeoff", label = "起飞", node = "Ch253TakeoffBackJump", phase = "ground"},
+    {key = "Test hover", label = "悬停", node = "HoverWait", phase = "air"},
+    {key = "Test forward", label = "悬停前移", node = "HoverForward", phase = "air"},
+    {key = "Test circle", label = "盘旋", node = "Ch253WrapAroundStartLoop", phase = "air"},
+    {key = "Test landing attack", label = "下冲落地攻击", node = "Ch253AirLandingPressStartLoop", phase = "air"}
+}
 flight_log.request_observer = {repeated_requests_omitted = 0, capacity_dropped = 0}
 
 local function game_time()
@@ -655,6 +665,66 @@ local function start_recording()
     log_event("recording_started", "60 gameplay seconds, at most 5 Hz; flight + action names + passive native requests")
 end
 
+local function queue_action_test(action)
+    if relation_pending or not shared or not shared.go or not shared.chara then return end
+    if game_time() - last_action_request < 3 then
+        action_test_status = "请等待至少3个游戏运行秒，再提交下一个动作。"
+        return
+    end
+    local expected, allow_cross = shared, cross_phase
+    relation_pending = true
+    action_test_status = "已排队：" .. action.label .. "。请关闭界面让游戏运行。"
+    run_once(function()
+        local called = false
+        local ok, err = pcall(function()
+            local core = dependency()
+            assert(core and core.properties.player == owner and shared == expected, "Instance context changed")
+            assert(core.properties.isPaused == false, "Gameplay paused")
+            assert(expected.go:get_Valid() and expected.chara:get_Valid(), "Bound instance invalid")
+            assert(expected.chara:get_CharaIDString() == "ch253000_00", "Not an ordinary Griffin")
+            assert(friendly and not aggro_conflict(), "Enable party Friend first")
+            for _, member in ipairs(party) do
+                assert(expected.chara:call("getBattleRelationshipTo(app.Character)", member) == friend_value
+                    and member:call("getBattleRelationshipTo(app.Character)", expected.chara) == friend_value,
+                    "Party relationship is not Friend in both directions")
+            end
+            local ctrl = expected.chara:call("get_FlightCtrl()")
+            assert(ctrl and ctrl:call("get_CachedCharacter()") == expected.chara, "Flight controller binding mismatch")
+            local flying = expected.chara:call("get_IsFlight()")
+            local grounded = expected.chara:call("get_IsGround()")
+            if not allow_cross then
+                assert(action.phase == "ground" and grounded and not flying or action.phase == "air" and flying,
+                    "Phase mismatch; enable cross-phase testing to intentionally bypass this check")
+            end
+            local manager = expected.chara:call("get_ActionManager()")
+            assert(manager and manager:call("get_GameObject()") == expected.go, "ActionManager binding mismatch")
+            local method = "requestActionCore(app.ActionManager.Priority, System.String, System.UInt32)"
+            assert(sdk.find_type_definition("app.ActionManager"):get_method(method), "Request method unavailable")
+            assert(#flight_log.samples < 1000, "Sample capacity full; use a fresh script session and rebind")
+            if not recording then start_recording() end
+            assert(#flight_log.events < 490, "Event capacity nearly full; use a fresh script session")
+            log_event("manual_action_attempt", action.node)
+            flight_log.events[#flight_log.events].request = {
+                node = action.node, layer = 0, priority = 10, cross_phase = allow_cross,
+                is_flight_before = flying, is_ground_before = grounded,
+                character_address = tostring(expected.chara:get_address()), target_origin = target_origin
+            }
+            assert(flush_flight_log(), "Could not save pre-request log; no native request sent")
+            last_action_request = game_time()
+            called = true
+            -- One observed request combination, no retry or forced completion.
+            manager:call(method, 10, action.node, 0)
+            action_test_status = "已提交一次：" .. action.label .. "。接口返回不代表动作执行成功。"
+            log_event("manual_action_returned", action.node)
+        end)
+        if not ok then
+            action_test_status = (called and "请求调用出现 Lua 错误：" or "未提交动作：") .. tostring(err)
+            log_event(called and "manual_action_error" or "manual_action_blocked", action_test_status)
+        end
+        relation_pending = false
+    end)
+end
+
 re.on_script_reset(function()
     recording = false
     if request_listener_table and request_listener_table[request_listener_key] == request_listener_fn then
@@ -685,9 +755,13 @@ local button_labels = {
     ["Clear ONLY party/Griffin hate (once)"] = "清除双方仇恨（一次）",
     ["Unbind THIS Griffin (no despawn)"] = "解除绑定（不删除狮鹫）",
  }
+for _, action in ipairs(test_actions) do
+    button_labels[action.key] = "【本轮测试】" .. action.label .. "（一次）"
+end
+button_labels["Toggle cross phase"] = "切换跨阶段测试（允许地面直接请求空中动作）"
 local function ui_button(key)
     local label = button_labels[key] or key
-    local highlight = label:find("【本轮】", 1, true) ~= nil
+    local highlight = label:find("【本轮", 1, true) ~= nil
     local styled = highlight and type(imgui.push_style_color) == "function" and type(imgui.pop_style_color) == "function"
     if styled then
         imgui.push_style_color(21, 0xff98652b) -- ImGuiCol.Button, packed ABGR
@@ -701,7 +775,7 @@ end
 re.on_draw_ui(function()
     if not imgui.tree_node("狮鹫坐骑实验 - 阶段3###Griffin Mount Experiment - Stage 3 Observe") then return end
     imgui.text("版本：" .. VERSION)
-    imgui.text("本轮：绑定现有狮鹫 → 设为友方 → 开始完整记录")
+    imgui.text("本轮：绑定狮鹫 → 设为友方 → 单次动作测试（自动记录）")
     imgui.text("录制会自动包含动作名和原生请求，不必另开探针。")
     if not dependency() then imgui.text("等待 NickCore 加载完成。") end
     imgui.text("绑定来源：" .. (target_origin == "selected" and "现有狮鹫" or target_origin == "spawned" and "本脚本生成" or "尚未绑定"))
@@ -726,6 +800,20 @@ re.on_draw_ui(function()
         if recording and ui_button("Stop flight recording + flush log") then
             recording = false
             log_event("recording_stopped", "Manual stop")
+        end
+        if imgui.tree_node("【本轮】动作测试（单次请求）") then
+            imgui.text("每次只点一个动作，关闭界面观察；至少间隔3秒。")
+            imgui.text("跨阶段测试：" .. (cross_phase and "已开启" or "关闭（按地面/空中检查）"))
+            if ui_button("Toggle cross phase") then
+                cross_phase = not cross_phase
+                log_event("cross_phase_mode", tostring(cross_phase))
+            end
+            for _, action in ipairs(test_actions) do
+                if ui_button(action.key) then queue_action_test(action) end
+            end
+            imgui.text("落地按钮是已捕获的下冲攻击，不是平稳降落。")
+            imgui.text(action_test_status)
+            imgui.tree_pop()
         end
     end
     imgui.text("录制：" .. (recording and "进行中（60秒后自动保存）" or "未在录制") .. " | 样本：" .. #flight_log.samples .. " | 原生请求：" .. request_event_count)
