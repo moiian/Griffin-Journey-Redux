@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.10. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.11. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.10-beta"
+local VERSION = "0.1.11-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -189,6 +189,22 @@ local function close_position(a,b)
     return math.abs(a.x-b.x)+math.abs(a.y-b.y)+math.abs(a.z-b.z)<0.001
 end
 local function restore_bone(d)
+    -- Joint world writes may persist independently of the actor matrix while FSM is frozen.
+    -- Reattach from the captured actor-relative pose, never from a stale local/world cache.
+    if d.rider_pose and d.rider_touched and owned_player(d,false) then
+        local actor=vector(d.transform:call("get_Position()"))
+        for _,a in ipairs(d.rider_pose.roots) do
+            if a.joint:get_Valid() then
+                a.joint:call("set_Position(via.vec3)",Vector3f.new(actor.x+a.offset.x,actor.y+a.offset.y,actor.z+a.offset.z))
+            end
+        end
+        local h=d.rider_pose.hip
+        if h and h.joint:get_Valid() then
+            h.joint:call("set_Position(via.vec3)",Vector3f.new(actor.x+h.offset.x,actor.y+h.offset.y,actor.z+h.offset.z))
+        end
+        d.bones_applied=nil
+        return
+    end
     local items=d.bones_applied
     if not items then return end
     if not owned_player(d,false) then d.bones_applied=nil;return end
@@ -234,8 +250,22 @@ local function discover_joints(d)
 end
 local function prepare_rider(d,key)
     discover_joints(d)
+    assert(d.display_roots and #d.display_roots>0,"玩家骨架根不可用，未开启骑乘显示")
     if key=="rider" then assert(d.hip_joint and d.hip_joint:get_Valid(),"玩家Hip骨骼不可用，未开启骑乘显示")
     else assert(d.display_roots and #d.display_roots>0,"没有独立骨架根，未开启旧相机偏移方式") end
+    if not d.rider_pose then
+        -- Use skeleton-internal differences: an old world-pinned root can already be
+        -- far from the actor when this version starts. That distance is not a pose.
+        local root=d.root_joint or d.display_roots[1]
+        local reference=vector(root:call("get_Position()"))
+        local function pose(joint)
+            local p=vector(joint:call("get_Position()"))
+            return {joint=joint,offset={x=p.x-reference.x,y=p.y-reference.y,z=p.z-reference.z}}
+        end
+        local roots={}
+        for _,joint in ipairs(d.display_roots) do roots[#roots+1]=pose(joint) end
+        d.rider_pose={roots=roots,hip=d.hip_joint and pose(d.hip_joint) or nil}
+    end
     local ch=d.spawn.result.chara
     local tr=ch:call("get_Transform()")
     assert(tr,"Griffin Transform unavailable")
@@ -379,6 +409,7 @@ stop_driver = function(reason)
             if owned_player(d, true) then
                 d.transform:call("set_UniversalPosition(via.Position)", d.original_position)
                 sync_player(d)
+                restore_bone(d) -- world-pinned skeleton must follow the restored actor too
             end
             d.moved = false
         end)
@@ -770,7 +801,14 @@ end
 -- Visual-only late Hip override. Navigation Transform is never moved to the seat.
 local function renew_rider_visual(phase)
     local d,c=active,core()
-    if not alive or not d or (d.anchor_mode~="rider" and d.anchor_mode~="rider_root") or not d.heading or not c or c.properties.isPaused then return end
+    if not alive or not d or not d.heading or not c or c.properties.isPaused then return end
+    if d.anchor_mode~="rider" and d.anchor_mode~="rider_root" then
+        if d.anchor_mode=="full" and d.rider_touched then
+            local ok,err=pcall(restore_bone,d)
+            if not ok then stop_driver("显示骨架恢复失败");failed("显示骨架恢复失败",err) end
+        end
+        return
+    end
     local ok,err=pcall(function()
         local ch=validate_spawn(d.spawn)
         assert(owned_player(d,true) and player_fsm(d.player)==d.fsm,"Player binding changed")
@@ -790,28 +828,24 @@ local function renew_rider_visual(phase)
         local fx,fz=d.heading.x,d.heading.z
         local seat={x=base.x+fx*settings.rider_forward+fz*settings.rider_side,
             y=base.y+settings.rider_height,z=base.z+fz*settings.rider_forward-fx*settings.rider_side}
-        local actor=vector(d.transform:call("get_Position()"))
         local items={}
-        if d.anchor_mode=="rider" then
-            items[1]={joint=hip,key="hip",original=vector(hip:call("get_Position()")),
-                local_original=vector(hip:call("get_LocalPosition()")),written=seat}
-        else
-            for i,joint in ipairs(d.display_roots) do
-                assert(joint:get_Valid(),"Player skeleton root unavailable")
-                local original=vector(joint:call("get_Position()"))
-                items[#items+1]={joint=joint,key="display_root_"..i,original=original,
-                    local_original=vector(joint:call("get_LocalPosition()")),
-                    written={x=original.x+seat.x-actor.x,y=original.y+seat.y-actor.y,z=original.z+seat.z-actor.z}}
-            end
+        local hip_offset=d.rider_pose.hip and d.rider_pose.hip.offset or {x=0,y=0,z=0}
+        local shift=d.anchor_mode=="rider" and hip_offset or {x=0,y=0,z=0}
+        for i,a in ipairs(d.rider_pose.roots) do
+            assert(a.joint:get_Valid(),"Player skeleton root unavailable")
+            items[#items+1]={joint=a.joint,key="display_root_"..i,
+                written={x=seat.x+a.offset.x-shift.x,y=seat.y+a.offset.y-shift.y,z=seat.z+a.offset.z-shift.z}}
         end
+        if d.anchor_mode=="rider" then items[#items+1]={joint=hip,key="hip",written=seat} end
+        d.rider_touched=true
         d.bones_applied=items
         for _,a in ipairs(items) do
             a.joint:call("set_Position(via.vec3)",Vector3f.new(a.written.x,a.written.y,a.written.z))
-            a.local_written=vector(a.joint:call("get_LocalPosition()"))
             if d.anchor_plan then d.anchor_plan[a.key]=a.written end
         end
         d.rider_trace={phase=phase,mode=d.anchor_mode,head_joint=d.rider_head_name,fallback=fallback,head=base,seat=seat,
             hip=hip and hip:get_Valid() and vector(hip:call("get_Position()")) or nil,
+            root=vector(d.rider_pose.roots[1].joint:call("get_Position()")),
             transform=vector(d.transform:call("get_Position()")),root_count=#items}
 
         if d.trace then d.trace.rider=d.rider_trace end
@@ -1136,7 +1170,7 @@ re.on_draw_ui(function()
                 if styled then imgui.push_style_color(0,0xffa8ecff) end
                 local changed,value=imgui.checkbox(mode.label.."###BetaAnchor_"..mode.key,anchor_mode==mode.key)
                 if styled then imgui.pop_style_color(1) end
-                if changed and value then change_anchor_mode(mode.key) end
+                if changed then change_anchor_mode(value and mode.key or "full") end
             end
         end
         imgui.text("分层实验：未选层跟随中立锚点；引擎可能联动各层。")
