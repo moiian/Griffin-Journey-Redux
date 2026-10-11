@@ -4,9 +4,9 @@ Dragon’s Dogma 2狮鹫驾驶实验。明确依赖已安装的NickCore EnemySpa
 
 仓库仅追踪两个Lua脚本和版本/测试说明；LOG、设置JSON、完整游戏转储、第三方参考MOD不上传。
 
-- main：Beta0.1.15球面回中高度已实机通过；保留Hip和头部镜头。
-- 固定回档标签：beta-v0.1.12-hip-verified、beta-v0.1.13-head-camera-verified、beta-v0.1.14-sphere-verified、beta-v0.1.15-neutral-height-verified。
-- 当前实验分支experiment/flight-gears：Beta0.1.16分档按键，离线回归通过，待实机。
+- main：Beta0.1.16分档操控已实机通过，作为后续打磨基线；保留Hip和头部镜头。
+- 固定回档标签：beta-v0.1.12-hip-verified、beta-v0.1.13-head-camera-verified、beta-v0.1.14-sphere-verified、beta-v0.1.15-neutral-height-verified、beta-v0.1.16-flight-controls-verified。
+- experiment/flight-gears：Beta0.1.16分档按键已实测通过并合并main。
 - 阶段三工具保持原文件，可通过原有桥接接管Beta当前实例。
 
 脚本部署到游戏reframework/autorun。当前操控和测试步骤见TESTING.md，版本变化见VERSION_HISTORY.md。
