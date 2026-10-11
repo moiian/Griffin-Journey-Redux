@@ -1,7 +1,7 @@
 -- Griffin Mount Experiment: stage 3 player-as-target flight control experiment.
 -- Requires the installed aaaNickCore.lua and _NickCore/EnemySpawner.lua.
 -- Keeps an explicit spawn return or user-confirmed instance; never selects by Character ID.
-local VERSION = "0.3.14-stage3-unlimited"
+local VERSION = "0.3.15-stage3-gears"
 local state = "Idle"
 local detail = "Ready for one ordinary Griffin request per script session."
 local shared = nil
@@ -63,6 +63,10 @@ local lure_stick_enabled = false
 local lure_input = {x=0, y=0, raw_x=0, raw_y=0}
 local lure_input_error = nil
 local lure_invert_y = false
+local pilot = nil
+local pilot_status = "四档驾驶未开启；先固定玩家，再开启四档驾驶。"
+local pilot_gear = 0
+local pilot_shoulder_masks = nil
 local stop_lure
 local restore_lure_camera
 local camera_settings = {enabled=true,distance=30,fov=90}
@@ -125,12 +129,12 @@ local test_actions = {
     {key = "Test candidate Ch253FlightTurnDashAttackAirToLandL", label = "飞行左转攻击转落地", node = "Ch253FlightTurnDashAttackAirToLandL", phase = "air", candidate_group = "战斗转向（后测；包含攻击）"},
     {key = "Test candidate Ch253FlightTurnDashAttackAirToLandR", label = "飞行右转攻击转落地", node = "Ch253FlightTurnDashAttackAirToLandR", phase = "air", candidate_group = "战斗转向（后测；包含攻击）"},
     {key = "Test hover turn target", label = "悬停朝目标转向", node = "HoverTurnTarget", phase = "air", slow_probe = true},
-    {key = "Test hover homing height", label = "目标高度悬停（地面原处悬停）", node = "Ch253HoverWaitHoHomingHeight", phase = "air", slow_probe = true},
+    {key = "Test hover homing height", label = "原位置悬停（0档）", node = "Ch253HoverWaitHoHomingHeight", phase = "air", slow_probe = true},
     {key = "Test hover backward", label = "悬停后移", node = "HoverBackward", phase = "air", slow_probe = true},
     {key = "Test takeoff", label = "起飞", node = "Ch253TakeoffBackJump", phase = "ground"},
     {key = "Test hover", label = "悬停（地面升至固定高度）", node = "HoverWait", phase = "air"},
-    {key = "Test forward", label = "悬停前移（慢速候选）", node = "HoverForward", phase = "air"},
-    {key = "Test circle", label = "目标导向飞行（快速候选）", node = "Ch253WrapAroundStartLoop", phase = "air"},
+    {key = "Test forward", label = "悬停前移（2档）", node = "HoverForward", phase = "air"},
+    {key = "Test circle", label = "目标导向飞行（3档）", node = "Ch253WrapAroundStartLoop", phase = "air"},
     {key = "Test landing attack", label = "下冲落地攻击", node = "Ch253AirLandingPressStartLoop", phase = "air"}
 }
 flight_log.request_observer = {repeated_requests_omitted = 0, capacity_dropped = 0}
@@ -628,6 +632,11 @@ local function queue_flight_snapshot(source)
             values = {}, errors = {}, action_probe_enabled = action_probe, target_origin = target_origin,
             target_probe_enabled = action_probe and target_probe
         }
+        if pilot then
+            sample.gear_control={gear=pilot.gear,desired_node=pilot.desired_node,last_requested_node=pilot.last_node,
+                height_offset=pilot.height,vertical_input=lure_input.vertical or 0,direction_x=pilot.direction_x,
+                direction_y=pilot.direction_y,pending=pilot.pending}
+        end
         if lure then
             sample.observation_camera={enabled=camera_settings.enabled,distance=camera_settings.distance,
                 fov=camera_settings.fov,active=camera_state~=nil,suspended=camera_suspended}
@@ -829,17 +838,22 @@ local function start_recording()
     log_event("recording_started", "60 gameplay seconds, at most 5 Hz; flight + action names + passive native requests")
 end
 
-local function queue_action_test(action)
+local function queue_action_test(action, pilot_token)
+    if pilot and not pilot_token then action_test_status="请先关闭四档驾驶，再用单次动作按钮。";return end
     if lure_restore_pending then action_test_status = "请先恢复玩家位置。"; return end
     if relation_pending or not shared or not shared.go or not shared.chara then return end
-    if game_time() - last_action_request < 3 then
+    if game_time() - last_action_request < (pilot_token and 0.35 or 3) then
         action_test_status = "请等待至少3个游戏运行秒，再提交下一个动作。"
         return
     end
-    local expected, allow_cross = shared, cross_phase
+    local expected, allow_cross = shared, pilot_token ~= nil or cross_phase
     relation_pending = true
     action_test_status = "已排队：" .. action.label .. "。请关闭界面让游戏运行。"
+    if pilot_token then pilot_token.pending=true end
     run_once(function()
+        if pilot_token and (pilot~=pilot_token or not lure or pilot_token.desired_node~=action.node) then
+            pilot_token.pending=false;relation_pending=false;return
+        end
         local called = false
         local ok, err = pcall(function()
             local core = dependency()
@@ -865,14 +879,15 @@ local function queue_action_test(action)
             assert(manager and manager:call("get_GameObject()") == expected.go, "ActionManager binding mismatch")
             local method = "requestActionCore(app.ActionManager.Priority, System.String, System.UInt32)"
             assert(sdk.find_type_definition("app.ActionManager"):get_method(method), "Request method unavailable")
-            assert(#flight_log.samples < 1000, "Sample capacity full; use a fresh script session and rebind")
-            if not recording then start_recording() end
+            assert(pilot_token or #flight_log.samples < 1000, "Sample capacity full; use a fresh script session and rebind")
+            if not recording and not pilot_token then start_recording() end
             assert(#flight_log.events < 490, "Event capacity nearly full; use a fresh script session")
             log_event("manual_action_attempt", action.node)
             flight_log.events[#flight_log.events].request = {
                 node = action.node, layer = 0, priority = 10, cross_phase = allow_cross,
                 is_flight_before = flying, is_ground_before = grounded,
-                candidate_group = action.candidate_group, source = action.candidate_group and "dump_enum_unverified" or "observed_native_request",
+                candidate_group = action.candidate_group, source = pilot_token and "user_verified_gear_control" or action.candidate_group and "dump_enum_unverified" or "observed_native_request",
+                pilot_gear = pilot_token and pilot_token.gear or nil,
                 character_address = tostring(expected.chara:get_address()), target_origin = target_origin
             }
             assert(flush_flight_log(), "Could not save pre-request log; no native request sent")
@@ -882,10 +897,19 @@ local function queue_action_test(action)
             manager:call(method, 10, action.node, 0)
             action_test_status = "已提交一次：" .. action.label .. "。接口返回不代表动作执行成功。"
             log_event("manual_action_returned", action.node)
+            if pilot_token then pilot_token.last_node=action.node end
         end)
         if not ok then
             action_test_status = (called and "请求调用出现 Lua 错误：" or "未提交动作：") .. tostring(err)
             log_event(called and "manual_action_error" or "manual_action_blocked", action_test_status)
+        end
+        if pilot_token then
+            pilot_token.pending=false
+            if not ok and pilot==pilot_token then
+                pilot=nil;lure_stick_enabled=false
+                pilot_status="四档驾驶已停用："..tostring(err).."；玩家仍固定，可手动停止。"
+                log_event("gear_control_error",pilot_status)
+            end
         end
         relation_pending = false
     end)
@@ -1001,6 +1025,7 @@ stop_lure = function(reason)
     local d = lure or lure_restore_pending
     if not d then return end
     if restore_lure_camera then restore_lure_camera() end
+    pilot=nil;pilot_status="四档驾驶已随固定停止。"
     lure = nil -- stop further driver writes before trying restoration
     lure_stick_enabled = false
     lure_input = {x=0,y=0,raw_x=0,raw_y=0}
@@ -1048,7 +1073,26 @@ local function read_lure_stick()
     end
     if lure_invert_y then y=-y end
     x=-x -- 0.3.10 live test confirmed horizontal control was reversed; keep Y unchanged.
-    return {x=x,y=y,raw_x=raw_x,raw_y=raw_y}
+    local vertical=0
+    if pilot then
+        if not pilot_shoulder_masks then
+            local enum=sdk.find_type_definition("via.hid.GamePadButton")
+            local rb=enum and enum:get_field("RTrigTop")
+            local lb=enum and enum:get_field("LTrigTop")
+            assert(rb and lb,"Shoulder button enum unavailable")
+            local r,l=rb:get_data(nil),lb:get_data(nil)
+            assert(type(r)=="number" and r>0 and r==math.floor(r)
+                and type(l)=="number" and l>0 and l==math.floor(l) and r~=l,"Invalid shoulder masks")
+            pilot_shoulder_masks={rb=r,lb=l}
+        end
+        local bits=device:call("get_Button")
+        assert(type(bits)=="number" and bits==math.floor(bits),"Shoulder buttons unavailable")
+        local masks=pilot_shoulder_masks
+        local rb=(bits & masks.rb)==masks.rb
+        local lb=(bits & masks.lb)==masks.lb
+        vertical=(rb and 1 or 0)-(lb and 1 or 0)
+    end
+    return {x=x,y=y,raw_x=raw_x,raw_y=raw_y,vertical=vertical}
 end
 
 local function validate_lure_griffin(d)
@@ -1124,6 +1168,60 @@ local function start_lure_test(unlimited)
     end)
 end
 
+local hold_node="Ch253HoverWaitHoHomingHeight"
+local function gear_target(d,position,fx,fz,x,y)
+    local p=pilot
+    local now=game_time()
+    p.last_tick=now
+    if (p.gear==1 or p.gear==2) and lure_invert_y then y=-y end -- Legacy inversion applies to altitude, not planar forward/back.
+    local vertical=lure_input.vertical or 0
+    local moving=x~=0 or y~=0
+    local node=hold_node
+    local point={x=position.x+fx*20,y=position.y,z=position.z+fz*20}
+    if p.gear==1 then
+        p.height=vertical*10
+        local magnitude=math.sqrt(x*x+y*y)
+        if moving then
+            p.direction_x=x/magnitude;p.direction_y=y/magnitude
+        end
+        local side,front=p.direction_x,p.direction_y
+        point={x=position.x+(fx*front+fz*side)*20,y=position.y+p.height,
+            z=position.z+(fz*front-fx*side)*20}
+        if not moving and vertical~=0 then point.x=position.x;point.z=position.z end
+        if moving or vertical~=0 then node="Ch253AirHoverMoveToTarget" end
+    elseif p.gear==2 and moving then
+        if math.abs(x)>math.abs(y) then node=x<0 and "HoverLateralR" or "HoverLateralL" -- X was flipped for world target placement; native Right/Left use stick intent.
+        else node=y>0 and "HoverForward" or "HoverBackward" end
+    elseif p.gear==3 then
+        point={x=position.x+fx*20+fz*x*12,y=position.y+y*10,z=position.z+fz*20-fx*x*12}
+        node="Ch253WrapAroundStartLoop"
+    end
+    p.desired_node=node
+    -- Submit only on a changed intention, never on every frame or by replaying an ended action.
+    if not p.pending and node~=p.last_node and not relation_pending and now-last_action_request>=0.35 then
+        queue_action_test({node=node,label="四档驾驶："..p.gear.."档 / "..node,phase="air"},p)
+    end
+    if pilot==p and p.stop_requested and not p.pending and p.last_node==hold_node then
+        pilot=nil;lure_stick_enabled=false;lure_input={x=0,y=0,raw_x=0,raw_y=0}
+        pilot_status="四档驾驶已关闭并提交原位悬停；玩家仍固定。"
+        log_event("gear_control_disabled","Hold requested; player anchor remains active")
+    elseif pilot==p then
+        pilot_status=p.stop_requested and "正在关闭四档驾驶，等待提交原位悬停。"
+            or "四档驾驶："..p.gear.."档；当前意图："..node
+    end
+    return point
+end
+
+local function enable_gear_control()
+    if pilot or not lure or lure_restore_pending or relation_pending then return end
+    pilot={gear=pilot_gear,height=0,direction_x=0,direction_y=1,last_tick=game_time(),pending=false}
+    local ok,value=pcall(read_lure_stick)
+    if not ok then pilot=nil;pilot_status="未开启四档驾驶："..tostring(value);log_event("gear_control_start_blocked",pilot_status);return end
+    lure_input=value;lure_input_error=nil;lure_stick_enabled=true
+    log_event("gear_control_enabled","Explicit enable; gear="..pilot_gear.."; change-only requests; 0.35s minimum")
+    pilot_status="四档驾驶已开启："..pilot_gear.."档；建议先在0档确认停留。"
+end
+
 local function tick_lure_test()
     local d=lure
     if not d then return end
@@ -1144,6 +1242,7 @@ local function tick_lure_test()
         local x,y=0,0
         if lure_stick_enabled then x,y=lure_input.x,lure_input.y end
         local point={x=position.x+fx*20+fz*x*12,y=position.y+y*10,z=position.z+fz*20-fx*x*12}
+        if pilot then point=gear_target(d,position,fx,fz,x,y) end
         if not d.moved then
             log_event("stick_lure_first_write", "Player Transform + position context + controller sync")
             flight_log.events[#flight_log.events].target=point
@@ -1267,6 +1366,12 @@ end
 button_labels["Toggle cross phase"] = "切换跨阶段测试（允许地面直接请求空中动作）"
 button_labels["Yaw left"] = "【本轮转向】左转（一次）"
 button_labels["Yaw right"] = "【本轮转向】右转（一次）"
+button_labels["Enable gear control"]="【本轮新增】开启四档驾驶"
+button_labels["Disable gear control"]="关闭四档驾驶并请求原位悬停（保持玩家固定）"
+button_labels["Gear 0"]="【本轮新增】0档：原位悬停"
+button_labels["Gear 1"]="【本轮新增】1档：精细调整"
+button_labels["Gear 2"]="【本轮新增】2档：四向平移"
+button_labels["Gear 3"]="【本轮新增】3档：快速追踪"
 button_labels["Start stick lure"] = "固定玩家到狮鹫前方（60秒）"
 button_labels["Start unlimited stick lure"] = "【本轮新增】固定玩家到狮鹫前方（不限时）"
 button_labels["Enable lure stick"] = "【本轮】2. 开启摇杆控制玩家方位"
@@ -1288,7 +1393,7 @@ end
 re.on_draw_ui(function()
     if not imgui.tree_node("狮鹫坐骑实验 - 阶段3###Griffin Mount Experiment - Stage 3 Observe") then return end
     imgui.text("版本：" .. VERSION)
-    imgui.text("本轮：不限时固定玩家；菜单打开时也可用左摇杆调整方位")
+    imgui.text("本轮：四档驾驶；0档停留／1档精调／2档平移／3档快速")
     imgui.text("录制会自动包含动作名和原生请求，不必另开探针。")
     if not dependency() then imgui.text("等待 NickCore 加载完成。") end
     imgui.text("绑定来源：" .. (target_origin == "selected" and "现有狮鹫" or target_origin == "spawned" and "本脚本生成" or "尚未绑定"))
@@ -1346,8 +1451,32 @@ re.on_draw_ui(function()
             imgui.tree_pop()
         end
     end
-    if shared and shared.go and shared.chara and imgui.tree_node("【本轮】左摇杆驾驶（玩家作为前方目标）") then
-        imgui.text("1.固定玩家 → 2.开启摇杆 → 再点目标导向飞行。")
+    if shared and shared.go and shared.chara then
+        imgui.text("【本轮新增】四档驾驶：先在下方固定玩家，再开启。")
+        if lure and not pilot and ui_button("Enable gear control") then enable_gear_control() end
+        if pilot and ui_button("Disable gear control") then
+            pilot.stop_requested=true;pilot.gear=0;pilot.desired_node=hold_node
+            lure_stick_enabled=false;lure_input={x=0,y=0,raw_x=0,raw_y=0}
+            pilot_status="正在关闭四档驾驶；提交原位悬停后保留玩家固定。"
+            log_event("gear_control_disable_requested","Cancel queued movement; request hold once")
+        end
+        for gear=0,3 do
+            if ui_button("Gear "..gear) then
+                pilot_gear=gear
+                if pilot and not pilot.stop_requested then
+                    pilot.gear=gear;pilot.desired_node=nil;pilot.height=0
+                    pilot.direction_x=0;pilot.direction_y=1
+                    log_event("gear_changed",tostring(gear))
+                end
+            end
+        end
+        imgui.text(pilot_status)
+        imgui.text("1档：左摇杆指定水平四周目标；RB升／LB降，松杆且松肩键则原位悬停。")
+        imgui.text("2档：左摇杆四向平移，松杆悬停；3档沿用原左右／上下追踪操作。")
+        imgui.text("动作意图变化时请求，最短间隔0.35秒；单次动作按钮需先关闭四档驾驶。")
+    end
+    if shared and shared.go and shared.chara and imgui.tree_node("玩家固定／镜头（四档驾驶共用）") then
+        imgui.text("四档驾驶只需：固定玩家 → 开启四档驾驶；它会自动启用摇杆。")
         imgui.text("不限时固定需手动停止；记录仍为每轮60秒，结束不解除不限时固定。")
         if type(imgui.checkbox)=="function" then
             local changed,value=imgui.checkbox("【本轮】启用观察镜头（固定期间）",camera_settings.enabled)
@@ -1369,7 +1498,7 @@ re.on_draw_ui(function()
             if ui_button("Start unlimited stick lure") then start_lure_test(true) end
             if ui_button("Start stick lure") then start_lure_test(false) end
         end
-        if lure and not lure_stick_enabled and ui_button("Enable lure stick") then
+        if lure and not pilot and not lure_stick_enabled and ui_button("Enable lure stick") then
             local ok,value=pcall(read_lure_stick)
             if ok then
                 lure_stick_enabled=true;lure_input=value;lure_input_error=nil
@@ -1379,7 +1508,7 @@ re.on_draw_ui(function()
                 log_event("stick_lure_input_error",lure_status)
             end
         end
-        if lure and lure_stick_enabled and ui_button("Disable lure stick") then
+        if lure and not pilot and lure_stick_enabled and ui_button("Disable lure stick") then
             lure_stick_enabled=false;lure_input={x=0,y=0,raw_x=0,raw_y=0};lure_input_error=nil
             log_event("stick_lure_input_disabled","Keep anchor; return to straight ahead")
         end
