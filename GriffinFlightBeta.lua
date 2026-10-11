@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.0. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.1. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.0-beta"
+local VERSION = "0.1.1-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -13,7 +13,7 @@ local status = "先生成狮鹫，再开始驾驶。"
 local hooks_ready, hooks_tried, friend_value = false, false, nil
 local masks = nil
 local input = {x = 0, y = 0, buttons = 0}
-local settings = {distance = 30, fov = 90}
+local settings = {distance = 30, fov = 90, player_distance = 20}
 local settings_path = "GriffinFlightBeta_Settings.json"
 local log_id = os.date("!%Y%m%dT%H%M%SZ") .. "_" .. math.floor(os.clock() * 1000)
 local part, last_flush, next_sample = 1, -math.huge, 0
@@ -61,6 +61,7 @@ end
 if type(json.load_file) == "function" then
     local ok, saved = pcall(json.load_file, settings_path)
     if ok and type(saved) == "table" then
+        if finite(saved.player_distance) then settings.player_distance = math.max(2, math.min(80, saved.player_distance)) end
         if finite(saved.distance) then settings.distance = math.max(0, math.min(80, saved.distance)) end
         if finite(saved.fov) then settings.fov = math.max(40, math.min(120, saved.fov)) end
     end
@@ -251,7 +252,7 @@ local function dispatch(d)
             manager:call("requestActionCore(app.ActionManager.Priority, System.String, System.UInt32)", 10, intent.node, 0)
             d.mode = intent.mode
             d.intent = nil
-            if d.mode == "taking_off" then d.takeoff_at = now(); d.saw_takeoff = false end
+            if d.mode == "taking_off" then d.takeoff_at = now(); d.saw_takeoff = false; d.auto_hover = intent.auto_hover end
             event("action_returned", intent.node)
         end)
         d.pending = false
@@ -259,6 +260,8 @@ local function dispatch(d)
     end)
 end
 local function start_driver()
+    local experiment = rawget(_G, "GriffinMountExperimentControl")
+    if experiment and experiment.is_driving() then status = "请先结束实验工具的玩家固定。"; return end
     if active or state.recovery or queued then return end
     if not core() then status = "等待 NickCore 加载。"; return end
     local r = state.spawns[#state.spawns]
@@ -299,8 +302,8 @@ local function start_driver()
             if r.result.chara:call("get_IsFlight()") then
                 set_intent(d, "Ch253HoverWaitHoHomingHeight", "hover")
             end
-            status = "驾驶中：A 起飞，RT 冲刺，LT 悬停。"
-            event("driver_started", {ahead = 20, lateral = 12, vertical = 10})
+            status = "驾驶中：A 起飞／降落，RT 冲刺，LT 悬停。"
+            event("driver_started", {ahead = settings.player_distance, lateral = 12, vertical = 10})
         end)
         if not ok then
             if active then stop_driver("Start failed") end
@@ -329,8 +332,8 @@ local function tick_driver()
         local length = math.sqrt(fx*fx+fz*fz)
         assert(length > 0.2, "Griffin is too vertical")
         fx,fz = fx/length,fz/length
-        local target = {x=pos.x+fx*20+fz*input.x*12, y=pos.y+input.y*10,
-            z=pos.z+fz*20-fx*input.x*12}
+        local target = {x=pos.x+fx*settings.player_distance+fz*input.x*12, y=pos.y+input.y*10,
+            z=pos.z+fz*settings.player_distance-fx*input.x*12}
         d.moved = true
         d.transform:call("set_Position(via.vec3)", Vector3f.new(target.x,target.y,target.z))
         sync_player(d)
@@ -343,17 +346,19 @@ local function tick_driver()
         d.previous_buttons = input.buttons
         if d.mode == "taking_off" then
             if action_name == "Ch253TakeoffBackJump" then d.saw_takeoff = true end
-            if flying and action_name ~= "Ch253TakeoffBackJump" and not d.intent then
+            if d.auto_hover and flying and action_name ~= "Ch253TakeoffBackJump" and not d.intent then
                 set_intent(d, "Ch253HoverWaitHoHomingHeight", "hover")
             elseif ground and not flying and d.saw_takeoff and action_name ~= "Ch253TakeoffBackJump" then
                 d.mode = "ground"
             end
         end
-        if held(pressed, masks.a) and ground and not flying and not d.pending then
+        if held(pressed, masks.lt) then
+            set_intent(d, "Ch253HoverWaitHoHomingHeight", "hover")
+        elseif held(pressed, masks.a) then
             set_intent(d, "Ch253TakeoffBackJump", "taking_off")
-        elseif flying and d.mode ~= "taking_off" then
-            if held(pressed, masks.lt) then set_intent(d, "Ch253HoverWaitHoHomingHeight", "hover")
-            elseif held(pressed, masks.rt) then set_intent(d, "Ch253WrapAroundStartLoop", "dash") end
+            d.intent.auto_hover = not flying
+        elseif held(pressed, masks.rt) then
+            set_intent(d, "Ch253WrapAroundStartLoop", "dash")
         end
         dispatch(d)
         d.trace = {griffin = pos, player = vector(d.transform:call("get_Position()")), target = target,
@@ -480,9 +485,57 @@ re.on_application_entry("PrepareRendering",function()
     end)
     if not ok then restore_camera(); d.camera_failed=true; event("camera_error",tostring(err)) end
 end)
+-- Runtime bridge: only retained Beta instances; never resolve by character ID/address.
+local bridge = {}
+local external_serial = 0
+function bridge.get_instance()
+    if not alive or state.generation ~= generation then return nil end
+    local r = active and active.spawn or state.spawns[#state.spawns]
+    if r and r.ready and not r.delete_requested then return r.result end
+end
+function bridge.is_driving() return alive and (active ~= nil or state.recovery ~= nil or queued) end
+function bridge.request_action(node, allow_cross, phase)
+    if not bridge.get_instance() or type(node) ~= "string" or node == "" then return false, "Beta 实例尚未就绪" end
+    if not allow_cross then
+        local ch = bridge.get_instance().chara
+        local flying, ground = ch:call("get_IsFlight()"), ch:call("get_IsGround()")
+        if not (phase == "air" and flying or phase == "ground" and ground and not flying) then
+            return false, "阶段不符；请开启跨阶段测试"
+        end
+    end
+    external_serial = external_serial + 1
+    local serial = external_serial
+    if active then
+        -- Replacing the intent cancels already queued requests. External actions also
+        -- cancel automatic takeoff-to-hover; only a new controller press replaces them.
+        active.mode = "external"
+        active.auto_hover = false
+        set_intent(active, node, "external")
+        event("external_action_queued", node)
+    else
+        local r = state.spawns[#state.spawns]
+        run_once(function()
+            if not alive or state.generation ~= generation or serial ~= external_serial or active
+                or r.delete_requested or state.spawns[#state.spawns] ~= r then return end
+            local ok, err = pcall(function()
+                local ch = validate_spawn(r)
+                local manager = ch:call("get_ActionManager()")
+                assert(manager and manager:call("get_GameObject()") == r.result.go, "ActionManager mismatch")
+                event("action_request", {node=node, mode="external"})
+                manager:call("requestActionCore(app.ActionManager.Priority, System.String, System.UInt32)", 10, node, 0)
+                event("action_returned", node)
+            end)
+            if not ok then failed("实验工具动作请求失败", err) end
+        end)
+    end
+    return true
+end
+_G.GriffinFlightBetaBridge = bridge
+
 re.on_script_reset(function()
     stop_driver("脚本重置")
     alive = false
+    if rawget(_G, "GriffinFlightBetaBridge") == bridge then _G.GriffinFlightBetaBridge = nil end
     for _, r in ipairs(state.spawns) do r.friend = false; r.ready = false; r.destroy_queued = false end
     flush()
 end)
@@ -499,7 +552,7 @@ local function beta_button(label)
 end
 re.on_draw_ui(function()
     if not imgui.tree_node("狮鹫飞行 Beta###GriffinFlightBeta") then return end
-    imgui.text("版本 "..VERSION.." | A 起飞 · RT 冲刺 · LT 悬停")
+    imgui.text("版本 "..VERSION.." | A 起飞／降落 · RT 冲刺 · LT 悬停")
     if beta_button("一键生成狮鹫并设为友方###BetaSpawn") then spawn() end
     if beta_button("开始驾驶（固定玩家＋冻结 FSM）###BetaStart") then start_driver() end
     if beta_button("结束驾驶／恢复玩家###BetaStop") then
@@ -517,12 +570,14 @@ re.on_draw_ui(function()
     end
     imgui.text(status)
     if active then
-        local labels={ground="等待起飞",taking_off="起飞中",hover="悬停",dash="冲刺"}
+        local labels={ground="等待起飞",taking_off="起飞／降落动作",external="实验工具动作",hover="悬停",dash="冲刺"}
         imgui.text("当前："..(labels[active.mode] or active.mode).."；左摇杆左右转向／上下调整目标高度。")
     end
-    if imgui.tree_node("镜头设置") then
+    if imgui.tree_node("玩家距离与镜头设置") then
         if type(imgui.slider_float)=="function" then
-            local changed,v = imgui.slider_float("距离偏移",settings.distance,0,80)
+            local changed,v = imgui.slider_float("玩家与狮鹫距离",settings.player_distance,2,80)
+            if changed and finite(v) then settings.player_distance=math.max(2,math.min(80,v));pcall(json.dump_file,settings_path,settings) end
+            changed,v = imgui.slider_float("相机距离偏移",settings.distance,0,80)
             if changed and finite(v) then settings.distance=math.max(0,math.min(80,v));pcall(json.dump_file,settings_path,settings) end
             changed,v = imgui.slider_float("FOV",settings.fov,40,120)
             if changed and finite(v) then settings.fov=math.max(40,math.min(120,v));pcall(json.dump_file,settings_path,settings) end
