@@ -1,7 +1,7 @@
 -- Griffin Mount Experiment: stage 3 player-as-target flight control experiment.
 -- Requires the installed aaaNickCore.lua and _NickCore/EnemySpawner.lua.
 -- Keeps an explicit spawn return or user-confirmed instance; never selects by Character ID.
-local VERSION = "0.3.16-stage3-beta-bridge"
+local VERSION = "0.3.17-stage3-think-fall"
 local state = "Idle"
 local detail = "Ready for one ordinary Griffin request per script session."
 local shared = nil
@@ -68,6 +68,7 @@ local pilot_status = "四档驾驶未开启；先固定玩家，再开启四档�
 local pilot_gear = 0
 local pilot_shoulder_masks = nil
 local stop_lure
+local control_frame
 local restore_lure_camera
 local camera_settings = {enabled=true,distance=30,fov=90}
 local camera_settings_path = "GriffinMountExperiment_Settings.json"
@@ -434,6 +435,7 @@ local function request_spawn(early)
 end
 
 re.on_frame(function()
+    if control_frame then control_frame() end
     if not shared then return end
     local core = dependency()
     if not core or core.properties.player ~= owner then
@@ -844,6 +846,55 @@ local function beta_bridge()
         and b.get_instance() then return b end
 end
 
+local function request_instance_skip(result, player)
+    assert(result and result.go and result.chara and result.go:get_Valid() and result.chara:get_Valid(), "Griffin unavailable")
+    local ch = result.chara
+    assert(ch:get_CharaIDString()=="ch253000_00" and ch:call("get_GameObject()")==result.go, "Griffin binding mismatch")
+    local maker=ch:call("get_AIDecisionMaker()")
+    assert(maker and maker:call("get_Character()")==ch, "AIDecisionMaker mismatch")
+    local module=maker:call("get_DecisionModule()")
+    assert(module and module:call("get_Chara()")==ch and module:call("get_Owner()")==result.go
+        and module:call("get_AIDecisionMaker()")==maker, "DecisionModule mismatch")
+    local td=sdk.find_type_definition("app.AIDecisionModule")
+    assert(td and td:get_method("requestSkipThink()") and td:get_method("get_IsSkipThink()"), "SkipThink interface unavailable")
+    module:call("requestSkipThink()")
+    assert(module:call("get_IsSkipThink()")==true, "SkipThink flag readback failed")
+end
+
+local control_alive=true
+local skip_think_enabled,skip_think_expected=false,nil
+local skip_think_status="跳过思考：关闭"
+local function think_state()
+    local b=beta_bridge()
+    if b and b.get_skip_think then return b.get_skip_think() end
+    return skip_think_enabled,skip_think_status
+end
+local function toggle_think()
+    local b=beta_bridge()
+    if b and b.set_skip_think then
+        local enabled=b.get_skip_think()
+        local ok,err=b.set_skip_think(not enabled)
+        action_test_status=ok and "Beta 狮鹫跳过思考已切换。" or tostring(err)
+        return
+    end
+    skip_think_enabled=not skip_think_enabled
+    skip_think_expected=skip_think_enabled and shared or nil
+    skip_think_status=skip_think_enabled and "已开启逐帧跳过思考，等待首次请求。" or "已停止请求跳过狮鹫思考。"
+    log_event("skip_think_mode",skip_think_enabled)
+end
+local function tick_skip_think()
+    if not skip_think_enabled or not control_alive then return end
+    if beta_bridge() then skip_think_enabled=false;skip_think_expected=nil;return end
+    local c=dependency()
+    if not c or c.properties.isPaused then return end
+    local ok,err=pcall(function()
+        assert(c.properties.player==owner and shared==skip_think_expected,"Griffin context changed")
+        request_instance_skip(shared,owner)
+    end)
+    if ok then skip_think_status="跳过思考：已请求；模块标志=true（动作仍可单独请求）"
+    else skip_think_enabled=false;skip_think_expected=nil;skip_think_status="跳过思考已关闭："..tostring(err);log_event("skip_think_error",skip_think_status) end
+end
+
 local function queue_action_test(action, pilot_token)
     local b = not pilot_token and beta_bridge()
     if b then
@@ -1140,6 +1191,35 @@ local function validate_lure_griffin(d)
     return manager,node,flying,player_target
 end
 
+local fall_hook_installed,fall_hook_tried=false,false
+local block_player_fall=false
+local fall_hits,fall_blocked,fall_logged,fall_log_at=0,0,0,-math.huge
+local fall_hook_status=""
+local function install_fall_hook()
+    if fall_hook_installed or fall_hook_tried then return end
+    fall_hook_tried=true
+    local ok,err=pcall(function()
+        local td=sdk.find_type_definition("app.Character")
+        local method=td and td:get_method("requestFallDead()")
+        assert(method and sdk.PreHookResult and sdk.PreHookResult.SKIP_ORIGINAL,"Fall request hook unavailable")
+        sdk.hook(method,function(args)
+            local d,c=lure,dependency()
+            if control_alive and d and d.moved and c and not c.properties.isPaused and c.properties.player==d.player
+                and sdk.to_managed_object(args[2])==d.player then
+                fall_hits=fall_hits+1
+                if block_player_fall then fall_blocked=fall_blocked+1;return sdk.PreHookResult.SKIP_ORIGINAL end
+            end
+        end,function(ret) return ret end)
+        fall_hook_installed=true
+    end)
+    if not ok then fall_hook_status="坠落请求 Hook 不可用："..tostring(err);log_event("fall_hook_error",fall_hook_status) end
+end
+control_frame=function()
+    if fall_hits~=fall_logged and game_time()-fall_log_at>=1 then
+        fall_logged=fall_hits;fall_log_at=game_time();log_event("player_fall_request",{hits=fall_hits,blocked=fall_blocked})
+    end
+end
+
 local function start_lure_test(unlimited)
     local b = rawget(_G, "GriffinFlightBetaBridge")
     if b and b.is_driving() then lure_status = "请先结束 Beta 驾驶。"; return end
@@ -1176,6 +1256,7 @@ local function start_lure_test(unlimited)
             lure_stick_enabled=false
             camera_suspended=false
             lure=d;lure_input_error=nil
+            install_fall_hook()
             lure_status="前方固定已开启（" .. (d.unlimited and "不限时；请手动停止" or "最长60秒") .. "）；可单独开启摇杆，菜单打开时也响应。"
         end)
         if not ok then
@@ -1342,12 +1423,13 @@ if type(re.on_application_entry)=="function" and type(re.on_pre_application_entr
         else lure_input={x=0,y=0,raw_x=0,raw_y=0};lure_input_error=tostring(value) end
     end)
     -- Supply the real player target before the game's behavior/AI stage.
-    re.on_pre_application_entry("UpdateBehavior",tick_lure_test)
+    re.on_pre_application_entry("UpdateBehavior",function() tick_skip_think();tick_lure_test() end)
 end
 
 local control_bridge = {is_driving=function() return lure ~= nil or lure_start_pending or lure_restore_pending end}
 _G.GriffinMountExperimentControl = control_bridge
 re.on_script_reset(function()
+    control_alive=false;skip_think_enabled=false;skip_think_expected=nil;block_player_fall=false
     if rawget(_G, "GriffinMountExperimentControl") == control_bridge then _G.GriffinMountExperimentControl = nil end
     lure_start_cancelled=true
     if lure or lure_restore_pending then stop_lure("脚本重置") end
@@ -1362,6 +1444,9 @@ re.on_script_reset(function()
 end)
 
 local button_labels = {
+    ["Enable Griffin think skip"]="【新增】开启跳过狮鹫思考",
+    ["Disable Griffin think skip"]="关闭跳过狮鹫思考",
+    ["Restore manual action buttons"]="【新增】恢复手动动作按钮（保留玩家固定）",
     ["Preview nearest enemy as Griffin (40m)"] = "【本轮】1. 查找附近狮鹫（40米）",
     ["Bind PREVIEWED Griffin instance"] = "【本轮】2. 绑定这只狮鹫",
     ["Spawn ONE ordinary Griffin"] = "生成普通狮鹫（不设友方）",
@@ -1400,7 +1485,7 @@ button_labels["Disable lure stick"] = "关闭摇杆控制（继续固定正前�
 button_labels["Stop stick lure"] = "【本轮驾驶】停止／恢复玩家原位置"
 local function ui_button(key)
     local label = button_labels[key] or key
-    local highlight = label:find("【本轮", 1, true) ~= nil
+    local highlight = label:find("【本轮", 1, true) ~= nil or label:find("【新增】", 1, true) ~= nil
     local styled = highlight and type(imgui.push_style_color) == "function" and type(imgui.pop_style_color) == "function"
     if styled then
         imgui.push_style_color(21, 0xff98652b) -- ImGuiCol.Button, packed ABGR
@@ -1443,6 +1528,15 @@ re.on_draw_ui(function()
     end
     if beta_bridge() or shared and shared.go and shared.chara then
         imgui.text(beta_bridge() and "动作目标：Beta 当前狮鹫（优先）；无需在工具内另行生成。" or "动作目标：实验工具绑定的狮鹫。")
+        local enabled,think_detail=think_state()
+        if ui_button(enabled and "Disable Griffin think skip" or "Enable Griffin think skip") then toggle_think() end
+        imgui.text(think_detail)
+        if pilot and ui_button("Restore manual action buttons") then
+            pilot=nil
+            pilot_status="四档自动驾驶已关闭；玩家固定保留，可使用单次动作按钮。"
+            action_test_status=pilot_status
+            log_event("gear_control_manual_release",true)
+        end
         imgui.text("已测试动作（每次只点一个，至少间隔3秒）")
         imgui.text("默认允许跨阶段；可直接测试空中或地面动作。")
         for _, action in ipairs(test_actions) do
@@ -1540,6 +1634,15 @@ re.on_draw_ui(function()
             lure_start_cancelled=true
             run_once(function() stop_lure("手动停止") end)
         end
+        if type(imgui.checkbox)=="function" then
+            local styled=type(imgui.push_style_color)=="function" and type(imgui.pop_style_color)=="function"
+            if styled then imgui.push_style_color(0,0xffa8ecff) end
+            local changed,value=imgui.checkbox("【测试】拦截玩家坠落死亡请求",block_player_fall)
+            if styled then imgui.pop_style_color(1) end
+            if changed then block_player_fall=value;log_event("fall_request_block_mode",value) end
+        end
+        imgui.text("坠落死亡请求："..fall_hits.."；已拦截："..fall_blocked)
+        if fall_hook_tried and not fall_hook_installed then imgui.text(fall_hook_status) end
         imgui.text(lure_status)
         if lure then imgui.text(string.format("摇杆 X %.2f / Y %.2f | 位置更新 %d 次",lure_input.x,lure_input.y,lure.writes)) end
         imgui.tree_pop()
