@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.8. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.9. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.8-beta"
+local VERSION = "0.1.9-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -169,31 +169,36 @@ local function sync_player(d)
     d.fall:call("resetFallHeight()")
     d.controller:call("warp()")
 end
--- Independent writes are experiments, not a guarantee that the engine keeps layers separate.
+-- All layers follow a neutral Griffin anchor; only the selected layer gets stick offset.
+-- Engine coupling is observed through readback, not assumed away.
 local anchor_mode="full"
 local anchor_modes={
     {key="full",label="完整同步（已验证基线）"},
-    {key="transform",label="仅 Transform／对象根位置"},
-    {key="context",label="仅位置上下文 PosRotContext"},
-    {key="controller",label="仅物理控制器（世界位移）"},
-    {key="root_bone",label="仅骨架根节点"},
-    {key="hip",label="仅髋部骨骼 Hip"},
+    {key="transform",label="仅 Transform／对象根位置响应摇杆"},
+    {key="context",label="仅位置上下文响应摇杆"},
+    {key="controller",label="仅物理控制器响应摇杆"},
+    {key="root_bone",label="仅骨架根节点响应摇杆"},
+    {key="hip",label="仅 Hip 髋部响应摇杆"},
 }
 local function close_position(a,b)
     return math.abs(a.x-b.x)+math.abs(a.y-b.y)+math.abs(a.z-b.z)<0.001
 end
 local function restore_bone(d)
-    local a=d.bone_applied
-    if not a then return end
-    if not owned_player(d,false) then d.bone_applied=nil;return end
-    if a.joint:get_Valid() then
-        local p=vector(a.joint:call("get_Position()"))
-        if close_position(p,a.written) then
-            a.joint:call("set_Position(via.vec3)",Vector3f.new(a.original.x,a.original.y,a.original.z))
-        end
+    local items=d.bones_applied
+    if not items then return end
+    if not owned_player(d,false) then d.bones_applied=nil;return end
+    -- Decide ownership before any parent write changes a child's world position.
+    local matches={}
+    for i,a in ipairs(items) do
+        matches[i]=a.joint:get_Valid() and close_position(vector(a.joint:call("get_Position()")),a.written)
     end
-    d.bone_applied=nil
+    -- Restore parent first, then child, using the pose captured before either write.
+    for i,a in ipairs(items) do
+        if matches[i] then a.joint:call("set_Position(via.vec3)",Vector3f.new(a.original.x,a.original.y,a.original.z)) end
+    end
+    d.bones_applied=nil
 end
+
 local function discover_joints(d)
     if d.joints_searched then return end
     d.joints_searched=true
@@ -210,6 +215,12 @@ local function discover_joints(d)
     event("anchor_joint_inventory",{root=d.root_name,hip=d.hip_name})
 end
 local function prepare_anchor_mode(d,key)
+    if key~="full" then
+        local td=sdk.find_type_definition("via.physics.CharacterController")
+        assert(td and td:get_method("applyWorldOffset(via.vec3)"),"Controller world-offset interface unavailable")
+        local ct=sdk.find_type_definition("app.CharacterPosRotContext")
+        assert(ct and ct:get_method("setPos(via.Position)"),"Context position interface unavailable")
+    end
     if key=="root_bone" or key=="hip" then
         discover_joints(d)
         local joint=d.root_joint
@@ -232,32 +243,39 @@ local function anchor_positions(d)
         root_bone=d.root_joint and d.root_joint:get_Valid() and vector(d.root_joint:call("get_Position()")) or nil,
         hip=d.hip_joint and d.hip_joint:get_Valid() and vector(d.hip_joint:call("get_Position()")) or nil}
 end
-local function write_anchor(d,target)
-    local key=d.anchor_mode
-    d.anchor_target=target
-    d.moved=true
-    if key=="full" or key=="transform" then
-        d.transform:call("set_Position(via.vec3)",Vector3f.new(target.x,target.y,target.z))
-        if key=="full" then sync_player(d) end
-    elseif key=="context" then
-        -- Construct universal coordinates from the current scene/universal pair;
-        -- never temporarily move Transform merely to obtain via.Position.
-        local scene=vector(d.transform:call("get_Position()"))
-        local universal=d.transform:call("get_UniversalPosition()")
-        universal.x=universal.x+target.x-scene.x
-        universal.y=universal.y+target.y-scene.y
-        universal.z=universal.z+target.z-scene.z
-        d.context:call("setPos(via.Position)",universal)
-    elseif key=="controller" then
-        local p=vector(d.controller:call("get_Position()"))
-        d.controller:call("applyWorldOffset(via.vec3)",Vector3f.new(target.x-p.x,target.y-p.y,target.z-p.z))
-    end
-    -- These two calls do not synchronize context or controller during isolated tests.
-    if key~="full" then
-        d.fall:call("resetBaseHeight(via.Position)",d.transform:call("get_UniversalPosition()"))
-        d.fall:call("resetFallHeight()")
-    end
+local function set_context_scene(d,target)
+    local scene=vector(d.transform:call("get_Position()"))
+    local universal=d.transform:call("get_UniversalPosition()")
+    universal.x=universal.x+target.x-scene.x
+    universal.y=universal.y+target.y-scene.y
+    universal.z=universal.z+target.z-scene.z
+    d.context:call("setPos(via.Position)",universal)
 end
+local function write_anchor(d,target,neutral)
+    local key=d.anchor_mode
+    restore_bone(d) -- remove last frame's pose correction before moving the actor
+    d.anchor_target=target;d.neutral_anchor=neutral
+    d.moved=true
+    if key=="full" then
+        d.transform:call("set_Position(via.vec3)",Vector3f.new(target.x,target.y,target.z))
+        sync_player(d)
+        d.anchor_plan={transform=target,context=target,controller=target}
+        return
+    end
+    local actor_target=key=="transform" and target or neutral
+    local context_target=key=="context" and target or neutral
+    local controller_target=key=="controller" and target or neutral
+    -- Move all layers with the Griffin. Unselected layers get neutral, not stick.
+    d.transform:call("set_Position(via.vec3)",Vector3f.new(actor_target.x,actor_target.y,actor_target.z))
+    set_context_scene(d,context_target)
+    local physical=vector(d.controller:call("get_Position()"))
+    d.controller:call("applyWorldOffset(via.vec3)",Vector3f.new(controller_target.x-physical.x,
+        controller_target.y-physical.y,controller_target.z-physical.z))
+    d.fall:call("resetBaseHeight(via.Position)",d.transform:call("get_UniversalPosition()"))
+    d.fall:call("resetFallHeight()")
+    d.anchor_plan={transform=actor_target,context=context_target,controller=controller_target}
+end
+
 local function change_anchor_mode(key)
     local d=active
     if not d then anchor_mode=key;event("anchor_mode_selected",key);return end
@@ -272,7 +290,7 @@ local function change_anchor_mode(key)
             restore_bone(d)
             -- Normalize layers to the current player Transform once, at the boundary.
             sync_player(d)
-            d.anchor_mode=key;anchor_mode=key;d.anchor_target=nil;d.target_probe_failed=nil
+            d.anchor_mode=key;anchor_mode=key;d.anchor_target=nil;d.neutral_anchor=nil;d.anchor_plan=nil;d.target_probe_failed=nil
             event("anchor_mode_changed",{mode=key,baseline=anchor_positions(d)})
         end)
         if not ok then
@@ -666,9 +684,10 @@ local function tick_driver()
         local length = math.sqrt(fx*fx+fz*fz)
         assert(length > 0.2, "Griffin is too vertical")
         fx,fz = fx/length,fz/length
-        local target = {x=pos.x+fx*settings.player_distance+fz*input.x*12, y=pos.y+settings.player_height+input.y*10,
-            z=pos.z+fz*settings.player_distance-fx*input.x*12}
-        write_anchor(d,target)
+        local neutral={x=pos.x+fx*settings.player_distance,y=pos.y+settings.player_height,
+            z=pos.z+fz*settings.player_distance}
+        local target = {x=neutral.x+fz*input.x*12,y=neutral.y+input.y*10,z=neutral.z-fx*input.x*12}
+        write_anchor(d,target,neutral)
         local flying, ground = ch:call("get_IsFlight()"), ch:call("get_IsGround()")
         local manager = ch:call("get_ActionManager()")
         assert(manager and manager:call("get_GameObject()") == d.spawn.result.go, "ActionManager mismatch")
@@ -693,7 +712,7 @@ local function tick_driver()
             set_intent(d, "Ch253WrapAroundStartLoop", "dash")
         end
         dispatch(d)
-        d.trace = {griffin = pos, player = vector(d.transform:call("get_Position()")), target = target,
+        d.trace = {neutral_anchor=neutral,anchor_plan=d.anchor_plan,griffin = pos, player = vector(d.transform:call("get_Position()")), target = target,
             physical = vector(d.controller:call("get_Position()")), flight = flying, ground = ground,
             action = tostring(action_name), mode = d.mode, anchor_mode=d.anchor_mode, anchor_height = settings.player_height, stick = {x=input.x,y=input.y}}
     end)
@@ -823,7 +842,7 @@ end)
 re.on_pre_application_entry("UpdateBehavior",function() tick_skip_think();tick_driver() end)
 re.on_pre_application_entry("UpdateJointExpression",function()
     local d=active
-    if not d or not alive or not d.bone_applied then return end
+    if not d or not alive or not d.bones_applied then return end
     local ok,err=pcall(function()
         assert(owned_player(d,true),"Player binding changed")
         restore_bone(d)
@@ -833,17 +852,27 @@ end)
 re.on_application_entry("UpdateJointExpression",function()
     local d,c=active,core()
     if not d or not alive or not c or c.properties.isPaused or not d.anchor_target then return end
-    if d.anchor_mode~="hip" and d.anchor_mode~="root_bone" then return end
+    if d.anchor_mode=="full" or not d.neutral_anchor then return end
     local ok,err=pcall(function()
         assert(owned_player(d,true),"Player binding changed")
         restore_bone(d)
-        local joint=d.root_joint
-        if d.anchor_mode=="hip" then joint=d.hip_joint end
-        assert(joint and joint:get_Valid(),"Player bone unavailable")
-        local original=vector(joint:call("get_Position()"))
-        local target=d.anchor_target
-        d.bone_applied={joint=joint,original=original,written=target}
-        joint:call("set_Position(via.vec3)",Vector3f.new(target.x,target.y,target.z))
+        local actor=vector(d.transform:call("get_Position()"))
+        local items={}
+        -- Capture both original world positions before moving either parent/child.
+        for _,spec in ipairs({{joint=d.root_joint,key="root_bone"},{joint=d.hip_joint,key="hip"}}) do
+            local joint=spec.joint
+            if joint and joint:get_Valid() then
+                local original=vector(joint:call("get_Position()"))
+                local anchor=d.anchor_mode==spec.key and d.anchor_target or d.neutral_anchor
+                local target={x=anchor.x+original.x-actor.x,y=anchor.y+original.y-actor.y,z=anchor.z+original.z-actor.z}
+                items[#items+1]={joint=joint,key=spec.key,original=original,written=target}
+            end
+        end
+        d.bones_applied=items -- retain recovery if a later native setter fails
+        for _,a in ipairs(items) do
+            a.joint:call("set_Position(via.vec3)",Vector3f.new(a.written.x,a.written.y,a.written.z))
+            if d.anchor_plan then d.anchor_plan[a.key]=a.written end
+        end
     end)
     if not ok then stop_driver("骨骼位置实验失败");failed("骨骼位置实验失败",err) end
 end)
@@ -998,7 +1027,7 @@ re.on_draw_ui(function()
         elseif probe and probe.error then imgui.text("目标探针读取失败；驾驶仍运行，详情已记录。") end
     end
     if imgui.tree_node("【新增】玩家追逐来源实验（互斥开关）") then
-        imgui.text("每次只选一项；摇杆移动该层。模式切换会先同步一次清理上一项。")
+        imgui.text("每次只选一项：选中层跟随摇杆，其余层跟随狮鹫前方中立锚点。")
         if type(imgui.checkbox)=="function" then
             for _,mode in ipairs(anchor_modes) do
                 local styled=type(imgui.push_style_color)=="function" and type(imgui.pop_style_color)=="function"
@@ -1008,8 +1037,8 @@ re.on_draw_ui(function()
                 if changed and value then change_anchor_mode(mode.key) end
             end
         end
-        imgui.text("Transform 就是对象根位置；骨架根节点是另一层。只写一层仍可能被引擎联动。")
-        imgui.text("各层实际位置自动写日志；仅骨架测试在动画更新后写入。")
+        imgui.text("未选中的层也会随狮鹫移动，但不响应摇杆；引擎仍可能联动各层。")
+        imgui.text("中立锚点、各层期望/实际位置自动记录；骨架保留自然姿势偏移。")
         imgui.tree_pop()
     end
     if imgui.tree_node("【新增】飞行目标坐标测试") then
