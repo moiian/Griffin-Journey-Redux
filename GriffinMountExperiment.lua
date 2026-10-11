@@ -1,7 +1,7 @@
 -- Griffin Mount Experiment: stage 3 player-as-target flight control experiment.
 -- Requires the installed aaaNickCore.lua and _NickCore/EnemySpawner.lua.
 -- Keeps an explicit spawn return or user-confirmed instance; never selects by Character ID.
-local VERSION = "0.3.9-stage3-stick-lure"
+local VERSION = "0.3.10-stage3-anchor-stick"
 local state = "Idle"
 local detail = "Ready for one ordinary Griffin request per script session."
 local shared = nil
@@ -58,7 +58,8 @@ local lure = nil
 local lure_restore_pending = nil
 local lure_start_pending = false
 local lure_start_cancelled = false
-local lure_status = "先让狮鹫进入目标导向飞行，再开启20秒摇杆测试。"
+local lure_status = "先固定玩家到前方，再开启摇杆控制，最后手动请求目标导向飞行。"
+local lure_stick_enabled = false
 local lure_input = {x=0, y=0, raw_x=0, raw_y=0}
 local lure_input_error = nil
 local lure_invert_y = false
@@ -569,7 +570,8 @@ local function queue_flight_snapshot(source)
             sample.stick_lure = {active=true, input_x=lure_input.x, input_y=lure_input.y,
                 raw_x=lure_input.raw_x, raw_y=lure_input.raw_y, writes=lure.writes,
                 elapsed=game_time()-lure.started, target=lure.target, player_readback=lure.readback,
-                controller_readback=lure.physical, forward_distance=20, lateral_range=12, vertical_range=10}
+                controller_readback=lure.physical, forward_distance=20, lateral_range=12, vertical_range=10,
+                stick_enabled=lure_stick_enabled, flight_readiness=lure.flight_readiness}
         end
         local ok, err = pcall(function()
             local core = dependency()
@@ -764,7 +766,7 @@ local function start_recording()
 end
 
 local function queue_action_test(action)
-    if lure or lure_restore_pending then action_test_status = "请先停止摇杆测试并恢复玩家位置。"; return end
+    if lure_restore_pending then action_test_status = "请先恢复玩家位置。"; return end
     if relation_pending or not shared or not shared.go or not shared.chara then return end
     if game_time() - last_action_request < 3 then
         action_test_status = "请等待至少3个游戏运行秒，再提交下一个动作。"
@@ -934,6 +936,7 @@ stop_lure = function(reason)
     local d = lure or lure_restore_pending
     if not d then return end
     lure = nil -- stop further driver writes before trying restoration
+    lure_stick_enabled = false
     lure_input = {x=0,y=0,raw_x=0,raw_y=0}
     log_event("stick_lure_stopped", reason)
     local ok, err = pcall(function()
@@ -995,18 +998,20 @@ local function validate_lure_griffin(d)
             and member:call("getBattleRelationshipTo(app.Character)",d.expected.chara)==friend_value,
             "Party relationship changed")
     end
-    assert(d.expected.chara:call("get_IsFlight()"), "Griffin is no longer airborne")
+    local flying=d.expected.chara:call("get_IsFlight()")
     local ctrl=d.expected.chara:call("get_FlightCtrl()")
     assert(ctrl and ctrl:call("get_CachedCharacter()")==d.expected.chara, "Flight controller mismatch")
     local manager=d.expected.chara:call("get_ActionManager()")
     assert(manager and manager:call("get_GameObject()")==d.expected.go, "ActionManager mismatch")
     local info=manager:get_field("CurrentAction")
-    assert(info and info:get_field("Name")=="Ch253WrapAroundStartLoop", "Fast flight action changed")
+    local node=info and info:get_field("Name")
     local ch=NickCore.object.get_component(d.expected.go,"app.Ch253")
     local tc=ch and ch:call("get_TargetController()")
     assert(tc and tc:call("get_Owner()")==d.expected.go and tc:call("get_Chara()")==d.expected.chara,
         "TargetController mismatch")
-    assert(tc:call("get_TargetCharacter()")==d.player, "Griffin is not targeting this player")
+    local player_target=tc:call("get_TargetCharacter()")==d.player
+    d.flight_readiness={node=tostring(node),flying=flying,target_is_player=player_target}
+    return manager,node,flying,player_target
 end
 
 local function start_lure_test()
@@ -1030,17 +1035,18 @@ local function start_lure_test()
                 fall=player:get_field("<FallInfo>k__BackingField"),started=game_time(),writes=0}
             assert(d.transform and d.context and d.controller and d.fall, "Player physics interfaces unavailable")
             validate_lure_griffin(d)
-            lure_input=read_lure_stick()
+            lure_input={x=0,y=0,raw_x=0,raw_y=0}
             d.original_universal=d.transform:call("get_UniversalPosition()")
             assert(d.original_universal, "Original universal position unavailable")
             d.original_scene=vector_values(d.transform:call("get_Position()"))
-            assert(#flight_log.samples<850 and #flight_log.events<470, "Use a fresh recording session")
+            assert(#flight_log.samples<650 and #flight_log.events<470, "Use a fresh recording session")
             start_recording() -- renew recorder window; preserve all earlier samples
-            log_event("stick_lure_started", "20 gameplay seconds; ahead=20m, lateral=12m, vertical=10m, deadzone=0.2")
+            log_event("stick_lure_started", "60 gameplay seconds; ahead=20m; stick initially disabled; no action request")
             flight_log.events[#flight_log.events].player_original_scene=d.original_scene
             assert(flush_flight_log(), "Pre-movement log failed")
+            lure_stick_enabled=false
             lure=d;lure_input_error=nil
-            lure_status="摇杆测试已开启：左右横移／上下升降，20秒后恢复玩家原位置。"
+            lure_status="前方固定已开启（最长60秒）；可单独开启摇杆，再手动请求飞行动作。"
         end)
         if not ok then
             lure_status="未开启摇杆测试："..tostring(err)
@@ -1055,12 +1061,8 @@ local function tick_lure_test()
     if not d then return end
     local core=dependency()
     if not core or core.properties.isPaused or game_time()<d.started then stop_lure("暂停或游戏上下文变化");return end
-    if not d.moved then
-        if reframework and reframework:is_drawing_ui() then return end
-        d.started=game_time() -- countdown starts with the first move, after UI closes
-    end
-    if game_time()-d.started>=20 then stop_lure("20秒测试到期");return end
-    if lure_input_error then stop_lure("摇杆读取失败："..lure_input_error);return end
+    if game_time()-d.started>=60 then stop_lure("60秒固定测试到期");return end
+    if lure_stick_enabled and lure_input_error then stop_lure("摇杆读取失败："..lure_input_error);return end
     if not recording then stop_lure("记录已停止或保存失败");return end
     local ok,err=pcall(function()
         validate_lure_griffin(d)
@@ -1071,7 +1073,8 @@ local function tick_lure_test()
         local length=math.sqrt(fx*fx+fz*fz)
         assert(length>0.2,"Griffin forward is too vertical")
         fx,fz=fx/length,fz/length
-        local x,y=lure_input.x,lure_input.y
+        local x,y=0,0
+        if lure_stick_enabled then x,y=lure_input.x,lure_input.y end
         local point={x=position.x+fx*20+fz*x*12,y=position.y+y*10,z=position.z+fz*20-fx*x*12}
         if not d.moved then
             log_event("stick_lure_first_write", "Player Transform + position context + controller sync")
@@ -1084,13 +1087,15 @@ local function tick_lure_test()
         d.target=point;d.writes=d.writes+1
         d.readback=vector_values(d.transform:call("get_Position()"))
         d.physical=vector_values(d.controller:call("get_Position()"))
+        lure_status=lure_stick_enabled and "玩家已固定；摇杆控制已开启。现在可手动请求目标导向飞行。"
+            or "玩家已固定在前方20米；摇杆控制未开启。"
     end)
     if not ok then stop_lure("驾驶检查或位置写入失败："..tostring(err)) end
 end
 
 if type(re.on_application_entry)=="function" and type(re.on_pre_application_entry)=="function" then
     re.on_application_entry("UpdateHID",function()
-        if not lure then return end
+        if not lure or not lure_stick_enabled then return end
         local ok,value=pcall(read_lure_stick)
         if ok then lure_input=value;lure_input_error=nil
         else lure_input={x=0,y=0,raw_x=0,raw_y=0};lure_input_error=tostring(value) end
@@ -1137,7 +1142,9 @@ end
 button_labels["Toggle cross phase"] = "切换跨阶段测试（允许地面直接请求空中动作）"
 button_labels["Yaw left"] = "【本轮转向】左转（一次）"
 button_labels["Yaw right"] = "【本轮转向】右转（一次）"
-button_labels["Start stick lure"] = "【本轮驾驶】开启左摇杆测试（20秒）"
+button_labels["Start stick lure"] = "【本轮】1. 固定玩家到狮鹫前方"
+button_labels["Enable lure stick"] = "【本轮】2. 开启摇杆控制玩家方位"
+button_labels["Disable lure stick"] = "关闭摇杆控制（继续固定正前方）"
 button_labels["Stop stick lure"] = "【本轮驾驶】停止／恢复玩家原位置"
 local function ui_button(key)
     local label = button_labels[key] or key
@@ -1155,7 +1162,7 @@ end
 re.on_draw_ui(function()
     if not imgui.tree_node("狮鹫坐骑实验 - 阶段3###Griffin Mount Experiment - Stage 3 Observe") then return end
     imgui.text("版本：" .. VERSION)
-    imgui.text("本轮：目标导向飞行 → 开启左摇杆测试 → 关闭界面驾驶")
+    imgui.text("本轮：固定玩家 → 开启摇杆 → 手动请求目标导向飞行")
     imgui.text("录制会自动包含动作名和原生请求，不必另开探针。")
     if not dependency() then imgui.text("等待 NickCore 加载完成。") end
     imgui.text("绑定来源：" .. (target_origin == "selected" and "现有狮鹫" or target_origin == "spawned" and "本脚本生成" or "尚未绑定"))
@@ -1181,7 +1188,7 @@ re.on_draw_ui(function()
             recording = false
             log_event("recording_stopped", "Manual stop")
         end
-        if imgui.tree_node("【本轮】动作测试（单次请求）") then
+        if imgui.tree_node("动作按钮（固定玩家后点目标导向飞行）") then
             imgui.text("每次只点一个动作，关闭界面观察；至少间隔3秒。")
             imgui.text("跨阶段测试：" .. (cross_phase and "已开启" or "关闭（按地面/空中检查）"))
             if ui_button("Toggle cross phase") then
@@ -1197,13 +1204,27 @@ re.on_draw_ui(function()
         end
     end
     if shared and shared.go and shared.chara and imgui.tree_node("【本轮】左摇杆驾驶（玩家作为前方目标）") then
-        imgui.text("先点目标导向飞行，再开启测试并关闭界面。")
-        imgui.text("左右横移／上下升降；松杆回正前方。测试20秒后回到原位置。")
+        imgui.text("1.固定玩家 → 2.开启摇杆 → 再点目标导向飞行。")
+        imgui.text("固定最长60秒；自动记录。左右横移／上下升降，松杆回正前方。")
         if type(imgui.checkbox)=="function" then
             local changed,value=imgui.checkbox("上下反转（推上反而下降时开启）",lure_invert_y)
             if changed then lure_invert_y=value end
         end
         if not lure and not lure_restore_pending and not lure_start_pending and ui_button("Start stick lure") then start_lure_test() end
+        if lure and not lure_stick_enabled and ui_button("Enable lure stick") then
+            local ok,value=pcall(read_lure_stick)
+            if ok then
+                lure_stick_enabled=true;lure_input=value;lure_input_error=nil
+                log_event("stick_lure_input_enabled","Manual enable; anchor remains active")
+            else
+                lure_status="已固定玩家，但摇杆无法读取："..tostring(value)
+                log_event("stick_lure_input_error",lure_status)
+            end
+        end
+        if lure and lure_stick_enabled and ui_button("Disable lure stick") then
+            lure_stick_enabled=false;lure_input={x=0,y=0,raw_x=0,raw_y=0};lure_input_error=nil
+            log_event("stick_lure_input_disabled","Keep anchor; return to straight ahead")
+        end
         if (lure or lure_restore_pending or lure_start_pending) and ui_button("Stop stick lure") then
             lure_start_cancelled=true
             run_once(function() stop_lure("手动停止") end)
