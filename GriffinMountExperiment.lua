@@ -1,7 +1,7 @@
 -- Griffin Mount Experiment: stage 3 read-only flight observation.
 -- Requires the installed aaaNickCore.lua and _NickCore/EnemySpawner.lua.
 -- Keeps an explicit spawn return or user-confirmed instance; never selects by Character ID.
-local VERSION = "0.3.7-stage3-yaw"
+local VERSION = "0.3.8-stage3-yaw-fix"
 local state = "Idle"
 local detail = "Ready for one ordinary Griffin request per script session."
 local shared = nil
@@ -847,11 +847,18 @@ local function queue_yaw_test(direction)
             -- World-Y rotation on the left preserves existing pitch/roll.
             local after = rotation_values({x=c*before.x+s*before.z, y=c*before.y+s*before.w,
                 z=c*before.z-s*before.x, w=c*before.w-s*before.y})
-            local value = Quaternion.new(after.x, after.y, after.z, after.w)
+            -- REFramework's constructor takes (w,x,y,z), unlike the named fields.
+            -- 0.3.7 live readback proved the old ordering permuted all four components.
+            local value = Quaternion.new(after.w, after.x, after.y, after.z)
+            local constructed = rotation_values(value)
+            for _, key in ipairs({"x", "y", "z", "w"}) do
+                assert(math.abs(constructed[key] - after[key]) < 0.00001,
+                    "Quaternion constructor component mismatch; rotation blocked")
+            end
             assert(#flight_log.samples < 1000 and #flight_log.events < 490, "Log capacity nearly full")
             if not recording then start_recording() end
             log_event("manual_yaw_attempt", node)
-            flight_log.events[#flight_log.events].rotation = {degrees=degrees, before=before, requested=after,
+            flight_log.events[#flight_log.events].rotation = {degrees=degrees, before=before, requested=after, constructed=constructed,
                 node=node, character_address=tostring(expected.chara:get_address()), target_origin=target_origin}
             assert(flush_flight_log(), "Could not save pre-write log; no rotation written")
             last_yaw_request = game_time()
