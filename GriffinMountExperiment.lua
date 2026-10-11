@@ -1,7 +1,7 @@
 -- Griffin Mount Experiment: stage 3 read-only flight observation.
 -- Requires the installed aaaNickCore.lua and _NickCore/EnemySpawner.lua.
 -- Keeps spawn_enemy's returned table; never searches by Character ID.
-local VERSION = "0.3.0-stage3-observe"
+local VERSION = "0.3.1-stage3-log"
 local state = "Idle"
 local detail = "Ready for one ordinary Griffin request per script session."
 local shared = nil
@@ -27,12 +27,48 @@ local hate_status = "Hate: not inspected; no entries cleared."
 local hate_rows = {}
 local flight_rows = {}
 local flight_status = "Flight: not inspected. No flight commands are implemented."
+local session_id = os.date("!%Y%m%dT%H%M%SZ") .. "_" .. tostring(math.floor(os.clock() * 1000))
+local flight_log_path = "GriffinMountExperiment_Flight_" .. session_id .. ".json"
+local flight_log = {schema = 1, version = VERSION, session_id = session_id, samples = {}, events = {}}
+local log_status = "No file write yet. Events and snapshots write the dedicated JSON."
+local recording = false
+local record_start = 0
+local next_sample = 0
+local last_flush = -math.huge
+local recorder_tick = nil
+
+local function game_time()
+    local core = rawget(_G, "NickCore")
+    return core and core.properties and core.properties.gameTime or 0
+end
+
+local function flush_flight_log()
+    local ok, result = pcall(json.dump_file, flight_log_path, flight_log)
+    if not ok or result == false then
+        log_status = "LOG WRITE ERROR: " .. tostring(result)
+        recording = false
+        log.error("[GriffinMountExperiment] " .. log_status)
+        return false
+    end
+    last_flush = game_time()
+    log_status = "Log write call completed; samples=" .. #flight_log.samples .. " events=" .. #flight_log.events
+    return true
+end
+
+local function log_event(name, detail)
+    if #flight_log.events >= 500 then return end
+    flight_log.events[#flight_log.events + 1] = {
+        name = name, detail = detail, game_time = game_time(), utc = os.date("!%Y-%m-%dT%H:%M:%SZ")
+    }
+    flush_flight_log()
+end
 
 local function disable_friendship(message)
     friendly = false
     party = {}
     relation_rows = {}
     relation_status = message or "Disabled. Original query results pass through."
+    log_event("friend_disabled", relation_status)
 end
 
 local function aggro_conflict()
@@ -107,6 +143,7 @@ end
 local function report(next_state, message)
     state, detail = next_state, message
     log.error("[GriffinMountExperiment " .. VERSION .. "] " .. state .. ": " .. detail)
+    log_event("state_" .. next_state, message)
 end
 
 local function enable_party_friend(core)
@@ -120,6 +157,7 @@ local function enable_party_friend(core)
     hits = {Character = {0, 0}, Holder = {0, 0}}
     friendly = true
     relation_status = "Enabled for returned Griffin + " .. #party .. " party members."
+    log_event("friend_enabled", relation_status)
 end
 
 local function request_spawn(early)
@@ -177,6 +215,7 @@ re.on_frame(function()
     if not core or core.properties.player ~= owner then
         disable_friendship("Disabled: player context changed.")
         shared = nil
+        recording = false
         report("Detached", "Player context changed. References discarded; no world object removed.")
         return
     end
@@ -192,6 +231,7 @@ re.on_frame(function()
     elseif state == "Waiting" and started and core.properties.gameTime - started > 20 then
         report("Delayed", "20 gameplay seconds elapsed. Still observing the same request; do not spawn again.")
     end
+    if recorder_tick then recorder_tick(core) end
 end)
 
 local function queue_relation_action(enable)
@@ -260,6 +300,7 @@ local function queue_think_flag(release)
             think_status = "Spawn ThinkStop flag: " .. tostring(before) .. " -> " .. tostring(after)
                 .. (release and " | Release requested; verify actual AI movement." or " | Read only.")
             log.error("[GriffinMountExperiment] " .. think_status)
+            log_event(release and "thinkstop_release" or "thinkstop_read", think_status)
         end)
         if not ok then
             think_status = "ThinkStop inspection/release error: " .. tostring(err)
@@ -346,21 +387,44 @@ local function queue_hate_action(clear)
     end)
 end
 
-local function queue_flight_snapshot()
+local function queue_flight_snapshot(source)
+    source = source or "manual"
     if relation_pending or not shared or not shared.go or not shared.chara then return end
+    if #flight_log.samples >= 1000 then
+        recording = false
+        flight_status = "Session sample limit reached (1000). Recording stopped."
+        flush_flight_log()
+        return
+    end
     relation_pending = true
     local expected = shared
     run_once(function()
         flight_rows = {}
+        local sample = {
+            sequence = #flight_log.samples + 1, source = source, game_time = game_time(),
+            utc = os.date("!%Y-%m-%dT%H:%M:%SZ"), friend_enabled = friendly,
+            values = {}, errors = {}
+        }
         local ok, err = pcall(function()
             local core = dependency()
             assert(core and core.properties.player == owner and shared == expected, "Instance context changed")
             assert(expected.go:get_Valid(), "Spawned GameObject is invalid")
+            sample.character_address = tostring(expected.chara:get_address()) -- diagnostic only; never selects a target
             local function row(label, getter)
                 local success, value = pcall(getter)
                 local text = label .. " = " .. (success and tostring(value) or ("READ ERROR: " .. tostring(value)))
                 flight_rows[#flight_rows + 1] = text
-                log.error("[GriffinMountExperiment] Flight " .. text)
+                if source == "manual" then log.error("[GriffinMountExperiment] Flight " .. text) end
+                if success then
+                    local kind = type(value)
+                    if kind == "number" or kind == "boolean" or kind == "string" then
+                        sample.values[label] = value
+                    else
+                        sample.values[label] = tostring(value)
+                    end
+                else
+                    sample.errors[label] = tostring(value)
+                end
                 return success and value or nil
             end
             for _, name in ipairs({"IsCanFly", "IsFlight", "IsGround", "IsHover"}) do
@@ -390,11 +454,46 @@ local function queue_flight_snapshot()
             if monster_ctrl ~= char_ctrl then inspect_controller("Ch253.FlightControl", monster_ctrl) end
             flight_status = "Snapshot complete. Read errors, if any, are shown below. No flight state was written."
         end)
-        if not ok then flight_status = "Flight snapshot error: " .. tostring(err) end
-        log.error("[GriffinMountExperiment] " .. flight_status)
+        if not ok then
+            flight_status = "Flight snapshot error: " .. tostring(err)
+            sample.errors.snapshot = tostring(err)
+            recording = false
+        end
+        flight_log.samples[#flight_log.samples + 1] = sample
+        if source == "manual" or not recording or not ok or game_time() - last_flush >= 1 then flush_flight_log() end
+        if source == "manual" or not ok then log.error("[GriffinMountExperiment] " .. flight_status) end
         relation_pending = false
     end)
 end
+
+recorder_tick = function(core)
+    if not recording or core.properties.isPaused then return end
+    local now = core.properties.gameTime
+    if now - record_start >= 60 then
+        recording = false
+        log_event("recording_finished", "60 gameplay seconds elapsed")
+        return
+    end
+    if now >= next_sample and not relation_pending then
+        next_sample = now + 0.2 -- At most 5 Hz; no catch-up burst after a slow frame.
+        queue_flight_snapshot("automatic")
+    end
+end
+
+local function start_recording()
+    if not shared or not shared.go or not shared.chara then return end
+    record_start = game_time()
+    next_sample = record_start
+    recording = true
+    log_event("recording_started", "60 gameplay seconds, at most 5 Hz; read-only flight getters")
+end
+
+re.on_script_reset(function()
+    recording = false
+    if #flight_log.samples > 0 or #flight_log.events > 0 then
+        log_event("script_reset", "Flushed available samples before reference loss")
+    end
+end)
 
 re.on_draw_ui(function()
     if not imgui.tree_node("Griffin Mount Experiment - Stage 3 Observe") then return end
@@ -410,6 +509,11 @@ re.on_draw_ui(function()
     end
     if shared and shared.go and shared.chara then
         if imgui.button("Read THIS Griffin flight snapshot (no control)") then queue_flight_snapshot() end
+        if not recording and imgui.button("Start 60s flight recording (5 Hz)") then start_recording() end
+        if recording and imgui.button("Stop flight recording + flush log") then
+            recording = false
+            log_event("recording_stopped", "Manual stop")
+        end
         if imgui.button("Inspect returned instance (read only)") then inspect_instance() end
         if imgui.button("Read BOTH relationship directions") then queue_relation_action(false) end
         if not friendly and imgui.button("Enable Friend for THIS Griffin + current party") then
@@ -425,6 +529,9 @@ re.on_draw_ui(function()
     end
     imgui.text(identity)
     imgui.text(flight_status)
+    imgui.text("Dedicated log: reframework/data/" .. flight_log_path)
+    imgui.text(log_status)
+    imgui.text("Automatic recording: " .. tostring(recording) .. " | Samples: " .. #flight_log.samples)
     for _, row in ipairs(flight_rows) do imgui.text(row) end
     imgui.text(relation_status)
     imgui.text(think_status)
