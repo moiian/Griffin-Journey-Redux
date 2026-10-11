@@ -1,7 +1,7 @@
 -- Griffin Mount Experiment: stage 3 player-as-target flight control experiment.
 -- Requires the installed aaaNickCore.lua and _NickCore/EnemySpawner.lua.
 -- Keeps an explicit spawn return or user-confirmed instance; never selects by Character ID.
-local VERSION = "0.3.10-stage3-anchor-stick"
+local VERSION = "0.3.11-stage3-camera"
 local state = "Idle"
 local detail = "Ready for one ordinary Griffin request per script session."
 local shared = nil
@@ -64,6 +64,28 @@ local lure_input = {x=0, y=0, raw_x=0, raw_y=0}
 local lure_input_error = nil
 local lure_invert_y = false
 local stop_lure
+local restore_lure_camera
+local camera_settings = {enabled=true,distance=30,fov=90}
+local camera_settings_path = "GriffinMountExperiment_Settings.json"
+local camera_state = nil
+local camera_suspended = false
+local camera_status = "观察镜头只在固定玩家期间生效；距离偏移30，FOV90。"
+local function bounded_number(value,fallback,minimum,maximum)
+    if type(value)~="number" or value~=value or math.abs(value)==math.huge then return fallback end
+    return math.max(minimum,math.min(maximum,value))
+end
+if type(json.load_file)=="function" then
+    local ok,saved=pcall(json.load_file,camera_settings_path)
+    if ok and type(saved)=="table" then
+        camera_settings.enabled=saved.enabled~=false
+        camera_settings.distance=bounded_number(saved.distance,30,0,80)
+        camera_settings.fov=bounded_number(saved.fov,90,40,120)
+    end
+end
+local function save_camera_settings()
+    local ok,result=pcall(json.dump_file,camera_settings_path,camera_settings)
+    if not ok or result==false then camera_status="镜头参数保存失败；本次调整仍有效。" end
+end
 local test_actions = {
     {key = "Test takeoff", label = "起飞", node = "Ch253TakeoffBackJump", phase = "ground"},
     {key = "Test hover", label = "悬停", node = "HoverWait", phase = "air"},
@@ -567,6 +589,8 @@ local function queue_flight_snapshot(source)
             target_probe_enabled = action_probe and target_probe
         }
         if lure then
+            sample.observation_camera={enabled=camera_settings.enabled,distance=camera_settings.distance,
+                fov=camera_settings.fov,active=camera_state~=nil,suspended=camera_suspended}
             sample.stick_lure = {active=true, input_x=lure_input.x, input_y=lure_input.y,
                 raw_x=lure_input.raw_x, raw_y=lure_input.raw_y, writes=lure.writes,
                 elapsed=game_time()-lure.started, target=lure.target, player_readback=lure.readback,
@@ -935,6 +959,7 @@ end
 stop_lure = function(reason)
     local d = lure or lure_restore_pending
     if not d then return end
+    if restore_lure_camera then restore_lure_camera() end
     lure = nil -- stop further driver writes before trying restoration
     lure_stick_enabled = false
     lure_input = {x=0,y=0,raw_x=0,raw_y=0}
@@ -981,6 +1006,7 @@ local function read_lure_stick()
         x,y=x*scale,y*scale
     end
     if lure_invert_y then y=-y end
+    x=-x -- 0.3.10 live test confirmed horizontal control was reversed; keep Y unchanged.
     if reframework and reframework:is_drawing_ui() then x,y=0,0 end
     return {x=x,y=y,raw_x=raw_x,raw_y=raw_y}
 end
@@ -1045,6 +1071,7 @@ local function start_lure_test()
             flight_log.events[#flight_log.events].player_original_scene=d.original_scene
             assert(flush_flight_log(), "Pre-movement log failed")
             lure_stick_enabled=false
+            camera_suspended=false
             lure=d;lure_input_error=nil
             lure_status="前方固定已开启（最长60秒）；可单独开启摇杆，再手动请求飞行动作。"
         end)
@@ -1093,7 +1120,63 @@ local function tick_lure_test()
     if not ok then stop_lure("驾驶检查或位置写入失败："..tostring(err)) end
 end
 
+restore_lure_camera = function()
+    local s=camera_state
+    if not s then return end
+    camera_state=nil -- single restoration attempt; never retry native calls every frame
+    local ok,err=pcall(function()
+        if sdk.get_managed_singleton("app.CameraManager")==s.manager
+            and s.last_distance and math.abs(s.manager._DistanceOffset-s.last_distance)<0.001 then
+            s.manager._DistanceOffset=s.original_distance
+        end
+        if sdk.get_primary_camera and sdk.get_primary_camera()==s.camera and s.last_fov then
+            local current=s.camera:call("get_FOV")
+            if math.abs(current-s.last_fov)<0.001 then s.camera:call("set_FOV",s.original_fov) end
+        end
+    end)
+    camera_status=ok and "观察镜头已释放；仍由本脚本持有的参数已恢复。" or "镜头恢复失败："..tostring(err)
+    log_event(ok and "camera_restored" or "camera_restore_error",camera_status)
+end
+
+local function update_lure_camera()
+    if not lure or not camera_settings.enabled then restore_lure_camera();return end
+    if camera_suspended then return end
+    local core=dependency()
+    if not core or core.properties.player~=lure.player or core.properties.isPaused then restore_lure_camera();return end
+    local ok,err=pcall(function()
+        local manager=sdk.get_managed_singleton("app.CameraManager")
+        local camera=sdk.get_primary_camera and sdk.get_primary_camera()
+        assert(manager and camera,"当前游戏相机不可用")
+        if camera_state and (camera_state.manager~=manager or camera_state.camera~=camera) then
+            restore_lure_camera();camera_suspended=true
+            camera_status="游戏相机已切换；观察镜头暂停至下次固定玩家。"
+            return
+        end
+        if not camera_state then
+            local md,cd=manager:get_type_definition(),camera:get_type_definition()
+            assert(md and md:get_field("_DistanceOffset") and cd and cd:get_method("get_FOV") and cd:get_method("set_FOV"),
+                "距离或FOV接口不可用")
+            local distance,fov=manager._DistanceOffset,camera:call("get_FOV")
+            assert(type(distance)=="number" and distance==distance and math.abs(distance)<math.huge,"原镜头距离无效")
+            assert(type(fov)=="number" and fov>5 and fov<180,"原FOV无效")
+            camera_state={manager=manager,camera=camera,original_distance=distance,original_fov=fov}
+            log_event("camera_override_started","Scoped to player anchor; editable distance and FOV")
+        end
+        local s=camera_state
+        s.last_distance=camera_settings.distance;s.last_fov=camera_settings.fov
+        manager._DistanceOffset=s.last_distance
+        camera:call("set_FOV",s.last_fov)
+        camera_status="观察镜头生效中（参数自动保存）"
+    end)
+    if not ok then
+        restore_lure_camera();camera_suspended=true
+        camera_status="观察镜头已停用，前方固定保留："..tostring(err)
+        log_event("camera_override_error",camera_status)
+    end
+end
+
 if type(re.on_application_entry)=="function" and type(re.on_pre_application_entry)=="function" then
+    re.on_application_entry("PrepareRendering",update_lure_camera)
     re.on_application_entry("UpdateHID",function()
         if not lure or not lure_stick_enabled then return end
         local ok,value=pcall(read_lure_stick)
@@ -1107,6 +1190,7 @@ end
 re.on_script_reset(function()
     lure_start_cancelled=true
     if lure or lure_restore_pending then stop_lure("脚本重置") end
+    restore_lure_camera()
     recording = false
     if request_listener_table and request_listener_table[request_listener_key] == request_listener_fn then
         request_listener_table[request_listener_key] = nil
@@ -1206,6 +1290,17 @@ re.on_draw_ui(function()
     if shared and shared.go and shared.chara and imgui.tree_node("【本轮】左摇杆驾驶（玩家作为前方目标）") then
         imgui.text("1.固定玩家 → 2.开启摇杆 → 再点目标导向飞行。")
         imgui.text("固定最长60秒；自动记录。左右横移／上下升降，松杆回正前方。")
+        if type(imgui.checkbox)=="function" then
+            local changed,value=imgui.checkbox("【本轮】启用观察镜头（固定期间）",camera_settings.enabled)
+            if changed then camera_settings.enabled=value;save_camera_settings() end
+        end
+        if type(imgui.slider_float)=="function" then
+            local changed,value=imgui.slider_float("【本轮】镜头距离偏移",camera_settings.distance,0,80)
+            if changed then camera_settings.distance=bounded_number(value,camera_settings.distance,0,80);save_camera_settings() end
+            changed,value=imgui.slider_float("【本轮】镜头FOV",camera_settings.fov,40,120)
+            if changed then camera_settings.fov=bounded_number(value,camera_settings.fov,40,120);save_camera_settings() end
+        end
+        imgui.text(camera_status)
         if type(imgui.checkbox)=="function" then
             local changed,value=imgui.checkbox("上下反转（推上反而下降时开启）",lure_invert_y)
             if changed then lure_invert_y=value end
