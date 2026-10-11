@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.15. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.16. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.15-beta"
+local VERSION = "0.1.16-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -15,7 +15,7 @@ local status = "先生成狮鹫，再开始驾驶。"
 local hooks_ready, hooks_tried, friend_value = false, false, nil
 local masks = nil
 local input = {x = 0, y = 0, buttons = 0}
-local settings = {distance = 30, fov = 90, player_distance = 20, player_height = 0, freeze_player = true, rider_height=1.0, rider_forward=0, rider_side=0, camera_x=0, camera_y=0, camera_z=0, sphere_navigation=true, navigation_radius=2.5, steering_yaw=50, steering_pitch=45, navigation_height=0.35}
+local settings = {distance = 30, fov = 90, player_distance = 20, player_height = 0, freeze_player = true, rider_height=1.0, rider_forward=0, rider_side=0, camera_x=0, camera_y=0, camera_z=0, sphere_navigation=true, navigation_radius=4.019, steering_yaw=50.276, steering_pitch=22.018, navigation_height=0.991, bumper_pitch=69, controls_revision=1}
 local settings_path = "GriffinFlightBeta_Settings.json"
 local log_id = os.date("!%Y%m%dT%H%M%SZ") .. "_" .. math.floor(os.clock() * 1000)
 local part, last_flush, next_sample = 1, -math.huge, 0
@@ -70,7 +70,9 @@ if type(json.load_file) == "function" then
         if finite(saved.navigation_radius) then settings.navigation_radius=math.max(2,math.min(30,saved.navigation_radius)) end
         if finite(saved.navigation_height) then settings.navigation_height=math.max(-27,math.min(27,saved.navigation_height)) end
         if finite(saved.steering_yaw) then settings.steering_yaw=math.max(1,math.min(85,saved.steering_yaw)) end
-        if finite(saved.steering_pitch) then settings.steering_pitch=math.max(1,math.min(80,saved.steering_pitch)) end
+        -- First controls migration adopts the user's screenshot, not an older cached pitch.
+        if saved.controls_revision == 1 and finite(saved.steering_pitch) then settings.steering_pitch=math.max(1,math.min(80,saved.steering_pitch)) end
+        if finite(saved.bumper_pitch) then settings.bumper_pitch=math.max(1,math.min(80,saved.bumper_pitch)) end
         if finite(saved.player_height) then settings.player_height = math.max(-80, math.min(80, saved.player_height)) end
         if finite(saved.player_distance) then settings.player_distance = math.max(2, math.min(80, saved.player_distance)) end
         if finite(saved.distance) then settings.distance = math.max(0, math.min(80, saved.distance)) end
@@ -509,7 +511,7 @@ local function read_pad()
     if not masks then
         local enum = sdk.find_type_definition("via.hid.GamePadButton")
         masks = {}
-        for name, field in pairs({a = "RDown", rt = "RTrigBottom", lt = "LTrigBottom"}) do
+        for name, field in pairs({a = "RDown", rt = "RTrigBottom", lt = "LTrigBottom", rb = "RTrigTop", lb = "LTrigTop"}) do
             local f = enum and enum:get_field(field)
             local n = f and f:get_data(nil)
             assert(finite(n) and n > 0 and n == math.floor(n), "Gamepad button unavailable: " .. field)
@@ -779,7 +781,7 @@ local function start_driver()
                 transform = player:call("get_Transform()"), context = player:get_field("<PosRotContext>k__BackingField"),
                 terrain = terrain, controller = terrain and terrain.MainCharacterController,
                 fall = player:get_field("<FallInfo>k__BackingField"), fsm = player_fsm(player),
-                anchor_mode=anchor_mode, mode = "ground", last_request = -math.huge, started = now(), pending = false}
+                anchor_mode=anchor_mode, gear=1, controls_active=false, mode = "ground", last_request = -math.huge, started = now(), pending = false}
             assert(d.transform and d.context and d.controller and d.fall and d.fsm, "Player interfaces unavailable")
             local ft = d.fsm:get_type_definition()
             assert(ft:get_method("get_Enabled()") and ft:get_method("set_Enabled(System.Boolean)"), "FSM Enabled interface unavailable")
@@ -796,9 +798,10 @@ local function start_driver()
             prepare_anchor_mode(d,d.anchor_mode)
             select_player_target(r)
             if r.result.chara:call("get_IsFlight()") then
+                d.controls_active=true; d.control_node="Ch253HoverWaitHoHomingHeight"
                 set_intent(d, "Ch253HoverWaitHoHomingHeight", "hover")
             end
-            status = "驾驶中：A 起飞／降落，RT 冲刺，LT 悬停。"
+            status = "驾驶中：A 仅起飞；RT 3档，LT 逐档减速；RB／LB 分档操作。"
             event("driver_started", {ahead = settings.player_distance, height = settings.player_height, freeze_player = d.freeze_requested, lateral = 12, vertical = 10, anchor_mode=d.anchor_mode,sphere_navigation=settings.sphere_navigation,navigation_radius=settings.navigation_radius,steering_yaw=settings.steering_yaw,steering_pitch=settings.steering_pitch})
         end)
         if not ok then
@@ -821,11 +824,17 @@ local function navigation_anchor(d,ch,tr,pos,fx,fz)
     assert(validate_spawn(d.spawn)==ch,"Griffin reference changed")
     local center=vector(d.rider_head:call("get_Position()"))
     local radius=settings.navigation_radius
-    local yaw=math.max(-1,math.min(1,input.x))*settings.steering_yaw*math.pi/180
+    local nav_x,nav_y=input.x,input.y
+    if d.controls_active and not d.external_control and (d.gear==2 or d.manual_hold) then nav_x,nav_y=0,0 end
+    local yaw=math.max(-1,math.min(1,nav_x))*settings.steering_yaw*math.pi/180
     local height=math.max(-radius*0.9,math.min(radius*0.9,settings.navigation_height))
     local neutral_pitch=math.asin(height/radius)
     local limit=85*math.pi/180
-    local pitch=math.max(-limit,math.min(limit,neutral_pitch+math.max(-1,math.min(1,input.y))*settings.steering_pitch*math.pi/180))
+    local pitch=math.max(-limit,math.min(limit,neutral_pitch+math.max(-1,math.min(1,nav_y))*settings.steering_pitch*math.pi/180))
+    if d.controls_active and not d.external_control and d.gear==3 and masks then
+        local rb,lb=held(input.buttons,masks.rb),held(input.buttons,masks.lb)
+        if rb ~= lb then pitch=(rb and 1 or -1)*settings.bumper_pitch*math.pi/180 end
+    end
     local horizontal=radius*math.cos(pitch)
     local dx=fx*math.cos(yaw)+fz*math.sin(yaw)
     local dz=fz*math.cos(yaw)-fx*math.sin(yaw)
@@ -864,8 +873,6 @@ local function tick_driver()
         assert(length > 0.2, "Griffin is too vertical")
         fx,fz = fx/length,fz/length
         d.heading={x=fx,z=fz}
-        local target,neutral,sphere=navigation_anchor(d,ch,tr,pos,fx,fz)
-        write_anchor(d,target,neutral)
         local flying, ground = ch:call("get_IsFlight()"), ch:call("get_IsGround()")
         local manager = ch:call("get_ActionManager()")
         assert(manager and manager:call("get_GameObject()") == d.spawn.result.go, "ActionManager mismatch")
@@ -873,26 +880,60 @@ local function tick_driver()
         local action_name = info and info:get_field("Name")
         local pressed = input.buttons & (~d.previous_buttons)
         d.previous_buttons = input.buttons
-        if d.mode == "taking_off" then
-            if action_name == "Ch253TakeoffBackJump" then d.saw_takeoff = true end
-            if d.auto_hover and flying and action_name ~= "Ch253TakeoffBackJump" and not d.intent then
-                set_intent(d, "Ch253HoverWaitHoHomingHeight", "hover")
-            elseif ground and not flying and d.saw_takeoff and action_name ~= "Ch253TakeoffBackJump" then
-                d.mode = "ground"
+        local moving=input.x~=0 or input.y~=0
+        local function resume(gear)
+            d.gear=gear; d.controls_active=true; d.external_control=false
+            d.manual_hold=nil; d.control_node=nil; d.auto_hover=false
+            d.intent=nil; d.mode="control"
+            event("gear_selected",gear)
+        end
+        if held(pressed,masks.rt) then
+            resume(3)
+        elseif held(pressed,masks.lt) then
+            resume(math.max(1,d.gear-1))
+        elseif held(pressed,masks.a) then
+            -- This native node can also land. Never request it in flight or twice mid-takeoff.
+            if ground and not flying and d.mode~="taking_off" and action_name~="Ch253TakeoffBackJump" then
+                resume(1); d.mode="taking_off"
+                set_intent(d,"Ch253TakeoffBackJump","taking_off"); d.intent.auto_hover=true
+            else event("takeoff_ignored","A仅允许地面起飞") end
+        elseif d.gear<=2 and (held(pressed,masks.rb) or held(pressed,masks.lb)) then
+            resume(d.gear)
+            d.manual_hold=held(pressed,masks.rb) and "hover" or "landing"
+            d.wait_center=true
+        end
+        if d.mode=="taking_off" then
+            if action_name=="Ch253TakeoffBackJump" then d.saw_takeoff=true end
+            if d.auto_hover and flying and action_name~="Ch253TakeoffBackJump" and not d.intent then
+                d.mode="hover"; d.manual_hold="hover"; d.wait_center=true; d.control_node=nil
+            elseif ground and not flying and d.saw_takeoff and action_name~="Ch253TakeoffBackJump" then
+                d.mode="ground"; d.controls_active=false
             end
         end
-        if held(pressed, masks.lt) then
-            set_intent(d, "Ch253HoverWaitHoHomingHeight", "hover")
-        elseif held(pressed, masks.a) then
-            set_intent(d, "Ch253TakeoffBackJump", "taking_off")
-            d.intent.auto_hover = not flying
-        elseif held(pressed, masks.rt) then
-            set_intent(d, "Ch253WrapAroundStartLoop", "dash")
+        if d.manual_hold then
+            if not moving then d.wait_center=false
+            elseif not d.wait_center then d.manual_hold=nil; d.control_node=nil end
         end
+        if d.controls_active and not d.external_control and d.mode~="taking_off" then
+            local node,mode
+            if d.manual_hold=="landing" then node,mode="Ch253HoverToLanding","landing"
+            elseif d.manual_hold=="hover" then node,mode="Ch253HoverWaitHoHomingHeight","hover"
+            elseif d.gear==3 then node,mode="Ch253WrapAroundStartLoop","dash"
+            elseif d.gear==2 then
+                node,mode="HoverForwardTargetHeight","coast"
+                if moving and math.abs(input.x)>math.abs(input.y) then
+                    node=input.x<0 and "HoverLateralRTargetHeight" or "HoverLateralLTargetHeight"
+                elseif input.y<0 then node="HoverBackwardTargetHeight" end
+            elseif moving then node,mode="Ch253AirHoverMoveToTarget","fine"
+            else node,mode="Ch253HoverWaitHoHomingHeight","hover" end
+            if node~=d.control_node then d.control_node=node; set_intent(d,node,mode) end
+        end
+        local target,neutral,sphere=navigation_anchor(d,ch,tr,pos,fx,fz)
+        write_anchor(d,target,neutral)
         dispatch(d)
         d.trace = {navigation_sphere=sphere,neutral_anchor=neutral,anchor_plan=d.anchor_plan,griffin = pos, player = vector(d.transform:call("get_Position()")), target = target,
             physical = vector(d.controller:call("get_Position()")), flight = flying, ground = ground,
-            action = tostring(action_name), mode = d.mode, anchor_mode=d.anchor_mode, anchor_height = settings.player_height, stick = {x=input.x,y=input.y}}
+            action = tostring(action_name), mode = d.mode, gear=d.gear, manual_hold=d.manual_hold, external_control=d.external_control, bumpers={rb=held(input.buttons,masks.rb),lb=held(input.buttons,masks.lb)}, anchor_mode=d.anchor_mode, anchor_height = settings.player_height, stick = {x=input.x,y=input.y}}
     end)
     if not ok then stop_driver("驾驶检查或位置同步失败"); failed("驾驶已停止", err) end
 end
@@ -1135,6 +1176,8 @@ function bridge.request_action(node, allow_cross, phase)
         -- Replacing the intent cancels already queued requests. External actions also
         -- cancel automatic takeoff-to-hover; only a new controller press replaces them.
         active.mode = "external"
+        active.external_control = true
+        active.control_node = nil
         active.auto_hover = false
         set_intent(active, node, "external")
         event("external_action_queued", node)
@@ -1180,7 +1223,7 @@ local function beta_button(label)
 end
 re.on_draw_ui(function()
     if not imgui.tree_node("狮鹫飞行 Beta###GriffinFlightBeta") then return end
-    imgui.text("版本 "..VERSION.." | A 起飞／降落 · RT 冲刺 · LT 悬停")
+    imgui.text("版本 "..VERSION.." | A 仅起飞 · RT 3档 · LT 逐档减速")
     if beta_button("一键生成狮鹫并设为友方###BetaSpawn") then spawn() end
     if beta_button((skip_think_enabled and "关闭跳过狮鹫思考" or "【新增】开启跳过狮鹫思考").."###BetaThinkToggle") then
         local ok,err=set_skip_think(not skip_think_enabled)
@@ -1227,9 +1270,10 @@ re.on_draw_ui(function()
         if mode.key==anchor_mode then imgui.text("当前摇杆位置层："..mode.label);break end
     end
     if active then
-        local labels={ground="等待起飞",taking_off="起飞／降落动作",external="实验工具动作",hover="悬停",dash="冲刺"}
-        imgui.text("请求模式："..(labels[active.mode] or active.mode).."；左摇杆左右转向／上下调整目标高度。")
+        local labels={ground="等待起飞",taking_off="起飞",external="实验工具接管",hover="原地悬停",dash="冲刺",coast="惯性平移",fine="精细移动",landing="原地降落",control="切档中"}
+        imgui.text("当前档位："..active.gear.."档；请求模式："..(labels[active.mode] or active.mode).."；左摇杆左右转向／上下调整目标高度。")
     end
+    imgui.text("3档 RB爬升／LB俯冲；1、2档 RB悬停／LB降落。")
     if active and active.trace then
         imgui.text("实际动作："..active.trace.action)
         local probe = active.trace.target_probe
@@ -1312,7 +1356,8 @@ re.on_draw_ui(function()
             for _,spec in ipairs({{key="navigation_radius",label="【本轮】头部导航半径（米）",low=2,high=30},
                 {key="navigation_height",label="【本轮】球面回中高度（米）",low=-settings.navigation_radius*0.9,high=settings.navigation_radius*0.9},
                 {key="steering_yaw",label="【本轮】左右转向灵敏度（最大角度）",low=1,high=85},
-                {key="steering_pitch",label="【本轮】上下转向灵敏度（最大角度）",low=1,high=80}}) do
+                {key="steering_pitch",label="【本轮】摇杆上下微调（最大角度）",low=1,high=80},
+                {key="bumper_pitch",label="【新增】3档 RB／LB 升降角度",low=1,high=80}}) do
                 local changed,value=imgui.slider_float(spec.label,math.max(spec.low,math.min(spec.high,settings[spec.key])),spec.low,spec.high)
                 if changed and finite(value) then settings[spec.key]=math.max(spec.low,math.min(spec.high,value));pcall(json.dump_file,settings_path,settings) end
             end
