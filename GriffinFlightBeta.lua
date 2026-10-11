@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.6. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.7. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.6-beta"
+local VERSION = "0.1.7-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -128,11 +128,22 @@ local function validate_spawn(r)
     assert(result.chara:get_CharaIDString() == "ch253000_00"
         and result.chara:call("get_GameObject()") == result.go, "Griffin reference mismatch")
     assert(r.friend and aggro_clear(), "Friend override unavailable")
+    assert(r.owner:get_Valid(), "Player no longer valid")
+    local unavailable = 0
     for _, member in ipairs(r.party) do
-        assert(member:get_Valid(), "Party member no longer valid")
-        assert(result.chara:call("getBattleRelationshipTo(app.Character)", member) == friend_value
-            and member:call("getBattleRelationshipTo(app.Character)", result.chara) == friend_value,
-            "Party relationship changed")
+        -- A distant pawn may leave the loaded scene. Never pass an invalid reference
+        -- to native relationship calls, and do not end the player's flight for it.
+        if member:get_Valid() then
+            assert(result.chara:call("getBattleRelationshipTo(app.Character)", member) == friend_value
+                and member:call("getBattleRelationshipTo(app.Character)", result.chara) == friend_value,
+                "Party relationship changed")
+        else
+            unavailable = unavailable + 1
+        end
+    end
+    if unavailable ~= (r.unavailable_party or 0) then
+        r.unavailable_party = unavailable
+        event("party_reference_availability", {unavailable=unavailable, ignored_for_driver=true})
     end
     return result.chara
 end
