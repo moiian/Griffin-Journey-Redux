@@ -1,6 +1,6 @@
 -- Griffin Flight Beta 0.1.19. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.19-beta"
+local VERSION = "0.1.20-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -18,7 +18,7 @@ local yaw_status = "自动转向镜头：未开启"
 local controls,menu = {},{}
 local masks = nil
 local input = {x = 0, y = 0, buttons = 0}
-local settings = {distance = 30, fov = 90, player_distance = 20, player_height = 0, freeze_player = true, rider_height=1.0, rider_forward=0, rider_side=0, camera_x=0, camera_y=0, camera_z=0, sphere_navigation=true, navigation_radius=4.019, steering_yaw=50.276, steering_pitch=22.018, navigation_height=0.991, bumper_pitch=59, controls_revision=1, camera_auto_yaw=false, camera_yaw_speed=120, camera_manual_threshold=0.55}
+local settings = {distance = 30, fov = 90, player_distance = 20, player_height = 0, freeze_player = true, rider_anchor="head", rider_neck_joint="", rider_height=1.0, rider_forward=0, rider_side=0, camera_x=0, camera_y=0, camera_z=0, sphere_navigation=true, navigation_radius=4.019, steering_yaw=50.276, steering_pitch=22.018, navigation_height=0.991, bumper_pitch=59, controls_revision=1, camera_auto_yaw=false, camera_yaw_speed=120, camera_manual_threshold=0.55}
 local loaded_settings=nil
 local settings_path = "GriffinFlightBeta_Settings.json"
 local log_id = os.date("!%Y%m%dT%H%M%SZ") .. "_" .. math.floor(os.clock() * 1000)
@@ -85,6 +85,8 @@ if type(json.load_file) == "function" then
         if finite(saved.player_distance) then settings.player_distance = math.max(2, math.min(80, saved.player_distance)) end
         if finite(saved.distance) then settings.distance = math.max(0, math.min(80, saved.distance)) end
         if finite(saved.fov) then settings.fov = math.max(40, math.min(120, saved.fov)) end
+        settings.rider_anchor=saved.rider_anchor=="neck" and "neck" or "head"
+        settings.rider_neck_joint=type(saved.rider_neck_joint)=="string" and saved.rider_neck_joint or ""
         if finite(saved.rider_height) then settings.rider_height=math.max(-5,math.min(15,saved.rider_height)) end
         if finite(saved.rider_forward) then settings.rider_forward=math.max(-15,math.min(15,saved.rider_forward)) end
         if finite(saved.rider_side) then settings.rider_side=math.max(-10,math.min(10,saved.rider_side)) end
@@ -246,7 +248,7 @@ local function prepare_rider(d,key)
     local tr=ch:call("get_Transform()")
     assert(tr,"Griffin Transform unavailable")
     d.rider_griffin_transform=tr
-    d.rider_head=nil;d.rider_head_name=nil
+    d.rider_head=nil;d.rider_head_name=nil;d.rider_necks={}
     local joints=tr:call("get_Joints()")
     local candidates={}
     if joints then
@@ -254,6 +256,10 @@ local function prepare_rider(d,key)
             if joint and joint:get_Valid() then
                 local name=tostring(joint:call("get_Name()"))
                 local lower=name:lower()
+                if lower:find("neck",1,true) and not lower:find("end",1,true)
+                    and not lower:find("target",1,true) and not lower:find("eff",1,true) then
+                    d.rider_necks[#d.rider_necks+1]={name=name,joint=joint}
+                end
                 if lower:find("head",1,true) then
                     candidates[#candidates+1]=name
                     if lower=="head" then d.rider_head=joint;d.rider_head_name=name
@@ -263,7 +269,9 @@ local function prepare_rider(d,key)
             end
         end
     end
-    event("rider_head_binding",{head=d.rider_head_name,candidates=candidates,
+    table.sort(d.rider_necks,function(a,b) return a.name<b.name end)
+    local neck_names={};for _,entry in ipairs(d.rider_necks) do neck_names[#neck_names+1]=entry.name end
+    event("rider_head_binding",{head=d.rider_head_name,candidates=candidates,neck_candidates=neck_names,
         fallback=not d.rider_head and "Griffin root + forward 3m / up 4m" or nil})
 end
 local function prepare_anchor_mode(d,key)
@@ -743,11 +751,14 @@ local function set_intent(d, node, mode)
     d.intent = {node = node, mode = mode}
 end
 local function dispatch(d)
-    if not d.intent or d.pending or now() - d.last_request < 0.35 then return end
+    local c=core()
+    if not c or c.properties.isPaused or not d.intent or d.pending or now() - d.last_request < 0.35 then return end
     local intent = d.intent
     d.pending = true
     run_once(function()
         if not alive or active ~= d or d.intent ~= intent then d.pending = false; return end
+        local c=core()
+        if c and c.properties.isPaused then d.pending=false;return end -- keep intent until resume
         local ok, err = pcall(function()
             local ch = validate_spawn(d.spawn)
             assert(owned_player(d, true) and player_fsm(d.player) == d.fsm, "Player binding changed")
@@ -1081,7 +1092,17 @@ local function tick_driver()
     local d = active
     if not d or not alive then return end
     local c = core()
-    if not c or c.properties.isPaused or now() < d.started then stop_driver("游戏暂停或上下文变化"); return end
+    if not c then stop_driver("游戏上下文不可用");return end
+    if c.properties.isPaused then
+        if not d.menu_paused then event("driver_menu_paused",true) end
+        d.menu_paused=true;d.previous_buttons=input.buttons
+        return -- preserve player position, FSM, bones, camera and pending intent
+    end
+    if d.menu_paused then
+        d.menu_paused=nil;d.previous_buttons=input.buttons
+        event("driver_menu_resumed",true)
+    end
+    if now()<d.started then stop_driver("游戏时间上下文变化");return end
     local ok, err = pcall(function()
         local ch = validate_spawn(d.spawn)
         local bus = rawget(_G, "DD2_OxcartControl")
@@ -1148,7 +1169,8 @@ local function tick_driver()
                 node,mode="HoverForwardTargetHeight","coast"
                 if moving and math.abs(input.x)>math.abs(input.y) then
                     node=input.x<0 and "HoverLateralRTargetHeight" or "HoverLateralLTargetHeight"
-                elseif input.y<0 then node="HoverBackwardTargetHeight" end
+                elseif input.y<0 then node="HoverBackwardTargetHeight"
+                elseif input.y>0 then node="FlightTarget" end
             elseif moving then node,mode="Ch253AirHoverMoveToTarget","fine"
             else node,mode="Ch253HoverWaitHoHomingHeight","hover" end
             if node~=d.control_node then d.control_node=node; set_intent(d,node,mode) end
@@ -1175,6 +1197,22 @@ local function rider_seat(d)
         base=vector(d.rider_griffin_transform:call("get_Position()"))
         base={x=base.x+d.heading.x*3,y=base.y+4,z=base.z+d.heading.z*3}
     end
+    local selected_name=d.rider_head_name
+    if settings.rider_anchor=="neck" then
+        local neck=d.rider_necks and d.rider_necks[1]
+        for _,candidate in ipairs(d.rider_necks or {}) do
+            if candidate.name==settings.rider_neck_joint then neck=candidate;break end
+        end
+        if neck and neck.joint:get_Valid() then
+            base=vector(neck.joint:call("get_Position()"));selected_name=neck.name
+            d.rider_neck_missing=nil
+        elseif not d.rider_neck_missing then
+            d.rider_neck_missing=true
+            status="未找到可用颈部骨骼，座位暂用头部；导航与驾驶继续。"
+            event("rider_neck_unavailable",settings.rider_neck_joint)
+        end
+    end
+    d.rider_seat_joint_name=selected_name
     local fx,fz=d.heading.x,d.heading.z
     local seat={x=base.x+fx*settings.rider_forward+fz*settings.rider_side,
         y=base.y+settings.rider_height,z=base.z+fz*settings.rider_forward-fx*settings.rider_side}
@@ -1238,7 +1276,7 @@ end
 re.on_frame(function()
     if not alive then return end
     local c = core()
-    if not c then return end
+    if not c or c.properties.isPaused then return end
     if fall_hits~=fall_logged and now()-fall_log_at>=1 then
         fall_logged=fall_hits;fall_log_at=now();event("player_fall_request",{hits=fall_hits,blocked=fall_blocked})
     end
@@ -1251,6 +1289,7 @@ re.on_frame(function()
             r.ready = true
             run_once(function()
                 if not alive or r.deleted or r.delete_requested then return end
+                if core() and core().properties.isPaused then r.ready=false;return end
                 local ok, err = pcall(function()
                     install_hooks()
                     local ch = validate_spawn(r)
@@ -1304,10 +1343,19 @@ re.on_application_entry("UpdateHID",function()
     if not alive then return end
     local ok,result=pcall(read_pad)
     if not ok then
+        if core() and core().properties.isPaused then return end
         if active then stop_driver("输入读取失败");failed("输入读取失败",result) end
         return
     end
     input=result
+    if core() and core().properties.isPaused then
+        if active then active.previous_buttons=result.buttons end
+        return -- menu navigation must not invoke gameplay hotkeys
+    end
+    if active and active.menu_paused then
+        active.previous_buttons=result.buttons
+        return -- seed menu-held inputs before the first resumed behavior update
+    end
     if controls.capture or controls.release_gate then return end
     for _,name in ipairs({"stop","delete","spawn","start","listen","preset_next"}) do
         if result.edges[name] then
@@ -1325,7 +1373,7 @@ end)
 re.on_pre_application_entry("UpdateBehavior",function() tick_skip_think();tick_driver();tick_camera_follow() end)
 re.on_pre_application_entry("UpdateJointExpression",function()
     local d=active
-    if not d or not alive or not d.bones_applied then return end
+    if not d or not alive or not d.bones_applied or not core() or core().properties.isPaused then return end
     local ok,err=pcall(function()
         assert(owned_player(d,true),"Player binding changed")
         restore_bone(d)
@@ -1360,7 +1408,7 @@ re.on_application_entry("UpdateJointExpression",function()
             if d.anchor_plan then d.anchor_plan[a.key]=a.written end
         end
         if seat then
-            d.rider_trace={phase="UpdateJointExpression",mode="rider",head_joint=d.rider_head_name,
+            d.rider_trace={phase="UpdateJointExpression",mode="rider",head_joint=d.rider_head_name,seat_joint=d.rider_seat_joint_name,seat_anchor=settings.rider_anchor,
                 fallback=not d.rider_head,head=head,seat=seat,
                 hip=vector(d.hip_joint:call("get_Position()")),
                 root=d.root_joint and vector(d.root_joint:call("get_Position()")) or nil,
@@ -1371,6 +1419,7 @@ re.on_application_entry("UpdateJointExpression",function()
     if not ok then stop_driver("骨骼位置实验失败");failed("骨骼位置实验失败",err) end
 end)
 re.on_application_entry("PrepareRendering",function()
+    if not core() or core().properties.isPaused then return end
     read_camera_follow()
     local d = active
     if not d or d.camera_failed then return end
@@ -1473,7 +1522,7 @@ menu.clone=function(value)
 end
 menu.preset_name="新座位预设"
 menu.snapshot=function(name,source)
-    return {schema=1,name=name,player={height=settings.rider_height,forward=settings.rider_forward,side=settings.rider_side},
+    return {schema=2,name=name,player={anchor=settings.rider_anchor,neck_joint=settings.rider_neck_joint,height=settings.rider_height,forward=settings.rider_forward,side=settings.rider_side},
         camera={distance=settings.distance,fov=settings.fov},pawns=menu.clone(source and source.pawns or {}),
         companions=menu.clone(source and source.companions or {})}
 end
@@ -1492,6 +1541,8 @@ menu.apply_preset=function(index)
     local preset=settings.seat_presets[index]
     if not preset then return end
     settings.seat_index=index
+    settings.rider_anchor=preset.player.anchor=="neck" and "neck" or "head"
+    settings.rider_neck_joint=type(preset.player.neck_joint)=="string" and preset.player.neck_joint or ""
     settings.rider_height=math.max(-5,math.min(15,preset.player.height))
     settings.rider_forward=math.max(-15,math.min(15,preset.player.forward))
     settings.rider_side=math.max(-10,math.min(10,preset.player.side))
@@ -1620,6 +1671,22 @@ re.on_draw_ui(function()
             if changed then menu.apply_preset(index) end
         else imgui.text("当前预设："..names[settings.seat_index]) end
         if beta_button("下一预设###BetaPresetNext") then menu.apply_preset(settings.seat_index%#settings.seat_presets+1) end
+        if type(imgui.combo)=="function" then
+            local changed,index=imgui.combo("【新增】座位骨骼锚点",settings.rider_anchor=="neck" and 2 or 1,{"头部","颈部"})
+            if changed then settings.rider_anchor=index==2 and "neck" or "head";controls.save() end
+            if settings.rider_anchor=="neck" then
+                local names={"自动（首个颈部骨骼）"};local selected=1
+                for _,entry in ipairs(active and active.rider_necks or {}) do
+                    names[#names+1]=entry.name
+                    if entry.name==settings.rider_neck_joint then selected=#names end
+                end
+                local changed,index=imgui.combo("【新增】颈部骨骼",selected,names)
+                if changed then settings.rider_neck_joint=index==1 and "" or names[index];controls.save() end
+            end
+        end
+        if active and active.rider_seat_joint_name then imgui.text("当前座位骨骼："..active.rider_seat_joint_name) end
+        if active and settings.rider_anchor=="neck" and active.rider_neck_missing then imgui.text("未找到可用颈部骨骼，暂用头部。") end
+        imgui.text("骨骼锚点随预设保存；导航目标与镜头仍跟随头部。")
         menu.slider("rider_height","【新增】座位上下偏移",-5,15)
         menu.slider("rider_forward","【新增】座位前后偏移",-15,15)
         menu.slider("rider_side","【新增】座位左右偏移",-10,10)
