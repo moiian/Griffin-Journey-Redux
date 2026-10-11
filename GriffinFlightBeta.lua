@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.14. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.15. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.14-beta"
+local VERSION = "0.1.15-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -15,7 +15,7 @@ local status = "先生成狮鹫，再开始驾驶。"
 local hooks_ready, hooks_tried, friend_value = false, false, nil
 local masks = nil
 local input = {x = 0, y = 0, buttons = 0}
-local settings = {distance = 30, fov = 90, player_distance = 20, player_height = 0, freeze_player = true, rider_height=1.0, rider_forward=0, rider_side=0, camera_x=0, camera_y=0, camera_z=0, sphere_navigation=true, navigation_radius=8, steering_yaw=45, steering_pitch=45}
+local settings = {distance = 30, fov = 90, player_distance = 20, player_height = 0, freeze_player = true, rider_height=1.0, rider_forward=0, rider_side=0, camera_x=0, camera_y=0, camera_z=0, sphere_navigation=true, navigation_radius=2.5, steering_yaw=50, steering_pitch=45, navigation_height=0.35}
 local settings_path = "GriffinFlightBeta_Settings.json"
 local log_id = os.date("!%Y%m%dT%H%M%SZ") .. "_" .. math.floor(os.clock() * 1000)
 local part, last_flush, next_sample = 1, -math.huge, 0
@@ -68,6 +68,7 @@ if type(json.load_file) == "function" then
         if type(saved.freeze_player) == "boolean" then settings.freeze_player = saved.freeze_player end
         if type(saved.sphere_navigation)=="boolean" then settings.sphere_navigation=saved.sphere_navigation end
         if finite(saved.navigation_radius) then settings.navigation_radius=math.max(2,math.min(30,saved.navigation_radius)) end
+        if finite(saved.navigation_height) then settings.navigation_height=math.max(-27,math.min(27,saved.navigation_height)) end
         if finite(saved.steering_yaw) then settings.steering_yaw=math.max(1,math.min(85,saved.steering_yaw)) end
         if finite(saved.steering_pitch) then settings.steering_pitch=math.max(1,math.min(80,saved.steering_pitch)) end
         if finite(saved.player_height) then settings.player_height = math.max(-80, math.min(80, saved.player_height)) end
@@ -821,12 +822,16 @@ local function navigation_anchor(d,ch,tr,pos,fx,fz)
     local center=vector(d.rider_head:call("get_Position()"))
     local radius=settings.navigation_radius
     local yaw=math.max(-1,math.min(1,input.x))*settings.steering_yaw*math.pi/180
-    local pitch=math.max(-1,math.min(1,input.y))*settings.steering_pitch*math.pi/180
+    local height=math.max(-radius*0.9,math.min(radius*0.9,settings.navigation_height))
+    local neutral_pitch=math.asin(height/radius)
+    local limit=85*math.pi/180
+    local pitch=math.max(-limit,math.min(limit,neutral_pitch+math.max(-1,math.min(1,input.y))*settings.steering_pitch*math.pi/180))
     local horizontal=radius*math.cos(pitch)
     local dx=fx*math.cos(yaw)+fz*math.sin(yaw)
     local dz=fz*math.cos(yaw)-fx*math.sin(yaw)
     local target={x=center.x+dx*horizontal,y=center.y+radius*math.sin(pitch),z=center.z+dz*horizontal}
-    local neutral={x=center.x+fx*radius,y=center.y,z=center.z+fz*radius}
+    local neutral_horizontal=math.sqrt(math.max(0,radius*radius-height*height))
+    local neutral={x=center.x+fx*neutral_horizontal,y=center.y+height,z=center.z+fz*neutral_horizontal}
     -- Roundoff guard: the requested point is never intentionally outside the sphere.
     local ox,oy,oz=target.x-center.x,target.y-center.y,target.z-center.z
     local length=math.sqrt(ox*ox+oy*oy+oz*oz)
@@ -835,7 +840,8 @@ local function navigation_anchor(d,ch,tr,pos,fx,fz)
         target={x=center.x+ox*scale,y=center.y+oy*scale,z=center.z+oz*scale}
     end
     return target,neutral,{center=center,radius=radius,yaw_degrees=yaw*180/math.pi,pitch_degrees=pitch*180/math.pi,
-        requested_distance=math.min(length,radius),head_joint=d.rider_head_name}
+        requested_distance=math.min(length,radius),head_joint=d.rider_head_name,
+        neutral_height=height,neutral_pitch_degrees=neutral_pitch*180/math.pi}
 end
 local function tick_driver()
     local d = active
@@ -1304,14 +1310,15 @@ re.on_draw_ui(function()
         end
         if type(imgui.slider_float)=="function" then
             for _,spec in ipairs({{key="navigation_radius",label="【本轮】头部导航半径（米）",low=2,high=30},
+                {key="navigation_height",label="【本轮】球面回中高度（米）",low=-settings.navigation_radius*0.9,high=settings.navigation_radius*0.9},
                 {key="steering_yaw",label="【本轮】左右转向灵敏度（最大角度）",low=1,high=85},
                 {key="steering_pitch",label="【本轮】上下转向灵敏度（最大角度）",low=1,high=80}}) do
-                local changed,value=imgui.slider_float(spec.label,settings[spec.key],spec.low,spec.high)
+                local changed,value=imgui.slider_float(spec.label,math.max(spec.low,math.min(spec.high,settings[spec.key])),spec.low,spec.high)
                 if changed and finite(value) then settings[spec.key]=math.max(spec.low,math.min(spec.high,value));pcall(json.dump_file,settings_path,settings) end
             end
         end
-        imgui.text("以当前狮鹫头部为球心，摇杆调整角度；回中位于头部正前方。")
-        imgui.text("球面模式替代旧玩家距离／高度；座位偏移和镜头距离仍独立。")
+        imgui.text("以头部为球心；回中高度沿球面抬升，不突破半径。")
+        imgui.text("回中高度调导航目标；可见模型用座位上下偏移。旧距离／高度仅旧模式生效。")
         imgui.text("角度越大通常转向越强，实际转弯速度仍取决于飞行动作。")
         imgui.tree_pop()
     end
