@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.26. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.27. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.26-beta"
+local VERSION = "0.1.27-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -47,7 +47,10 @@ menu.gameplay_paused=function()
     return not c or c.properties.isPaused or menu.photo_active()
 end
 menu.visual_allowed=function()
-    return core() and (not menu.gameplay_paused() or menu.photo_active())
+    local c=core()
+    -- Display locking spans normal menus and the frame before pause is reported.
+    -- Each visual write still validates the retained player/Griffin/actor instances.
+    return alive and c and active and c.properties.player==active.player
 end
 local function now()
     local c = core()
@@ -167,7 +170,7 @@ local function capture_party(c, player)
 end
 local function validate_spawn(r,visual_only)
     local c = assert(core(), "NickCore unavailable")
-    assert(c.properties.player == r.owner and (not menu.gameplay_paused() or visual_only and menu.photo_active()), "Player changed or game paused")
+    assert(c.properties.player == r.owner and (not menu.gameplay_paused() or visual_only and menu.visual_allowed()), "Player changed or game paused")
     local result = r.result
     assert(result and result.go and result.chara, "等待狮鹫生成完成")
     assert(result.go:get_Valid() and result.chara:get_Valid(), "Griffin no longer valid")
@@ -1885,9 +1888,9 @@ menu.player_visual_post=function()
 end
 menu.visual_error=function(label,err)
     -- A paused render callback must not release actors or invoke gameplay cleanup.
-    if menu.photo_active() then
+    if menu.gameplay_paused() or menu.rendering_visual then
         local message=label..": "..tostring(err)
-        if menu.photo_error~=message then menu.photo_error=message;failed(label,err) end
+        if menu.visual_last_error~=message then menu.visual_last_error=message;failed(label,err) end
     else stop_driver(label);failed(label,err) end
 end
 re.on_pre_application_entry("UpdateJointExpression",function()
@@ -1897,12 +1900,15 @@ re.on_application_entry("UpdateJointExpression",function()
     passengers.post();menu.player_visual_post()
 end)
 re.on_pre_application_entry("PrepareRendering",function()
-    if not alive or not active or not menu.photo_active() then return end
-    -- Photo Mode may skip UpdateBehavior/UpdateJointExpression entirely. Reuse the
-    -- verified capture/restore Hip path, with no physics, AI, input or FSM updates.
+    if not menu.visual_allowed() then return end
+    -- Menu transitions can replace the pose before NickCore reports pause. Keep
+    -- this fallback active every rendered frame, using the same Hip restore path.
+    -- No physics, AI, input or FSM updates here; normal menu preset changes wait.
     menu.apply_pending_preset()
+    menu.rendering_visual=true
     passengers.pre();menu.player_visual_pre()
     passengers.post();menu.player_visual_post()
+    menu.rendering_visual=false
 end)
 re.on_application_entry("PrepareRendering",function()
     if not core() or menu.gameplay_paused() then return end
@@ -2126,7 +2132,7 @@ menu.apply_preset=function(index)
 end
 menu.apply_pending_preset=function()
     local preset=menu.pending_preset
-    if not preset or not menu.visual_allowed() then return end
+    if not preset or not core() or menu.gameplay_paused() and not menu.photo_active() then return end
     menu.pending_preset=nil
     for index,entry in ipairs(settings.seat_presets) do if entry==preset then menu.apply_preset(index);return end end
 end
