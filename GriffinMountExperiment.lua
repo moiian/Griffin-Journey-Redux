@@ -1,7 +1,7 @@
 -- Griffin Mount Experiment: stage 3 read-only flight observation.
 -- Requires the installed aaaNickCore.lua and _NickCore/EnemySpawner.lua.
 -- Keeps an explicit spawn return or user-confirmed instance; never selects by Character ID.
-local VERSION = "0.3.6-stage3-target"
+local VERSION = "0.3.7-stage3-yaw"
 local state = "Idle"
 local detail = "Ready for one ordinary Griffin request per script session."
 local shared = nil
@@ -51,11 +51,14 @@ local last_action_request = -math.huge
 local action_test_status = "尚未提交动作请求。"
 local target_probe = true
 local target_probe_status = "目标与坐标记录随动作探针开启；只读。"
+local yaw_degrees = 45
+local yaw_status = "先运行慢速或快速动作，再点击左转或右转；每次只改一次世界朝向。"
+local last_yaw_request = -math.huge
 local test_actions = {
     {key = "Test takeoff", label = "起飞", node = "Ch253TakeoffBackJump", phase = "ground"},
     {key = "Test hover", label = "悬停", node = "HoverWait", phase = "air"},
-    {key = "Test forward", label = "悬停前移", node = "HoverForward", phase = "air"},
-    {key = "Test circle", label = "目标导向飞行（原盘旋）", node = "Ch253WrapAroundStartLoop", phase = "air"},
+    {key = "Test forward", label = "悬停前移（慢速候选）", node = "HoverForward", phase = "air"},
+    {key = "Test circle", label = "目标导向飞行（快速候选）", node = "Ch253WrapAroundStartLoop", phase = "air"},
     {key = "Test landing attack", label = "下冲落地攻击", node = "Ch253AirLandingPressStartLoop", phase = "air"}
 }
 flight_log.request_observer = {repeated_requests_omitted = 0, capacity_dropped = 0}
@@ -63,6 +66,19 @@ flight_log.request_observer = {repeated_requests_omitted = 0, capacity_dropped =
 local function game_time()
     local core = rawget(_G, "NickCore")
     return core and core.properties and core.properties.gameTime or 0
+end
+
+local function rotation_values(q)
+    local v = {}
+    for _, key in ipairs({"x", "y", "z", "w"}) do
+        local n = q and q[key]
+        assert(type(n) == "number" and n == n and math.abs(n) < math.huge, "Invalid quaternion")
+        v[key] = n
+    end
+    local length = math.sqrt(v.x*v.x + v.y*v.y + v.z*v.z + v.w*v.w)
+    assert(length > 0.0001, "Zero quaternion")
+    for key, n in pairs(v) do v[key] = n / length end
+    return v
 end
 
 local function flush_flight_log()
@@ -632,6 +648,7 @@ local function queue_flight_snapshot(source)
                     end
                     -- Keep scalar row behavior, while storing vectors in a separate typed table.
                     sample.vectors = {}
+                    sample.rotations = {}
                     local function capture_vector(label, getter)
                         target_row(label, function()
                             local v = getter()
@@ -643,6 +660,15 @@ local function queue_flight_snapshot(source)
                     end
                     capture_vector("Griffin.Position", function()
                         return expected.chara:call("get_Transform()"):call("get_Position()")
+                    end)
+                    target_row("Griffin.Rotation", function()
+                        local q = rotation_values(expected.chara:call("get_Transform()"):call("get_Rotation()"))
+                        sample.rotations["Griffin.Rotation"] = q
+                        sample.vectors["Griffin.Forward"] = {
+                            x = 2*(q.x*q.z + q.w*q.y), y = 2*(q.y*q.z - q.w*q.x),
+                            z = 1 - 2*(q.x*q.x + q.y*q.y)
+                        }
+                        return true
                     end)
                     capture_vector("Player.Position", function() return core.properties.transform:call("get_Position()") end)
                     if char_ctrl then
@@ -781,6 +807,72 @@ local function queue_action_test(action)
     end)
 end
 
+local function queue_yaw_test(direction)
+    if relation_pending or not shared or not shared.go or not shared.chara then return end
+    if game_time() - last_yaw_request < 1 then
+        yaw_status = "请间隔至少1个游戏运行秒，再点击转向。"
+        return
+    end
+    local expected, degrees = shared, direction * yaw_degrees
+    relation_pending = true
+    yaw_status = "转向已排队，请关闭界面让游戏运行。"
+    run_once(function()
+        local called = false
+        local ok, err = pcall(function()
+            local core = dependency()
+            assert(core and core.properties.player == owner and shared == expected, "Instance context changed")
+            assert(core.properties.isPaused == false, "Gameplay paused")
+            assert(expected.go:get_Valid() and expected.chara:get_Valid(), "Bound instance invalid")
+            assert(expected.chara:get_CharaIDString() == "ch253000_00"
+                and expected.chara:call("get_GameObject()") == expected.go, "Character binding mismatch")
+            assert(friendly and not aggro_conflict(), "Enable party Friend first")
+            for _, member in ipairs(party) do
+                assert(expected.chara:call("getBattleRelationshipTo(app.Character)", member) == friend_value
+                    and member:call("getBattleRelationshipTo(app.Character)", expected.chara) == friend_value,
+                    "Party relationship is not Friend in both directions")
+            end
+            assert(expected.chara:call("get_IsFlight()"), "Griffin must be airborne")
+            local ctrl = expected.chara:call("get_FlightCtrl()")
+            assert(ctrl and ctrl:call("get_CachedCharacter()") == expected.chara, "Flight controller binding mismatch")
+            local manager = expected.chara:call("get_ActionManager()")
+            assert(manager and manager:call("get_GameObject()") == expected.go, "ActionManager binding mismatch")
+            local info = manager:get_field("CurrentAction")
+            local node = info and info:get_field("Name")
+            assert(node == "HoverForward" or node == "Ch253WrapAroundStartLoop", "Run slow or fast flight first")
+            local transform = expected.chara:call("get_Transform()")
+            assert(transform and Quaternion and Quaternion.new, "Transform or Quaternion constructor unavailable")
+            local before = rotation_values(transform:call("get_Rotation()"))
+            local half = math.rad(degrees) / 2
+            local s, c = math.sin(half), math.cos(half)
+            -- World-Y rotation on the left preserves existing pitch/roll.
+            local after = rotation_values({x=c*before.x+s*before.z, y=c*before.y+s*before.w,
+                z=c*before.z-s*before.x, w=c*before.w-s*before.y})
+            local value = Quaternion.new(after.x, after.y, after.z, after.w)
+            assert(#flight_log.samples < 1000 and #flight_log.events < 490, "Log capacity nearly full")
+            if not recording then start_recording() end
+            log_event("manual_yaw_attempt", node)
+            flight_log.events[#flight_log.events].rotation = {degrees=degrees, before=before, requested=after,
+                node=node, character_address=tostring(expected.chara:get_address()), target_origin=target_origin}
+            assert(flush_flight_log(), "Could not save pre-write log; no rotation written")
+            last_yaw_request = game_time()
+            called = true
+            transform:call("set_Rotation(via.Quaternion)", value)
+            yaw_status = "已单次旋转 " .. tostring(degrees) .. "°；观察朝向和航迹是否保持。"
+            log_event("manual_yaw_returned", yaw_status)
+            local read_ok, readback = pcall(function() return rotation_values(transform:call("get_Rotation()")) end)
+            local event = flight_log.events[#flight_log.events]
+            event.rotation_readback = read_ok and readback or nil
+            event.readback_error = not read_ok and tostring(readback) or nil
+            flush_flight_log()
+        end)
+        if not ok then
+            yaw_status = (called and "转向调用出现 Lua 错误：" or "未执行转向：") .. tostring(err)
+            log_event(called and "manual_yaw_error" or "manual_yaw_blocked", yaw_status)
+        end
+        relation_pending = false
+    end)
+end
+
 re.on_script_reset(function()
     recording = false
     if request_listener_table and request_listener_table[request_listener_key] == request_listener_fn then
@@ -815,6 +907,8 @@ for _, action in ipairs(test_actions) do
     button_labels[action.key] = "【本轮测试】" .. action.label .. "（一次）"
 end
 button_labels["Toggle cross phase"] = "切换跨阶段测试（允许地面直接请求空中动作）"
+button_labels["Yaw left"] = "【本轮转向】左转（一次）"
+button_labels["Yaw right"] = "【本轮转向】右转（一次）"
 local function ui_button(key)
     local label = button_labels[key] or key
     local highlight = label:find("【本轮", 1, true) ~= nil
@@ -871,6 +965,21 @@ re.on_draw_ui(function()
             imgui.text(action_test_status)
             imgui.tree_pop()
         end
+    end
+    if shared and shared.go and shared.chara and imgui.tree_node("【本轮】转向测试（慢速／快速共用）") then
+        imgui.text("先进入悬停前移或目标导向飞行，再转向。")
+        if type(imgui.slider_int) == "function" then
+            local changed, value = imgui.slider_int("【本轮】单次转向角度（度）", yaw_degrees, 5, 180)
+            if changed and type(value) == "number" and value == value then
+                yaw_degrees = math.max(5, math.min(180, math.floor(value)))
+            end
+        else
+            imgui.text("角度滑条不可用，使用默认45°。")
+        end
+        if ui_button("Yaw left") then queue_yaw_test(-1) end
+        if ui_button("Yaw right") then queue_yaw_test(1) end
+        imgui.text(yaw_status)
+        imgui.tree_pop()
     end
     imgui.text("录制：" .. (recording and "进行中（60秒后自动保存）" or "未在录制") .. " | 样本：" .. #flight_log.samples .. " | 原生请求：" .. request_event_count)
     imgui.text("日志：reframework/data/" .. flight_log_path)
