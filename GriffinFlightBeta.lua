@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.21. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.22. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.21-beta"
+local VERSION = "0.1.22-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -18,7 +18,7 @@ local yaw_status = "自动转向镜头：未开启"
 local controls,menu,passengers = {},{},{}
 local masks = nil
 local input = {x = 0, y = 0, buttons = 0}
-local settings = {distance = 30, fov = 90, player_distance = 20, player_height = 0, freeze_player = true, rider_anchor="head", rider_neck_joint="", rider_height=1.0, rider_forward=0, rider_side=0, camera_x=0, camera_y=0, camera_z=0, sphere_navigation=true, navigation_radius=4.019, steering_yaw=50.276, steering_pitch=22.018, navigation_height=0.991, bumper_pitch=59, controls_revision=1, camera_auto_yaw=false, camera_yaw_speed=120, camera_manual_threshold=0.55}
+local settings = {distance = 30, fov = 90, player_distance = 20, player_height = 0, freeze_player = true, rider_lookX=0, rider_lookZ=1, rider_tilt_follow=1, rider_pitch_offset=0, rider_anchor="head", rider_neck_joint="", rider_height=1.0, rider_forward=0, rider_side=0, camera_x=0, camera_y=0, camera_z=0, sphere_navigation=true, navigation_radius=4.019, steering_yaw=50.276, steering_pitch=22.018, navigation_height=0.991, bumper_pitch=59, controls_revision=1, camera_auto_yaw=false, camera_yaw_speed=120, camera_manual_threshold=0.55}
 local loaded_settings=nil
 local settings_path = "GriffinFlightBeta_Settings.json"
 local log_id = os.date("!%Y%m%dT%H%M%SZ") .. "_" .. math.floor(os.clock() * 1000)
@@ -85,6 +85,9 @@ if type(json.load_file) == "function" then
         if finite(saved.player_distance) then settings.player_distance = math.max(2, math.min(80, saved.player_distance)) end
         if finite(saved.distance) then settings.distance = math.max(0, math.min(80, saved.distance)) end
         if finite(saved.fov) then settings.fov = math.max(40, math.min(120, saved.fov)) end
+        for _,spec in ipairs({{"rider_lookX",-1,1},{"rider_lookZ",-1,1},{"rider_tilt_follow",0,1},{"rider_pitch_offset",-45,45}}) do
+            if finite(saved[spec[1]]) then settings[spec[1]]=math.max(spec[2],math.min(spec[3],saved[spec[1]])) end
+        end
         settings.rider_anchor=saved.rider_anchor=="neck" and "neck" or "head"
         settings.rider_neck_joint=type(saved.rider_neck_joint)=="string" and saved.rider_neck_joint or ""
         if finite(saved.rider_height) then settings.rider_height=math.max(-5,math.min(15,saved.rider_height)) end
@@ -186,12 +189,17 @@ local function player_fsm(player)
     local manager = player:call("get_ActionManager()")
     return manager and manager.Fsm
 end
-local function sync_player(d)
+passengers.reset_fall=function(d)
+    local pos=d.transform:call("get_UniversalPosition()")
+    d.fall:call("resetBaseHeight(via.Position)",pos)
+    d.fall:call("resetFallHeight()")
+    d.fall_reset_pending=false
+end
+local function sync_player(d,reset_fall)
     local pos = d.transform:call("get_UniversalPosition()")
     d.context:call("setPos(via.Position)", pos)
-    -- Runs on every anchored UpdateBehavior, including centered input and an open UI.
-    d.fall:call("resetBaseHeight(via.Position)", pos)
-    d.fall:call("resetFallHeight()")
+    -- Fall reset is an attach/preset/release operation, never a continuous movement update.
+    if reset_fall or d.fall_reset_pending then passengers.reset_fall(d) end
     d.controller:call("warp()")
 end
 -- All layers follow a neutral Griffin anchor; only the selected layer gets stick offset.
@@ -319,6 +327,7 @@ local function write_anchor(d,target,neutral)
     d.moved=true
     if key=="full" or key=="rider" then
         d.transform:call("set_Position(via.vec3)",Vector3f.new(target.x,target.y,target.z))
+        passengers.orient(d,passengers.player_config())
         sync_player(d)
         d.anchor_plan={transform=target,context=target,controller=target}
         return
@@ -332,8 +341,7 @@ local function write_anchor(d,target,neutral)
     local physical=vector(d.controller:call("get_Position()"))
     d.controller:call("applyWorldOffset(via.vec3)",Vector3f.new(controller_target.x-physical.x,
         controller_target.y-physical.y,controller_target.z-physical.z))
-    d.fall:call("resetBaseHeight(via.Position)",d.transform:call("get_UniversalPosition()"))
-    d.fall:call("resetFallHeight()")
+    if d.fall_reset_pending then passengers.reset_fall(d) end
     d.anchor_plan={transform=actor_target,context=context_target,controller=controller_target}
 end
 
@@ -600,11 +608,13 @@ stop_driver = function(reason)
     local errors = passengers.restore_all and passengers.restore_all(d) or {}
     local bone_ok,bone_err=pcall(restore_bone,d)
     if not bone_ok then errors[#errors+1]="骨骼恢复 "..tostring(bone_err) end
+    local rot_ok,rot_err=pcall(passengers.restore_rotation,d)
+    if not rot_ok then errors[#errors+1]="朝向恢复 "..tostring(rot_err) end
     if d.moved then
         local ok, err = pcall(function()
             if owned_player(d, true) then
                 d.transform:call("set_UniversalPosition(via.Position)", d.original_position)
-                sync_player(d)
+                sync_player(d,true)
             end
             d.moved = false
         end)
@@ -967,7 +977,7 @@ end
 local fall_hook_installed,fall_hook_tried=false,false
 local block_player_fall=true
 local fall_hits,fall_blocked,fall_logged,fall_log_at=0,0,0,-math.huge
-local fall_hook_status="坠落死亡请求拦截：默认开启（仅驾驶玩家）"
+local fall_hook_status="坠落死亡请求拦截：默认开启（驾驶玩家与接管乘客）"
 local function install_fall_hook()
     if fall_hook_installed or fall_hook_tried then return end
     fall_hook_tried=true
@@ -977,10 +987,13 @@ local function install_fall_hook()
         assert(method and sdk.PreHookResult and sdk.PreHookResult.SKIP_ORIGINAL,"Fall request hook unavailable")
         sdk.hook(method,function(args)
             local d,c=active,core()
-            if alive and d and d.moved and c and not c.properties.isPaused and c.properties.player==d.player
-                and sdk.to_managed_object(args[2])==d.player then
-                fall_hits=fall_hits+1
-                if block_player_fall then fall_blocked=fall_blocked+1;return sdk.PreHookResult.SKIP_ORIGINAL end
+            if alive and d and c and not c.properties.isPaused and c.properties.player==d.player then
+                local ch=sdk.to_managed_object(args[2])
+                local member=d.passengers and d.passengers[ch]
+                if ch==d.player and d.moved or member and member.moved and member.anchor_target and not member.recovery_pending then
+                    fall_hits=fall_hits+1
+                    if block_player_fall then fall_blocked=fall_blocked+1;return sdk.PreHookResult.SKIP_ORIGINAL end
+                end
             end
         end,function(ret) return ret end)
         fall_hook_installed=true
@@ -1016,7 +1029,7 @@ local function start_driver()
                 transform = player:call("get_Transform()"), context = player:get_field("<PosRotContext>k__BackingField"),
                 terrain = terrain, controller = terrain and terrain.MainCharacterController,
                 fall = player:get_field("<FallInfo>k__BackingField"), fsm = player_fsm(player),
-                passengers={},anchor_mode=anchor_mode, gear=1, controls_active=false, mode = "ground", last_request = -math.huge, started = now(), pending = false}
+                passengers={},fall_reset_pending=true,anchor_mode=anchor_mode, gear=1, controls_active=false, mode = "ground", last_request = -math.huge, started = now(), pending = false}
             assert(d.transform and d.context and d.controller and d.fall and d.fsm, "Player interfaces unavailable")
             local ft = d.fsm:get_type_definition()
             assert(ft:get_method("get_Enabled()") and ft:get_method("set_Enabled(System.Boolean)"), "FSM Enabled interface unavailable")
@@ -1120,6 +1133,7 @@ local function tick_driver()
         assert(length > 0.2, "Griffin is too vertical")
         fx,fz = fx/length,fz/length
         d.heading={x=fx,z=fz}
+        d.body_pitch=math.atan(2*(qy*qz-qw*qx),length)*180/math.pi
         local flying, ground = ch:call("get_IsFlight()"), ch:call("get_IsGround()")
         local manager = ch:call("get_ActionManager()")
         assert(manager and manager:call("get_GameObject()") == d.spawn.result.go, "ActionManager mismatch")
@@ -1183,13 +1197,75 @@ local function tick_driver()
             physical = vector(d.controller:call("get_Position()")), flight = flying, ground = ground,
             action = tostring(action_name), mode = d.mode, gear=d.gear, manual_hold=d.manual_hold, external_control=d.external_control, bumpers={rb=held(input.buttons,masks.rb),lb=held(input.buttons,masks.lb)}, anchor_mode=d.anchor_mode, anchor_height = settings.player_height, stick = {x=input.x,y=input.y}}
         passengers.tick(d)
+        d.trace.seat_orientation=d.orientation_trace
     end)
     if not ok then stop_driver("驾驶检查或位置同步失败"); failed("驾驶已停止", err) end
 end
 
+passengers.player_config=function()
+    return {anchor=settings.rider_anchor,neck_joint=settings.rider_neck_joint,height=settings.rider_height,
+        forward=settings.rider_forward,side=settings.rider_side,lookX=settings.rider_lookX,lookZ=settings.rider_lookZ,
+        tilt_follow=settings.rider_tilt_follow,pitch_offset=settings.rider_pitch_offset}
+end
+passengers.basis=function(d,config,position_only)
+    local fx,fz=d.heading.x,d.heading.z
+    local strength=finite(config.tilt_follow) and math.max(0,math.min(1,config.tilt_follow)) or 1
+    local trim=finite(config.pitch_offset) and math.max(-45,math.min(45,config.pitch_offset)) or 0
+    if position_only then trim=0 end -- pose trim changes facing, never the calibrated seat position
+    local pitch=math.max(-89,math.min(89,(d.body_pitch or 0)*strength+trim))*math.pi/180
+    local cp,sp=math.cos(pitch),math.sin(pitch)
+    return {x=fz,y=0,z=-fx},{x=-fx*sp,y=cp,z=-fz*sp},{x=fx*cp,y=sp,z=fz*cp},pitch*180/math.pi
+end
+passengers.same_rotation=function(a,b)
+    if not a or not b then return false end
+    local dot,na,nb=0,0,0
+    for _,key in ipairs({"x","y","z","w"}) do
+        if not finite(a[key]) or not finite(b[key]) then return false end
+        dot=dot+a[key]*b[key];na=na+a[key]^2;nb=nb+b[key]^2
+    end
+    return na>0.00001 and nb>0.00001 and math.abs(dot)/math.sqrt(na*nb)>0.999999
+end
+passengers.restore_rotation=function(d)
+    local s=d.seat_rotation
+    if not s then return end
+    if owned_player(d,false) and passengers.same_rotation(d.transform:call("get_Rotation()"),s.last) then
+        d.transform:call("set_Rotation(via.Quaternion)",s.original)
+    end
+    d.seat_rotation=nil
+end
+passengers.orient=function(d,config)
+    if d.orientation_failed then return end
+    local ok,err=pcall(function()
+        local right,up,forward,pitch=passengers.basis(d,config)
+        local x=finite(config.lookX) and math.max(-1,math.min(1,config.lookX)) or 0
+        local z=finite(config.lookZ) and math.max(-1,math.min(1,config.lookZ)) or 1
+        local length=math.sqrt(x*x+z*z)
+        if length<0.0001 then x,z,length=0,1,1 end
+        local direction={x=(right.x*x+forward.x*z)/length,y=(right.y*x+forward.y*z)/length,z=(right.z*x+forward.z*z)/length}
+        local pos=vector(d.transform:call("get_Position()"))
+        if not d.seat_rotation then
+            local original=d.transform:call("get_Rotation()")
+            assert(passengers.same_rotation(original,original),"Seat original rotation invalid")
+            d.seat_rotation={original=original,last=original}
+        end
+        local applied,apply_err=pcall(function()
+            d.transform:call("lookAt(via.vec3, via.vec3)",Vector3f.new(pos.x+direction.x,pos.y+direction.y,pos.z+direction.z),Vector3f.new(up.x,up.y,up.z))
+        end)
+        -- Read back even after a Lua error raised after the native setter wrote.
+        d.seat_rotation.last=d.transform:call("get_Rotation()")
+        assert(applied,apply_err)
+        d.orientation_trace={lookX=x,lookZ=z,pitch=pitch,body_pitch=d.body_pitch or 0,direction=direction,up=up}
+    end)
+    if not ok then
+        d.orientation_failed=true
+        event("seat_orientation_error",{group=d.group or "player",slot=d.slot,error=tostring(err)})
+        pcall(passengers.restore_rotation,d)
+    end
+end
+
 -- Seat calculation only. Bone writes use the original Hip experiment callback below.
 local function rider_seat(d,config)
-    config=config or {anchor=settings.rider_anchor,neck_joint=settings.rider_neck_joint,height=settings.rider_height,forward=settings.rider_forward,side=settings.rider_side}
+    config=config or passengers.player_config()
     local ch=validate_spawn(d.spawn)
     assert(ch:call("get_Transform()")==d.rider_griffin_transform,"Griffin anchor changed")
     local base
@@ -1216,9 +1292,10 @@ local function rider_seat(d,config)
         end
     end
     d.rider_seat_joint_name=selected_name
-    local fx,fz=d.heading.x,d.heading.z
-    local seat={x=base.x+fx*config.forward+fz*config.side,
-        y=base.y+config.height,z=base.z+fz*config.forward-fx*config.side}
+    local right,up,forward=passengers.basis(d,config,true)
+    local seat={x=base.x+forward.x*config.forward+right.x*config.side+up.x*config.height,
+        y=base.y+forward.y*config.forward+right.y*config.side+up.y*config.height,
+        z=base.z+forward.z*config.forward+right.z*config.side+up.z*config.height}
     return seat,base
 end
 -- Passenger ownership uses live character instances, never character IDs for control.
@@ -1285,6 +1362,10 @@ passengers.seat=function(group,index)
     local seat=settings[key][index]
     if type(seat)~="table" then seat={};settings[key][index]=seat end
     if seat.enabled==nil then seat.enabled=true end
+    for _,spec in ipairs({{"lookX",0,-1,1},{"lookZ",1,-1,1},{"tilt_follow",1,0,1},{"pitch_offset",0,-45,45}}) do
+        local key,default,lo,hi=spec[1],spec[2],spec[3],spec[4]
+        seat[key]=finite(seat[key]) and math.max(lo,math.min(hi,seat[key])) or default
+    end
     seat.anchor=seat.anchor=="head" and "head" or "neck"
     if type(seat.neck_joint)~="string" then seat.neck_joint="" end
     if not finite(seat.height) then seat.height=0.5 end
@@ -1301,10 +1382,11 @@ passengers.restore_one=function(a)
     end
     assert(owned_player(a,false),"Passenger binding changed; retained for recovery")
     restore_bone(a)
+    passengers.restore_rotation(a)
     if a.moved then
         if core() and core().properties.player==a.owner then
             a.transform:call("set_UniversalPosition(via.Position)",a.original_position)
-            sync_player(a)
+            sync_player(a,true)
         end
         a.moved=false
     end
@@ -1326,7 +1408,7 @@ end
 passengers.bind=function(d,ch,group,index)
     assert(ch:get_Valid(),"Passenger unloaded")
     local terrain=ch:get_field("<AdjustTerrain>k__BackingField")
-    local a={player=ch,owner=d.player,spawn=d.spawn,player_go=ch:call("get_GameObject()"),
+    local a={player=ch,owner=d.player,spawn=d.spawn,fall_reset_pending=true,player_go=ch:call("get_GameObject()"),
         transform=ch:call("get_Transform()"),context=ch:get_field("<PosRotContext>k__BackingField"),terrain=terrain,
         controller=terrain and terrain.MainCharacterController,fall=ch:get_field("<FallInfo>k__BackingField"),
         fsm=player_fsm(ch),group=group,slot=index,anchor_mode="rider"}
@@ -1342,7 +1424,7 @@ passengers.bind=function(d,ch,group,index)
     return a
 end
 passengers.prepare_rig=function(a,d)
-    a.heading=d.heading;a.rider_griffin_transform=d.rider_griffin_transform
+    a.heading=d.heading;a.body_pitch=d.body_pitch;a.rider_griffin_transform=d.rider_griffin_transform
     a.rider_head=d.rider_head;a.rider_head_name=d.rider_head_name;a.rider_necks=d.rider_necks
 end
 passengers.tick=function(d)
@@ -1382,8 +1464,9 @@ passengers.tick=function(d)
             local physical=rider_seat(a,settings.seat_presets[1].player)
             a.moved=true;a.anchor_target=physical;a.neutral_anchor=physical
             a.transform:call("set_Position(via.vec3)",Vector3f.new(physical.x,physical.y,physical.z))
+            passengers.orient(a,passengers.seat(a.group,a.slot))
             sync_player(a)
-            d.passenger_trace[#d.passenger_trace+1]={group=a.group,slot=a.slot,physical=physical,fsm_enabled=false}
+            d.passenger_trace[#d.passenger_trace+1]={group=a.group,slot=a.slot,physical=physical,fsm_enabled=false,orientation=a.orientation_trace,orientation_failed=a.orientation_failed or false}
         end)
         if not ok then
             passengers.last_error=slot.group.." "..slot.slot..": "..tostring(err)
@@ -1406,7 +1489,10 @@ end
 passengers.pre=function()
     if not active or not core() or core().properties.isPaused then return end
     for _,a in pairs(active.passengers or {}) do
-        local ok,err=pcall(restore_bone,a)
+        local ok,err=pcall(function()
+            restore_bone(a)
+            if a.anchor_target then passengers.orient(a,passengers.seat(a.group,a.slot)) end
+        end)
         if not ok then event("passenger_bone_restore_error",tostring(err)) end
     end
 end
@@ -1598,6 +1684,7 @@ re.on_pre_application_entry("UpdateJointExpression",function()
     local ok,err=pcall(function()
         assert(owned_player(d,true),"Player binding changed")
         restore_bone(d)
+        passengers.orient(d,passengers.player_config())
     end)
     if not ok then stop_driver("骨骼恢复失败");failed("骨骼恢复失败",err) end
 end)
@@ -1744,7 +1831,7 @@ menu.clone=function(value)
 end
 menu.preset_name="新座位预设"
 menu.snapshot=function(name,source)
-    return {schema=3,name=name,player={anchor=settings.rider_anchor,neck_joint=settings.rider_neck_joint,height=settings.rider_height,forward=settings.rider_forward,side=settings.rider_side},
+    return {schema=4,name=name,player=passengers.player_config(),
         camera={distance=settings.distance,fov=settings.fov},pawns=menu.clone(settings.pawn_seats or source and source.pawns or {}),
         companions=menu.clone(settings.companion_seats or source and source.companions or {})}
 end
@@ -1762,6 +1849,8 @@ if #settings.seat_presets==0 then settings.seat_presets[1]=menu.snapshot("默认
 if #settings.seat_presets==1 then
     settings.seat_presets[2]=menu.clone(settings.seat_presets[1]);settings.seat_presets[2].name="默认乘坐座位"
 end
+if not finite(settings.seat_presets[1].player.tilt_follow) then settings.seat_presets[1].player.tilt_follow=0 end
+if not finite(settings.seat_presets[1].player.pitch_offset) then settings.seat_presets[1].player.pitch_offset=0 end
 settings.seat_index=math.max(2,math.min(#settings.seat_presets,math.floor(tonumber(loaded_settings and loaded_settings.seat_index) or 2)))
 settings.pawn_seats=menu.clone(loaded_settings and loaded_settings.pawn_seats or settings.seat_presets[settings.seat_index].pawns or {})
 settings.companion_seats=menu.clone(loaded_settings and loaded_settings.companion_seats or settings.seat_presets[settings.seat_index].companions or {})
@@ -1780,11 +1869,34 @@ menu.apply_preset=function(index)
     settings.rider_height=math.max(-5,math.min(15,preset.player.height))
     settings.rider_forward=math.max(-15,math.min(15,preset.player.forward))
     settings.rider_side=math.max(-10,math.min(10,preset.player.side))
+    for _,spec in ipairs({{"lookX",0,-1,1},{"lookZ",1,-1,1},{"tilt_follow",1,0,1},{"pitch_offset",0,-45,45}}) do
+        local value=preset.player[spec[1]]
+        settings["rider_"..spec[1]]=finite(value) and math.max(spec[3],math.min(spec[4],value)) or spec[2]
+    end
     if type(preset.camera)=="table" then
         if finite(preset.camera.distance) then settings.distance=math.max(0,math.min(80,preset.camera.distance)) end
         if finite(preset.camera.fov) then settings.fov=math.max(40,math.min(120,preset.camera.fov)) end
     end
+    if active then
+        active.fall_reset_pending=true
+        for _,a in pairs(active.passengers or {}) do a.fall_reset_pending=true end
+    end
     controls.save();status="已应用座位预设："..preset.name
+end
+menu.edit_facing=function(seat,id)
+    local dirty=false
+    for _,spec in ipairs({{"lookX","【新增】Look At X（右正／左负）",0,-1,1},
+        {"lookZ","【新增】Look At Z（前正／后负）",1,-1,1},
+        {"pitch_offset","【新增】角色倾斜修正角（度）",0,-45,45}}) do
+        local key=spec[1]
+        if not finite(seat[key]) then seat[key]=spec[3] end
+        local changed,value=imgui.slider_float(spec[2].."###"..id..key,seat[key],spec[4],spec[5])
+        if changed and finite(value) then seat[key]=math.max(spec[4],math.min(spec[5],value));dirty=true end
+    end
+    local changed,value=menu.toggle("【新增】角色身体倾斜跟随###"..id.."Tilt",(seat.tilt_follow or 1)>0)
+    if changed then seat.tilt_follow=value and 1 or 0;dirty=true end
+    imgui.text("Look At X左右面向、Z前后面向；(0, 1)朝狮鹫前方。倾斜仅作用于角色身体。")
+    return dirty
 end
 menu.edit_seat=function(seat,id)
     if type(imgui.combo)=="function" then
@@ -1804,6 +1916,7 @@ menu.edit_seat=function(seat,id)
         local changed,value=imgui.slider_float(spec[2].."###"..id..spec[1],seat[spec[1]],spec[3],spec[4])
         if changed and finite(value) then seat[spec[1]]=math.max(spec[3],math.min(spec[4],value));controls.save() end
     end
+    if id~="BetaPhysical" and menu.edit_facing(seat,id) then controls.save() end
 end
 menu.passenger_seats=function()
     imgui.text("【新增】乘客实体位置固定取预设[1]，Hip分别使用以下座位；开始驾驶后自动冻结乘客FSM。")
@@ -1835,7 +1948,13 @@ end
 menu.physical_preset=function()
     if imgui.tree_node("【新增】预设[1]：实体位置校正（不参与切换）") then
         imgui.text("此项直接修改预设[1]；所有乘客Transform／碰撞体共用，不响应摇杆。")
-        menu.edit_seat(settings.seat_presets[1].player,"BetaPhysical")
+        local seat=settings.seat_presets[1].player
+        local before=tostring(seat.anchor)..tostring(seat.neck_joint)..tostring(seat.height)..tostring(seat.forward)..tostring(seat.side)
+        menu.edit_seat(seat,"BetaPhysical")
+        local after=tostring(seat.anchor)..tostring(seat.neck_joint)..tostring(seat.height)..tostring(seat.forward)..tostring(seat.side)
+        if before~=after and active then
+            for _,a in pairs(active.passengers or {}) do a.fall_reset_pending=true end
+        end
         imgui.text(passengers.npc_status or "同行NPC等待扫描")
         imgui.tree_pop()
     end
@@ -1980,6 +2099,12 @@ re.on_draw_ui(function()
         menu.slider("rider_height","【新增】座位上下偏移",-5,15)
         menu.slider("rider_forward","【新增】座位前后偏移",-15,15)
         menu.slider("rider_side","【新增】座位左右偏移",-10,10)
+        local facing=passengers.player_config()
+        if menu.edit_facing(facing,"BetaPlayerFacing") then
+            for _,key in ipairs({"lookX","lookZ","tilt_follow","pitch_offset"}) do settings["rider_"..key]=facing[key] end
+            controls.save()
+        end
+        if active and active.orientation_failed then imgui.text("座位朝向写入失败，本次驾驶已停用朝向修正；位置与驾驶继续。") end
         if type(imgui.input_text)=="function" then
             local changed,name=imgui.input_text("预设名称",menu.preset_name)
             if changed and type(name)=="string" then menu.preset_name=name:sub(1,120) end
@@ -2009,7 +2134,7 @@ re.on_draw_ui(function()
         menu.physical_preset()
         if beta_button((skip_think_enabled and "关闭跳过狮鹫思考" or "开启跳过狮鹫思考").."###BetaThinkToggle") then set_skip_think(not skip_think_enabled) end
         imgui.text(skip_think_status)
-        local changed,value=menu.toggle("【测试】拦截玩家坠落死亡请求",block_player_fall)
+        local changed,value=menu.toggle("【测试】拦截驾驶角色坠落死亡请求",block_player_fall)
         if changed then block_player_fall=value;if active then install_fall_hook() end;event("fall_request_block_mode",value) end
         changed,value=menu.toggle("【对照测试】冻结玩家 FSM",settings.freeze_player)
         if changed then change_player_freeze(value) end
