@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.27. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.28. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.27-beta"
+local VERSION = "0.1.28-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -17,7 +17,7 @@ local yaw_state, yaw_hook_ready = nil, false
 local yaw_status = "自动转向镜头：未开启"
 local controls,menu,passengers = {},{},{}
 passengers.frame=0
-passengers.protection={damage=true,relocation=true,counts={}}
+passengers.protection={damage=true,relocation=true,lost_check=false,destroy=false,counts={}}
 local masks = nil
 local input = {x = 0, y = 0, buttons = 0}
 local settings = {distance = 30, fov = 90, player_distance = 20, player_height = 0, freeze_player = true, rider_anim="", rider_lookX=0, rider_lookZ=1, rider_tilt_follow=1, rider_pitch_offset=0, rider_anchor="head", rider_neck_joint="", rider_height=1.0, rider_forward=0, rider_side=0, camera_x=0, camera_y=0, camera_z=0, sphere_navigation=true, navigation_radius=4.019, steering_yaw=50.276, steering_pitch=22.018, navigation_height=0.991, bumper_pitch=59, controls_revision=1, camera_auto_yaw=false, camera_yaw_speed=120, camera_manual_threshold=0.55}
@@ -74,12 +74,12 @@ local function rotate()
         journal = {version = VERSION, events = {}, samples = {}}
     end
 end
-local function event(name, detail)
+local function event(name, detail, defer_flush)
     rotate()
     if #journal.events < 450 then
         journal.events[#journal.events + 1] = {name = name, detail = detail, time = now()}
     end
-    flush()
+    if not defer_flush then flush() end
 end
 local function failed(label, err)
     status = label .. "：" .. tostring(err)
@@ -634,8 +634,9 @@ stop_driver = function(reason)
     if d.moved then
         local ok, err = pcall(function()
             if owned_player(d, true) then
-                d.transform:call("set_UniversalPosition(via.Position)", d.original_position)
+                -- Release at the current physical position; never return to the launch point.
                 sync_player(d,true)
+                d.release_position=vector(d.transform:call("get_Position()"))
             end
             d.moved = false
         end)
@@ -656,8 +657,8 @@ stop_driver = function(reason)
     end
     state.recovery = (#errors > 0) and d or nil
     status = #errors > 0 and ("驾驶已停止，请再点结束驾驶恢复：" .. table.concat(errors, "; "))
-        or "驾驶已结束，玩家已恢复。"
-    event("driver_stopped", {reason = reason, errors = errors})
+        or "驾驶已结束，玩家和乘客已在当前位置释放。"
+    event("driver_stopped", {reason = reason, errors = errors,release_mode="current_physical_position",player_position=d.release_position})
     return #errors == 0
 end
 
@@ -1074,6 +1075,7 @@ local function start_driver()
             if settings.head_camera~=false then change_camera_mode("griffin") end
             install_fall_hook()
             passengers.install_protection()
+            pcall(passengers.capture_probe_refs,d)
             apply_player_freeze(d, settings.freeze_player)
             local joint_ok,joint_err=pcall(discover_joints,d)
             if not joint_ok then event("anchor_joint_probe_error",tostring(joint_err)) end
@@ -1430,6 +1432,7 @@ passengers.controlled=function(ch,include_player)
     local a=include_player and ch==d.player and d or (d.passengers or {})[ch]
     if a and a.moved and a.anchor_target and not a.recovery_pending and ch:get_Valid() then return a end
 end
+-- Hooks only aggregate in memory. No disk I/O or per-hit snapshots in native callbacks.
 passengers.record_protection=function(a,route,blocked)
     if not a then return end
     local key=(a.group or "player")..":"..(a.slot or 0)..":"..route..(blocked and ":blocked" or ":observed")
@@ -1437,54 +1440,177 @@ passengers.record_protection=function(a,route,blocked)
     counts[key]=(counts[key] or 0)+1
     a.protection_counts=a.protection_counts or {}
     a.protection_counts[route]=(a.protection_counts[route] or 0)+1
-    if not a.protection_log_at or now()>=a.protection_log_at then
-        a.protection_log_at=now()+5
-        passengers.protection.pending=passengers.protection.pending or {}
-        passengers.protection.pending[#passengers.protection.pending+1]={group=a.group or "player",slot=a.slot,route=route,blocked=blocked,counts=a.protection_counts}
+    a.protection_dirty=true
+    a.protection_routes=a.protection_routes or {}
+    a.protection_routes[route]=blocked and "blocked" or "observed"
+end
+passengers.each_controlled=function(fn)
+    local d=active
+    if not d then return end
+    local a=passengers.controlled(d.player,true)
+    if a then local value=fn(a);if value then return value end end
+    for ch in pairs(d.passengers or {}) do
+        a=passengers.controlled(ch)
+        if a then local value=fn(a);if value then return value end end
     end
+end
+passengers.receiver=function(go)
+    if not go then return end
+    return passengers.each_controlled(function(a) if a.player_go==go then return a end end)
+end
+passengers.component_actor=function(component)
+    if not component then return end
+    local ch=component["<CachedCharacter>k__BackingField"]
+    return ch and passengers.controlled(ch,true)
+end
+passengers.container_actor=function(container)
+    if not container then return end
+    -- Exact captured container only. Never walk parent/shared containers or match IDs.
+    return passengers.each_controlled(function(a) if a.generate_container==container then return a end end)
+end
+passengers.snapshot=function(value)
+    if type(value)~="table" then return value end
+    local result={}
+    for key,item in pairs(value) do result[key]=passengers.snapshot(item) end
+    return result
+end
+passengers.capture_probe_refs=function(a)
+    local info=a.player:get_field("<GenerateInfo>k__BackingField")
+    a.generate_container=info and info:call("get_Container()") or nil
+    a.brine=a.player:get_field("<BrineProcessor>k__BackingField")
+end
+passengers.probe_tick=function()
+    if not active then return end
+    passengers.each_controlled(function(a)
+        if a.protection_dirty and now()>=(a.protection_log_at or -math.huge) then
+            a.protection_log_at=now()+5;a.protection_dirty=false
+            local counts,routes={},{}
+            for key,value in pairs(a.protection_counts or {}) do counts[key]=value end
+            for key,value in pairs(a.protection_routes or {}) do routes[key]=value end
+            event("rider_protection",{group=a.group or "player",slot=a.slot,counts=counts,routes=routes},true)
+        end
+        if now()<(a.health_probe_at or -math.huge) then return end
+        a.health_probe_at=now()+0.5
+        local ok,value=pcall(function()
+            -- Metadata-verified read-only getters; no HP refill or forced resurrection.
+            passengers.capture_probe_refs(a)
+            local b=a.brine
+            return {hp=a.player:call("get_Hp()"),dead=a.player:call("get_IsDead()"),
+                fall_dead=a.player:call("get_IsFallDead()"),cause=tostring(a.player:call("get_CauseOfDeath()")),
+                brine=b and b["<IsKilledByBrine>k__BackingField"] or false,
+                wall_brine=b and b["<IsKilledByWallBrine>k__BackingField"] or false,
+                position=vector(a.transform:call("get_Position()")),container_available=a.generate_container~=nil}
+        end)
+        if not ok then
+            if not a.health_probe_error then event("rider_health_probe_error",{group=a.group or "player",slot=a.slot,error=tostring(value)},true);a.health_probe_error=true end
+            return
+        end
+        local previous=a.health_probe
+        a.health_probe=value
+        if not previous or previous.hp~=value.hp or previous.dead~=value.dead or previous.fall_dead~=value.fall_dead
+            or previous.cause~=value.cause or previous.brine~=value.brine or previous.wall_brine~=value.wall_brine then
+            event("rider_health_changed",{group=a.group or "player",slot=a.slot,before=previous,after=value},true)
+        end
+    end)
 end
 passengers.install_protection=function()
     if passengers.protection.installed then return end
     passengers.protection.installed=true
     local errors={}
-    local function hook(type_name,signature,pre)
+    local function hook(type_name,signature,pre,boolean_result)
         local ok,err=pcall(function()
             local td=sdk.find_type_definition(type_name)
             local m=assert(td and td:get_method(signature),signature.." unavailable")
+            local key="griffin_beta_guard_"..type_name..signature
             sdk.hook(m,function(args)
+                if boolean_result then thread.get_hook_storage()[key]=false end
                 local success,result=pcall(pre,args)
-                if success then return result end
-            end,function(ret) return ret end)
+                if success then
+                    if boolean_result then thread.get_hook_storage()[key]=result==sdk.PreHookResult.SKIP_ORIGINAL end
+                    return result
+                end
+            end,function(ret)
+                if boolean_result and thread.get_hook_storage()[key] then return sdk.to_ptr(0) end
+                return ret
+            end)
         end)
         if not ok then errors[#errors+1]=tostring(err) end
     end
     for _,signature in ipairs({"damageProc(app.HitController.DamageInfo)","updateDamage(app.HitController.DamageInfo, System.UInt32, System.Single, System.Boolean)"}) do
         hook("app.HitController",signature,function(args)
+            if not active then return end
             local info=sdk.to_managed_object(args[3])
-            local receiver=info and info["<DamageGameObject>k__BackingField"]
-            if not receiver then return end
-            for ch in pairs(active and active.passengers or {}) do
-                local a=passengers.controlled(ch)
-                if a and receiver==a.player_go then
-                    passengers.record_protection(a,"damage",passengers.protection.damage)
-                    if passengers.protection.damage then return sdk.PreHookResult.SKIP_ORIGINAL end
-                end
+            local a=passengers.receiver(info and info["<DamageGameObject>k__BackingField"])
+            if a then
+                passengers.record_protection(a,signature,passengers.protection.damage)
+                if passengers.protection.damage then return sdk.PreHookResult.SKIP_ORIGINAL end
             end
+        end,signature=="damageProc(app.HitController.DamageInfo)")
+    end
+    -- Closer to HP application, covering direct routes that bypass damageProc/updateDamage.
+    hook("app.HitController","updateDamageHp(app.HitController.DamageInfo, System.Single, System.Boolean)",function(args)
+        if not active then return end
+        local a=passengers.component_actor(sdk.to_managed_object(args[2]))
+        if a then
+            passengers.record_protection(a,"updateDamageHp",passengers.protection.damage)
+            if passengers.protection.damage then return sdk.PreHookResult.SKIP_ORIGINAL end
+        end
+    end)
+    for _,signature in ipairs({"setHp(System.Single, System.Boolean, System.Int32)","setHpValue(System.Single, System.Boolean)"}) do
+        hook("app.HitController",signature,function(args)
+            if not active then return end
+            local a=passengers.component_actor(sdk.to_managed_object(args[2]))
+            if a then passengers.record_protection(a,signature,false) end -- healing/setup must pass
         end)
     end
-    -- Confirmed Character-taking void overloads only; no CharacterID-wide control.
     for _,signature in ipairs({"safeWarp(app.Character, via.Position)","safeWarp(app.Character, via.Position, via.Quaternion)",
         "pawnLost(app.Character, System.Boolean, System.Boolean)","setPawnLostTimer(app.Character)"}) do
         hook("app.PawnManager",signature,function(args)
-            local ch=sdk.to_managed_object(args[3])
-            local a=passengers.controlled(ch)
+            if not active then return end
+            local a=passengers.controlled(sdk.to_managed_object(args[3]))
             if a and a.group=="pawns" then
                 passengers.record_protection(a,signature,passengers.protection.relocation)
                 if passengers.protection.relocation then return sdk.PreHookResult.SKIP_ORIGINAL end
             end
         end)
     end
-    passengers.protection.status=#errors==0 and "乘客伤害／自动传送保护已安装（仅当前落座实例）" or "部分乘客保护不可用："..table.concat(errors,"; ")
+    hook("app.PawnManager","pawnLost(app.InstanceInfo, app.DummyArg_2_0_0_37)",function(args)
+        if not active then return end
+        local info=sdk.to_managed_object(args[3])
+        local a=passengers.container_actor(info and info["<Container>k__BackingField"])
+        if a and a.group=="pawns" then
+            passengers.record_protection(a,"pawnLost.InstanceInfo",passengers.protection.relocation)
+            if passengers.protection.relocation then return sdk.PreHookResult.SKIP_ORIGINAL end
+        end
+    end)
+    -- Character and CharacterID overloads share their native address in this dump.
+    -- Compare the raw pointer first; never cast an unknown CharacterID argument to Character.
+    hook("app.PawnManager","onLostCheck(app.Character)",function(args)
+        if not active then return end
+        for ch,a in pairs(active.passengers or {}) do
+            if a.group=="pawns" and args[3]==sdk.to_ptr(ch:get_address()) and passengers.controlled(ch) then
+                passengers.record_protection(a,"onLostCheck.Character",passengers.protection.lost_check)
+                if passengers.protection.lost_check then return sdk.PreHookResult.SKIP_ORIGINAL end
+                return
+            end
+        end
+    end)
+    hook("app.GenerateManager","requestDestroy(app.GenerateInfo.GenerateInfoContainer, System.Boolean, System.Boolean, System.Boolean, System.Boolean, System.Boolean)",function(args)
+        if not active then return end
+        local a=passengers.container_actor(sdk.to_managed_object(args[3]))
+        if a and a.group then
+            passengers.record_protection(a,"requestDestroy.exactContainer",passengers.protection.destroy)
+            if passengers.protection.destroy then return sdk.PreHookResult.SKIP_ORIGINAL end
+        end
+    end,true)
+    hook("app.BrineProcessor","onKillCommon()",function(args)
+        if not active then return end
+        local processor=sdk.to_managed_object(args[2])
+        if not processor then return end
+        local a=passengers.each_controlled(function(actor) if actor.brine==processor then return actor end end)
+        if a then passengers.record_protection(a,"BrineProcessor.onKillCommon",false) end
+    end)
+    passengers.protection.status=#errors==0 and "驾驶角色扣血／随从丢失保护及根因探针已安装" or "部分保护／探针不可用："..table.concat(errors,"; ")
     event("passenger_protection_installed",{errors=errors})
 end
 passengers.play_pose=function(a,node)
@@ -1538,7 +1664,7 @@ passengers.restore_one=function(a)
     a.pose_pending=nil
     if a.moved then
         if core() and core().properties.player==a.owner then
-            a.transform:call("set_UniversalPosition(via.Position)",a.original_position)
+            -- Hip display is restored above; keep the current physical location.
             sync_player(a,true)
         end
         a.moved=false
@@ -1574,8 +1700,9 @@ passengers.bind=function(d,ch,group,index)
     discover_joints(a)
     assert(a.hip_joint and a.hip_joint:get_Valid(),"Passenger Hip unavailable")
     a.pose_pending=passengers.visual_seat(group,index).anim
+    pcall(passengers.capture_probe_refs,a) -- ready before the first anchored game tick
     d.passengers[ch]=a -- recovery registered before the first native mutation
-    event("passenger_bound",{group=group,slot=index})
+    event("passenger_bound",{group=group,slot=index,instance=tostring(ch)})
     return a
 end
 passengers.prepare_rig=function(a,d)
@@ -1594,7 +1721,7 @@ passengers.tick=function(d)
     end
     for ch,a in pairs(d.passengers) do
         if not wanted[ch] or not ch:get_Valid() then
-            if not ch:get_Valid() then event("passenger_unloaded",{group=a.group,slot=a.slot,protection=a.protection_counts}) end
+            if not ch:get_Valid() then event("passenger_unloaded",{group=a.group,slot=a.slot,instance=tostring(ch),protection=a.protection_counts,health=a.health_probe}) end
             a.anchor_target=nil
             local ok,err=pcall(passengers.restore_one,a)
             if ok then d.passengers[ch]=nil;event("passenger_released",{group=a.group,slot=a.slot})
@@ -1623,7 +1750,7 @@ passengers.tick=function(d)
             passengers.orient(a,passengers.visual_seat(a.group,a.slot))
             sync_player(a)
             passengers.tick_pose(a)
-            d.passenger_trace[#d.passenger_trace+1]={group=a.group,slot=a.slot,physical=physical,fsm_enabled=a.fsm:call("get_Enabled()"),protection=a.protection_counts,orientation=a.orientation_trace,orientation_failed=a.orientation_failed or false}
+            d.passenger_trace[#d.passenger_trace+1]={group=a.group,slot=a.slot,physical=physical,fsm_enabled=a.fsm:call("get_Enabled()"),protection=a.protection_counts,health=a.health_probe,orientation=a.orientation_trace,orientation_failed=a.orientation_failed or false}
         end)
         if not ok then
             passengers.last_error=slot.group.." "..slot.slot..": "..tostring(err)
@@ -1741,9 +1868,7 @@ re.on_frame(function()
     if not alive then return end
     local c = core()
     if not c or menu.gameplay_paused() then return end
-    local pending=passengers.protection.pending or {}
-    passengers.protection.pending={}
-    for _,detail in ipairs(pending) do event("rider_protection",detail) end
+    passengers.probe_tick()
     if fall_hits~=fall_logged and now()-fall_log_at>=1 then
         fall_logged=fall_hits;fall_log_at=now();event("player_fall_request",{hits=fall_hits,blocked=fall_blocked})
     end
@@ -1778,6 +1903,7 @@ re.on_frame(function()
     end
     if active and active.trace and now() >= next_sample then
         next_sample = now()+0.5
+        active.trace.rider_health=active.health_probe
         active.trace.target_probe = read_target_probe(active)
         local positions_ok,positions=pcall(anchor_positions,active)
         active.trace.anchor_positions=positions_ok and positions or {error=tostring(positions)}
@@ -1787,7 +1913,7 @@ re.on_frame(function()
             sphere.sampled_player_distance=math.sqrt((p.x-h.x)^2+(p.y-h.y)^2+(p.z-h.z)^2)
         end
         rotate()
-        if #journal.samples < 650 then journal.samples[#journal.samples+1] = {time=now(), data=active.trace} end
+        if #journal.samples < 650 then journal.samples[#journal.samples+1] = {time=now(), data=passengers.snapshot(active.trace)} end
     end
     if target_record and not menu.gameplay_paused() then
         local rec=target_record
@@ -2420,10 +2546,15 @@ re.on_draw_ui(function()
             end
         end
         if menu.show_physical then imgui.text("在座位预设的当前布局中选择[1]，编辑实体位置。") end
-        changed,value=menu.toggle("【新增】落座乘客伤害免疫",passengers.protection.damage)
+        changed,value=menu.toggle("驾驶玩家／乘客扣血拦截",passengers.protection.damage)
         if changed then passengers.protection.damage=value end
         changed,value=menu.toggle("【新增】阻止落座乘客自动传送／丢失",passengers.protection.relocation)
         if changed then passengers.protection.relocation=value end
+        changed,value=menu.toggle("【探针验证】跳过落座随从丢失检查",passengers.protection.lost_check)
+        if changed then passengers.protection.lost_check=value;event("lost_check_guard_mode",value) end
+        changed,value=menu.toggle("【探针验证】拦截落座乘客生成器销毁",passengers.protection.destroy)
+        if changed then passengers.protection.destroy=value;event("destroy_guard_mode",value) end
+        imgui.text("后两项默认只记录命中，勾选后拦截；结束驾驶立即放行。")
         imgui.text(passengers.protection.status or "乘客保护：开始驾驶后安装")
         for key,count in pairs(passengers.protection.counts) do imgui.text(key.."："..count) end
         if beta_button((skip_think_enabled and "关闭跳过狮鹫思考" or "开启跳过狮鹫思考").."###BetaThinkToggle") then set_skip_think(not skip_think_enabled) end
