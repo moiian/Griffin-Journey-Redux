@@ -1,7 +1,7 @@
 -- Griffin Mount Experiment: stage 3 read-only flight observation.
 -- Requires the installed aaaNickCore.lua and _NickCore/EnemySpawner.lua.
 -- Keeps an explicit spawn return or user-confirmed instance; never selects by Character ID.
-local VERSION = "0.3.3-stage3-select"
+local VERSION = "0.3.4-stage3-record"
 local state = "Idle"
 local detail = "Ready for one ordinary Griffin request per script session."
 local shared = nil
@@ -642,12 +642,17 @@ end
 local function start_recording()
     if not shared or not shared.go or not shared.chara then return end
     local core = dependency()
-    if core and action_probe then attach_request_observer(core) end
+    if not action_probe then
+        action_probe = true
+        log_event("action_probe_enabled", "Automatically enabled by recording start")
+    end
+    if core then attach_request_observer(core) end
+    log_event("request_observer_status", request_listener_status)
     record_start = game_time()
     request_last = {}
     next_sample = record_start
     recording = true
-    log_event("recording_started", "60 gameplay seconds, at most 5 Hz; read-only flight getters")
+    log_event("recording_started", "60 gameplay seconds, at most 5 Hz; flight + action names + passive native requests")
 end
 
 re.on_script_reset(function()
@@ -660,84 +665,110 @@ re.on_script_reset(function()
     end
 end)
 
-re.on_draw_ui(function()
-    if not imgui.tree_node("Griffin Mount Experiment - Stage 3 Observe") then return end
-    imgui.text("Version: " .. VERSION)
-    imgui.text("Dependency: installed NickCore enemySpawner + run_once")
-    if target_origin == "selected" then
-        imgui.text("Existing Griffin / ch253000_00 / no spawn ThinkStop requested by this script")
-    else
-        imgui.text("Ordinary Griffin / ch253000_00 / requested thinkStop=" .. tostring(early_mode))
+local button_labels = {
+    ["Preview nearest enemy as Griffin (40m)"] = "【本轮】1. 查找附近狮鹫（40米）",
+    ["Bind PREVIEWED Griffin instance"] = "【本轮】2. 绑定这只狮鹫",
+    ["Spawn ONE ordinary Griffin"] = "生成普通狮鹫（不设友方）",
+    ["Spawn ThinkStop Griffin + PRE-ARM Friend"] = "没有现成狮鹫：生成并预设友方",
+    ["Enable action-name probe (read only)"] = "开启动作探针（只读）",
+    ["Disable action-name probe"] = "关闭动作探针",
+    ["Read THIS Griffin flight snapshot (no control)"] = "读取一次飞行和动作状态",
+    ["Start 60s flight recording (5 Hz)"] = "【本轮】开始完整记录（60秒）",
+    ["Stop flight recording + flush log"] = "停止记录并保存",
+    ["Inspect returned instance (read only)"] = "查看绑定对象信息（只读）",
+    ["Read BOTH relationship directions"] = "读取双方关系",
+    ["Enable Friend for THIS Griffin + current party"] = "设为队伍友方（仅这只）",
+    ["Disable Friend override"] = "关闭队伍友方",
+    ["Read spawn ThinkStop flag"] = "读取生成暂停标志",
+    ["Release spawn ThinkStop flag (test)"] = "解除生成暂停（恢复行动）",
+    ["Read party/Griffin hate (both ways)"] = "读取双方仇恨",
+    ["Clear ONLY party/Griffin hate (once)"] = "清除双方仇恨（一次）",
+    ["Unbind THIS Griffin (no despawn)"] = "解除绑定（不删除狮鹫）",
+ }
+local function ui_button(key)
+    local label = button_labels[key] or key
+    local highlight = label:find("【本轮】", 1, true) ~= nil
+    local styled = highlight and type(imgui.push_style_color) == "function" and type(imgui.pop_style_color) == "function"
+    if styled then
+        imgui.push_style_color(21, 0xff98652b) -- ImGuiCol.Button, packed ABGR
+        imgui.push_style_color(0, 0xffa8ecff) -- bright text; no dependency on another mod's UI helpers
     end
-    imgui.text("Status: " .. state)
-    imgui.text(detail)
-    if not dependency() then imgui.text("NickCore is not ready. No standalone fallback.") end
-    imgui.text("Bound instance origin: " .. target_origin)
+    local clicked = imgui.button(label .. "###" .. key)
+    if styled then imgui.pop_style_color(2) end
+    return clicked
+end
+
+re.on_draw_ui(function()
+    if not imgui.tree_node("狮鹫坐骑实验 - 阶段3###Griffin Mount Experiment - Stage 3 Observe") then return end
+    imgui.text("版本：" .. VERSION)
+    imgui.text("本轮：绑定现有狮鹫 → 设为友方 → 开始完整记录")
+    imgui.text("录制会自动包含动作名和原生请求，不必另开探针。")
+    if not dependency() then imgui.text("等待 NickCore 加载完成。") end
+    imgui.text("绑定来源：" .. (target_origin == "selected" and "现有狮鹫" or target_origin == "spawned" and "本脚本生成" or "尚未绑定"))
     if not shared and state ~= "Queued" then
-        if imgui.button("Preview nearest enemy as Griffin (40m)") then preview_existing_griffin() end
-        if candidate and imgui.button("Bind PREVIEWED Griffin instance") then bind_existing_griffin() end
-        imgui.text(candidate_status)
+        if ui_button("Preview nearest enemy as Griffin (40m)") then preview_existing_griffin() end
+        if candidate then
+            imgui.text("已找到普通狮鹫，对象地址：" .. candidate_status)
+            if ui_button("Bind PREVIEWED Griffin instance") then bind_existing_griffin() end
+        else
+            imgui.text(candidate_status)
+        end
     end
     if not submitted and not shared then
-        if imgui.button("Spawn ONE ordinary Griffin") then request_spawn(false) end
-        if not submitted and imgui.button("Spawn ThinkStop Griffin + PRE-ARM Friend") then request_spawn(true) end
+        if ui_button("Spawn ThinkStop Griffin + PRE-ARM Friend") then request_spawn(true) end
     end
     if shared and shared.go and shared.chara then
-        if not action_probe and imgui.button("Enable action-name probe (read only)") then
+        imgui.text("队伍友方：" .. (friendly and "已开启" or "未开启"))
+        if not friendly and ui_button("Enable Friend for THIS Griffin + current party") then queue_relation_action(true) end
+        if early_mode and friendly and not release_attempted
+            and ui_button("Release spawn ThinkStop flag (test)") then queue_think_flag(true) end
+        if not recording and ui_button("Start 60s flight recording (5 Hz)") then start_recording() end
+        if recording and ui_button("Stop flight recording + flush log") then
+            recording = false
+            log_event("recording_stopped", "Manual stop")
+        end
+    end
+    imgui.text("录制：" .. (recording and "进行中（60秒后自动保存）" or "未在录制") .. " | 样本：" .. #flight_log.samples .. " | 原生请求：" .. request_event_count)
+    imgui.text("日志：reframework/data/" .. flight_log_path)
+    if relation_pending then imgui.text("操作已排队，请关闭界面让游戏运行。") end
+    if log_status:find("LOG WRITE ERROR", 1, true) then imgui.text("日志保存失败：" .. log_status) end
+    local latest = flight_log.samples[#flight_log.samples]
+    if latest and next(latest.errors) then imgui.text("最近读取有错误，请展开高级诊断；日志已保留错误。") end
+    if imgui.tree_node("高级诊断（平时不用点）") then
+        if not submitted and not shared and ui_button("Spawn ONE ordinary Griffin") then request_spawn(false) end
+        if shared and shared.go and shared.chara then
+        if not action_probe and ui_button("Enable action-name probe (read only)") then
             action_probe = true
             local core = dependency()
             if core then attach_request_observer(core) end
             log_event("action_probe_enabled", "Current/previous action names and body/wing names added to flight samples")
         end
-        if action_probe and imgui.button("Disable action-name probe") then
+        if action_probe and ui_button("Disable action-name probe") then
             action_probe = false
             log_event("action_probe_disabled", "Manual disable")
         end
-        if imgui.button("Read THIS Griffin flight snapshot (no control)") then queue_flight_snapshot() end
-        if not recording and imgui.button("Start 60s flight recording (5 Hz)") then start_recording() end
-        if recording and imgui.button("Stop flight recording + flush log") then
-            recording = false
-            log_event("recording_stopped", "Manual stop")
-        end
-        if imgui.button("Inspect returned instance (read only)") then inspect_instance() end
-        if imgui.button("Read BOTH relationship directions") then queue_relation_action(false) end
-        if not friendly and imgui.button("Enable Friend for THIS Griffin + current party") then
-            queue_relation_action(true)
-        end
-        if friendly and imgui.button("Disable Friend override") then disable_friendship() end
-        if imgui.button("Read spawn ThinkStop flag") then queue_think_flag(false) end
-        if early_mode and friendly and not release_attempted
-            and imgui.button("Release spawn ThinkStop flag (test)") then queue_think_flag(true) end
-        if imgui.button("Read party/Griffin hate (both ways)") then queue_hate_action(false) end
+        if ui_button("Read THIS Griffin flight snapshot (no control)") then queue_flight_snapshot() end
+        if ui_button("Inspect returned instance (read only)") then inspect_instance() end
+        if ui_button("Read BOTH relationship directions") then queue_relation_action(false) end
+        if friendly and ui_button("Disable Friend override") then disable_friendship() end
+        if ui_button("Read spawn ThinkStop flag") then queue_think_flag(false) end
+        if ui_button("Read party/Griffin hate (both ways)") then queue_hate_action(false) end
         if friendly and not hate_clear_attempted
-            and imgui.button("Clear ONLY party/Griffin hate (once)") then queue_hate_action(true) end
-        if not recording and imgui.button("Unbind THIS Griffin (no despawn)") then unbind_griffin() end
+            and ui_button("Clear ONLY party/Griffin hate (once)") then queue_hate_action(true) end
+        if not recording and ui_button("Unbind THIS Griffin (no despawn)") then unbind_griffin() end
+        end
+        imgui.text("状态：" .. state .. " | " .. detail)
+        imgui.text(identity)
+        imgui.text(flight_status)
+        imgui.text(log_status)
+        imgui.text(request_listener_status)
+        imgui.text(relation_status)
+        imgui.text(think_status)
+        imgui.text(hate_status)
+        for _, row in ipairs(flight_rows) do imgui.text(row) end
+        for _, row in ipairs(relation_rows) do imgui.text(row) end
+        for _, row in ipairs(hate_rows) do imgui.text(row) end
+        imgui.tree_pop()
     end
-    imgui.text(identity)
-    imgui.text(flight_status)
-    imgui.text("Dedicated log: reframework/data/" .. flight_log_path)
-    imgui.text(log_status)
-    imgui.text("Automatic recording: " .. tostring(recording) .. " | Samples: " .. #flight_log.samples)
-    imgui.text("Action-name probe: " .. tostring(action_probe) .. " (read only; disables on read error)")
-    imgui.text(request_listener_status .. " | Request events: " .. request_event_count)
-    for _, row in ipairs(flight_rows) do imgui.text(row) end
-    imgui.text(relation_status)
-    imgui.text(think_status)
-    if early_mode then
-        imgui.text("Pre-armed filter binds only when NickCore fills returned chara; initialization gap is unproven.")
-        imgui.text("ThinkStop release resumed AI in prior tests; check movement in this session.")
-    end
-    imgui.text("Friend enum (runtime metadata): " .. tostring(friend_value or "not read yet"))
-    if relation_pending then imgui.text("Relationship action queued. Close UI and let gameplay run.") end
-    imgui.text("Hits Griffin->party / party->Griffin | Character: " .. hits.Character[1] .. "/" .. hits.Character[2]
-        .. " | Holder: " .. hits.Holder[1] .. "/" .. hits.Holder[2])
-    for _, row in ipairs(relation_rows) do imgui.text(row) end
-    imgui.text(hate_status)
-    for _, row in ipairs(hate_rows) do imgui.text(row) end
-    imgui.text("Party snapshot: disable/re-enable after changing party. Other creatures pass through.")
-    imgui.text("Read button also counts as hook hits. Observe AI behaviour separately.")
-    imgui.text("Hate clear is manual, pair-only, once per session. No AI reset or damage blocking.")
-    imgui.text("No global faction writes, flight or riding edits.")
-    imgui.text("One spawn request per session. After reset, preview/bind an existing Griffin; no despawn.")
     imgui.tree_pop()
 end)
