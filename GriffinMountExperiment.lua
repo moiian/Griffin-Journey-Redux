@@ -1,7 +1,7 @@
 -- Griffin Mount Experiment: stage 2 relationship query experiment.
 -- Requires the installed aaaNickCore.lua and _NickCore/EnemySpawner.lua.
 -- Keeps spawn_enemy's returned table; never searches by Character ID.
-local VERSION = "0.2.1-stage2"
+local VERSION = "0.2.2-stage2"
 local state = "Idle"
 local detail = "Ready for one ordinary Griffin request per script session."
 local shared = nil
@@ -22,6 +22,9 @@ local hits = {Character = {0, 0}, Holder = {0, 0}}
 local early_mode = false
 local think_status = "Spawn ThinkStop flag: not inspected"
 local release_attempted = false
+local hate_clear_attempted = false
+local hate_status = "Hate: not inspected; no entries cleared."
+local hate_rows = {}
 
 local function disable_friendship(message)
     friendly = false
@@ -277,6 +280,70 @@ local function inspect_instance()
     log.error("[GriffinMountExperiment] " .. identity)
 end
 
+local function queue_hate_action(clear)
+    if relation_pending or not shared or not shared.go or not shared.chara then return end
+    if clear and hate_clear_attempted then return end
+    relation_pending = true
+    local expected = shared
+    run_once(function()
+        local completed = 0
+        local ok, err = pcall(function()
+            local core = dependency()
+            assert(core and core.properties.player == owner and shared == expected, "Instance context changed")
+            assert(expected.go:get_Valid(), "Spawned GameObject is invalid")
+            if clear then
+                assert(friendly and not aggro_conflict(), "Friend override must remain enabled")
+            end
+            local members = friendly and party or core.object.get_party()
+            local griffin_hate = expected.chara:call("get_HateSystem()")
+            assert(griffin_hate, "Griffin HateSystem unavailable")
+            local entries = {}
+            -- Collect and read everything before any write. Never enumerate world enemies.
+            for index, member in ipairs(members) do
+                local member_go = member:call("get_GameObject()")
+                assert(member_go and member_go:get_Valid(), "Party GameObject invalid: " .. index)
+                if clear then
+                    assert(expected.chara:call("getBattleRelationshipTo(app.Character)", member) == friend_value
+                        and member:call("getBattleRelationshipTo(app.Character)", expected.chara) == friend_value,
+                        "Both directions must be Friend before clearing: Party " .. index)
+                end
+                local member_hate = member:call("get_HateSystem()")
+                entries[#entries + 1] = {label = "Griffin -> Party " .. index, system = griffin_hate, target = member_go}
+                entries[#entries + 1] = {label = "Party " .. index .. " -> Griffin", system = member_hate, target = expected.go}
+            end
+            local function read(entry)
+                if not entry.system then return "N/A (no HateSystem)" end
+                return "total=" .. tostring(entry.system:call("getTotalHate(via.GameObject)", entry.target))
+                    .. " temp=" .. tostring(entry.system:call("getRawTotalTempHate(via.GameObject)", entry.target))
+                    .. " notForget=" .. tostring(entry.system:call("getRawTotalNotForgetHate(via.GameObject)", entry.target))
+            end
+            local rows = {}
+            for index, entry in ipairs(entries) do rows[index] = entry.label .. " | " .. read(entry) end
+            hate_rows = rows
+            for _, row in ipairs(rows) do log.error("[GriffinMountExperiment] Hate BEFORE/READ " .. row) end
+            if clear then
+                hate_clear_attempted = true -- Never automatically repeat a partially completed native mutation.
+                for index, entry in ipairs(entries) do
+                    if entry.system then
+                        entry.system:call("clear(via.GameObject)", entry.target)
+                        completed = completed + 1
+                    end
+                    hate_rows[index] = rows[index] .. " => " .. read(entry)
+                    log.error("[GriffinMountExperiment] Hate AFTER " .. hate_rows[index])
+                end
+            end
+            hate_status = clear and ("Pair-only clear completed: " .. completed .. " calls. Observe and read again after 10s.")
+                or "Hate snapshot read only. total / temp / notForget; values are not an AI target readout."
+            log.error("[GriffinMountExperiment] " .. hate_status)
+        end)
+        if not ok then
+            hate_status = "Hate error after " .. completed .. " clear calls: " .. tostring(err)
+            log.error("[GriffinMountExperiment] " .. hate_status)
+        end
+        relation_pending = false
+    end)
+end
+
 re.on_draw_ui(function()
     if not imgui.tree_node("Griffin Mount Experiment - Stage 2") then return end
     imgui.text("Version: " .. VERSION)
@@ -299,6 +366,9 @@ re.on_draw_ui(function()
         if imgui.button("Read spawn ThinkStop flag") then queue_think_flag(false) end
         if early_mode and friendly and not release_attempted
             and imgui.button("Release spawn ThinkStop flag (test)") then queue_think_flag(true) end
+        if imgui.button("Read party/Griffin hate (both ways)") then queue_hate_action(false) end
+        if friendly and not hate_clear_attempted
+            and imgui.button("Clear ONLY party/Griffin hate (once)") then queue_hate_action(true) end
     end
     imgui.text(identity)
     imgui.text(relation_status)
@@ -312,9 +382,12 @@ re.on_draw_ui(function()
     imgui.text("Hits Griffin->party / party->Griffin | Character: " .. hits.Character[1] .. "/" .. hits.Character[2]
         .. " | Holder: " .. hits.Holder[1] .. "/" .. hits.Holder[2])
     for _, row in ipairs(relation_rows) do imgui.text(row) end
+    imgui.text(hate_status)
+    for _, row in ipairs(hate_rows) do imgui.text(row) end
     imgui.text("Party snapshot: disable/re-enable after changing party. Other creatures pass through.")
     imgui.text("Read button also counts as hook hits. Observe AI behaviour separately.")
-    imgui.text("No global faction writes, hate clearing, flight or riding edits.")
+    imgui.text("Hate clear is manual, pair-only, once per session. No AI reset or damage blocking.")
+    imgui.text("No global faction writes, flight or riding edits.")
     imgui.text("One request per session. Script reset loses ownership; it does not despawn.")
     imgui.tree_pop()
 end)
