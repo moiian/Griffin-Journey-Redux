@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.5. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.6. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.5-beta"
+local VERSION = "0.1.6-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -316,11 +316,33 @@ local function target_context(r)
     assert(ctrl and ctrl:call("get_CachedCharacter()") == ch, "FlightControl binding mismatch")
     return player, transform, tc, ctrl
 end
+local target_enum_names={}
+local function target_type_name(value)
+    local key=tostring(value)
+    if target_enum_names[key] then return target_enum_names[key] end
+    local td=sdk.find_type_definition("app.TargetController.TargetTypeEnum")
+    if td then
+        for _,name in ipairs({"ManualPlayer","CharaHighWithoutClimber","HateHigh","HateLow","LastTargetPosition","GeneratePosition","Self","Nearest","CharaHigh","CharaLow"}) do
+            local field=td:get_field(name)
+            if field then
+                local v=field:get_data()
+                if finite(v) then target_enum_names[tostring(v)]=name end
+            end
+        end
+    end
+    return target_enum_names[key] or "Unknown"
+end
 local function target_snapshot(r)
     local player, transform, tc, ctrl = target_context(r)
     local fsm = player_fsm(player)
-    return {target_is_player=tc:call("get_TargetCharacter()") == player,
-        target_type=tostring(tc:call("get_TargetType()")),
+    local target=tc:call("get_TargetCharacter()")
+    local target_type=tc:call("get_TargetType()")
+    local party_index=nil
+    for i,member in ipairs(r.party) do if target==member then party_index=i;break end end
+    return {target_is_player=target == player, target_is_self=target == r.result.chara,
+        target_party_index=party_index, target_has_character=target~=nil,
+        target_character_id=target and target:get_Valid() and target:get_CharaIDString() or nil,
+        target_type=tostring(target_type), target_type_name=target_type_name(target_type),
         character_target_position=vector(tc:call("get_TargetPosition()")),
         flight_target_position=vector(ctrl:call("get_TargetPosition()")),
         player_position=vector(transform:call("get_Position()")),
@@ -343,7 +365,7 @@ local function start_target_record(r)
     target_status="目标坐标记录中（60秒），玩家可自由移动；日志自动保存。"
     event("target_record_started",60)
 end
-local function target_test(sync_once)
+local function target_test(sync_once, select_player)
     local r=active and active.spawn or state.spawns[#state.spawns]
     if not r or not r.ready or r.delete_requested then target_status="请先生成并等待狮鹫就绪。";return end
     run_once(function()
@@ -351,6 +373,19 @@ local function target_test(sync_once)
         local ok,err=pcall(function()
             local before=target_snapshot(r)
             event("flight_target_test_before",before)
+            if select_player then
+                local _,_,tc=target_context(r)
+                local td=sdk.find_type_definition("app.TargetController.TargetTypeEnum")
+                local field=td and td:get_field("ManualPlayer")
+                local value=field and field:get_data()
+                assert(finite(value), "ManualPlayer enum unavailable")
+                local type_def=sdk.find_type_definition("app.TargetController")
+                assert(type_def and type_def:get_method("setTarget(app.TargetController.TargetTypeEnum)"), "Target selection interface unavailable")
+                assert(tc:call("get_ManualPlayerTarget()"), "ManualPlayer target unavailable")
+                event("manual_player_target_request",{value=value,before=before})
+                tc:call("setTarget(app.TargetController.TargetTypeEnum)",value)
+                event("manual_player_target_returned",target_snapshot(r))
+            end
             if sync_once then
                 local _, transform, tc, ctrl=target_context(r)
                 assert(tc:call("get_TargetCharacter()") == r.owner, "目标角色不是玩家；取消同步")
@@ -363,7 +398,7 @@ local function target_test(sync_once)
             end
             start_target_record(r)
         end)
-        if not ok then target_status="目标测试停止："..tostring(err);target_record=nil;event("target_test_error",target_status) end
+        if not ok then target_status="目标请求未完成："..tostring(err);event("target_test_error",target_status);start_target_record(r) end
     end)
 end
 
@@ -804,8 +839,9 @@ re.on_draw_ui(function()
     end
     if imgui.tree_node("【新增】飞行目标坐标测试") then
         if beta_button("【新增】记录目标坐标60秒（不改位置）###BetaRecordTarget") then target_test(false) end
+        if beta_button("【新增】切换目标到玩家（仅一次）###BetaSelectPlayerTarget") then target_test(false,true) end
         if beta_button("【新增】飞行目标对准玩家（仅一次）###BetaSyncTargetOnce") then target_test(true) end
-        imgui.text("先冲刺，观察异常后再同步；不会改变目标角色或重新播放动作。")
+        imgui.text("先切换玩家目标，再用工具请求冲刺；坐标同步作为独立测试。")
         imgui.text(target_status)
         imgui.tree_pop()
     end
