@@ -12,3 +12,5 @@ Dragon’s Dogma 2狮鹫驾驶实验。明确依赖已安装的NickCore EnemySpa
 脚本部署到游戏reframework/autorun。当前操控和测试步骤见TESTING.md，版本变化见VERSION_HISTORY.md。
 
 历史Import archived提交于2026-10-11从原快照导入；提交时间为导入时间，不是开发时间。失败版本保留在历史与版本说明。
+
+当前实验分支experiment/camera-yaw-follow：Beta0.1.17，新增3档镜头自动水平跟随开关及速度滑条；右摇杆操作时暂停，松开0.8秒后回正。离线回归通过，实机待验收。main与beta-v0.1.16-flight-controls-verified继续保留已验证操控基线。

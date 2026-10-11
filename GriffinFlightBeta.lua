@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.16. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.17. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.16-beta"
+local VERSION = "0.1.17-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -13,9 +13,11 @@ local camera_mode, follow_state = "original", nil
 local camera_follow_status = "镜头实验：原跟随"
 local status = "先生成狮鹫，再开始驾驶。"
 local hooks_ready, hooks_tried, friend_value = false, false, nil
+local yaw_state, yaw_hook_ready = nil, false
+local yaw_status = "自动转向镜头：未开启"
 local masks = nil
 local input = {x = 0, y = 0, buttons = 0}
-local settings = {distance = 30, fov = 90, player_distance = 20, player_height = 0, freeze_player = true, rider_height=1.0, rider_forward=0, rider_side=0, camera_x=0, camera_y=0, camera_z=0, sphere_navigation=true, navigation_radius=4.019, steering_yaw=50.276, steering_pitch=22.018, navigation_height=0.991, bumper_pitch=69, controls_revision=1}
+local settings = {distance = 30, fov = 90, player_distance = 20, player_height = 0, freeze_player = true, rider_height=1.0, rider_forward=0, rider_side=0, camera_x=0, camera_y=0, camera_z=0, sphere_navigation=true, navigation_radius=4.019, steering_yaw=50.276, steering_pitch=22.018, navigation_height=0.991, bumper_pitch=69, controls_revision=1, camera_auto_yaw=false, camera_yaw_speed=120}
 local settings_path = "GriffinFlightBeta_Settings.json"
 local log_id = os.date("!%Y%m%dT%H%M%SZ") .. "_" .. math.floor(os.clock() * 1000)
 local part, last_flush, next_sample = 1, -math.huge, 0
@@ -65,6 +67,8 @@ end
 if type(json.load_file) == "function" then
     local ok, saved = pcall(json.load_file, settings_path)
     if ok and type(saved) == "table" then
+        if type(saved.camera_auto_yaw)=="boolean" then settings.camera_auto_yaw=saved.camera_auto_yaw end
+        if finite(saved.camera_yaw_speed) then settings.camera_yaw_speed=math.max(15,math.min(360,saved.camera_yaw_speed)) end
         if type(saved.freeze_player) == "boolean" then settings.freeze_player = saved.freeze_player end
         if type(saved.sphere_navigation)=="boolean" then settings.sphere_navigation=saved.sphere_navigation end
         if finite(saved.navigation_radius) then settings.navigation_radius=math.max(2,math.min(30,saved.navigation_radius)) end
@@ -356,6 +360,7 @@ local camera_modes={
     {key="griffin",label="【本轮】镜头跟随狮鹫头部"},
 }
 local function restore_follow()
+    yaw_state=nil -- angle writes leave no persistent lock; native/manual control resumes
     local s=follow_state
     if not s then return true end
     local ok,err=pcall(function()
@@ -429,6 +434,96 @@ local function tick_camera_follow()
         event("camera_follow_error",camera_follow_status)
     end
 end
+-- Native manual-camera update finishes input handling before rotation is built.
+-- Only the current driving player's exact controller is touched. No camera Transform writes.
+local function wrap_yaw(a) return (a+math.pi)%(2*math.pi)-math.pi end
+local function yaw_failed(err)
+    yaw_state=nil
+    settings.camera_auto_yaw=false
+    yaw_status="自动跟随已停用："..tostring(err)
+    event("camera_yaw_error",tostring(err))
+end
+local function tick_camera_yaw(controller)
+    local d,s=active,follow_state
+    if not alive or not settings.camera_auto_yaw then return end
+    if not d or not s or camera_mode~="griffin" or d.gear~=3 or not d.controls_active or d.external_control then
+        yaw_state=nil; yaw_status="自动跟随待机：仅3档头部镜头生效";return
+    end
+    if controller~=s.controller then return end
+    local ok,err=pcall(function()
+        local c=core()
+        if not c or c.properties.isPaused then yaw_state=nil;return end
+        assert(owned_player(d,true) and s.main:get_Valid(),"驾驶玩家或镜头失效")
+        assert(s.main:call("get_TargetCharacter()")==d.player and s.main._CurrentCameraController==controller,
+            "镜头归属或控制器变化")
+        assert(sdk.get_managed_singleton("app.CameraManager")==s.manager,"镜头管理器变化")
+        assert(not input.right_error and finite(input.rx) and finite(input.ry),"右摇杆读取不可用")
+        local angle=vector(controller:call("get_Angle()"))
+        local t=now()
+        if not yaw_state or yaw_state.controller~=controller then
+            -- Compare native/degree ranges instead of assuming the angle unit.
+            local range=controller:call("get_YawRange()")
+            local degrees=controller:call("get_YawRangeDeg()")
+            assert(range and degrees and finite(range.x) and finite(range.y) and finite(degrees.x) and finite(degrees.y),"镜头角度范围不可用")
+            local span,deg_span=math.abs(range.y-range.x),math.abs(degrees.y-degrees.x)
+            assert(span>0.001 and deg_span>0.001,"镜头角度范围无效")
+            local scale=(span/deg_span)*(180/math.pi)
+            assert(math.abs(scale-1)<0.02 or math.abs(scale-180/math.pi)<0.1,"未知镜头角度单位")
+            -- Calibrate the native orbit-angle offset from the actual camera-to-target ray.
+            local pos=vector(s.main:call("get_Position()"))
+            local target=vector(s.main:call("get_TargetPosition()"))
+            local dx,dz=target.x-pos.x,target.z-pos.z
+            assert(dx*dx+dz*dz>0.01,"镜头过于垂直，暂不能确定水平朝向")
+            yaw_state={controller=controller,last_time=t,resume_at=t,
+                scale=scale,offset=wrap_yaw(angle.y/scale-math.atan(dx,dz))}
+            event("camera_yaw_bound",{scale=scale,offset=yaw_state.offset,original_yaw=angle.y})
+        end
+        local y=yaw_state
+        local dt=math.max(0,math.min(0.1,t-y.last_time));y.last_time=t
+        if input.rx*input.rx+input.ry*input.ry>0.04 then y.resume_at=t+0.8 end
+        if t<y.resume_at then
+            yaw_status="右摇杆观察中；松开后自动回正"
+            d.trace.camera_yaw={manual=true,current=angle.y,scale=y.scale};return
+        end
+        assert(d.heading and finite(d.heading.x) and finite(d.heading.z),"狮鹫朝向不可用")
+        local desired=wrap_yaw(math.atan(d.heading.x,d.heading.z)+y.offset)
+        local current=angle.y/y.scale
+        local difference=wrap_yaw(desired-current)
+        -- Exponential easing with an angular speed cap, taking the shortest arc at +/-180.
+        local max_step=math.rad(settings.camera_yaw_speed)*dt
+        local step=math.max(-max_step,math.min(max_step,difference*(1-math.exp(-5*dt))))
+        local output=current+step
+        if dt>0 and math.abs(step)>0.00001 then controller:call("setYaw(System.Single)",output*y.scale) end
+        yaw_status="3档镜头自动跟随中；右摇杆可自由观察"
+        d.trace.camera_yaw={manual=false,current=angle.y,requested=output*y.scale,target=desired*y.scale,
+            speed=settings.camera_yaw_speed,scale=y.scale,dt=dt}
+    end)
+    if not ok then yaw_failed(err) end
+end
+local function install_yaw_hook()
+    if yaw_hook_ready then return true end
+    local ok,err=pcall(function()
+        local def=assert(sdk.find_type_definition("app.RotateCameraControllerBase"),"镜头旋转类型不可用")
+        local method=assert(def:get_method("updateManualCameraControl()"),"镜头手动更新接口不可用")
+        assert(def:get_method("setYaw(System.Single)") and def:get_method("get_Angle()") and
+            def:get_method("get_YawRange()") and def:get_method("get_YawRangeDeg()"),"镜头水平角接口不可用")
+        sdk.hook(method,function(args)
+            local storage=thread.get_hook_storage()
+            storage.griffin_yaw_controller=nil
+            if alive and settings.camera_auto_yaw and active and follow_state then
+                local candidate=sdk.to_managed_object(args[2])
+                if candidate==follow_state.controller then storage.griffin_yaw_controller=candidate end
+            end
+        end,function(retval)
+            local candidate=thread.get_hook_storage().griffin_yaw_controller
+            if candidate then tick_camera_yaw(candidate) end
+            return retval
+        end)
+        yaw_hook_ready=true
+    end)
+    if not ok then yaw_failed(err) end
+    return ok
+end
 local function read_camera_follow()
     local d,s=active,follow_state
     if not d or not s then return end
@@ -446,6 +541,7 @@ end
 local function restore_camera()
     restore_follow()
     camera_mode="original"
+    yaw_state=nil
     local s = camera_state
     if not s then return end
     camera_state = nil
@@ -524,7 +620,13 @@ local function read_pad()
     local length = math.sqrt(x*x + y*y)
     if length <= 0.2 then x, y = 0, 0
     else local scale = math.min(1, (length - 0.2)/0.8)/length; x, y = -x*scale, y*scale end
-    return {x = x, y = y, buttons = bits}
+    local rx,ry,right_error=0,0,nil
+    if settings.camera_auto_yaw then
+        local ok,right=pcall(function() return device:call("get_AxisR()") end)
+        if ok and right and finite(right.x) and finite(right.y) then rx,ry=right.x,right.y
+        else right_error="右摇杆读取失败" end
+    end
+    return {x = x, y = y, buttons = bits,rx=rx,ry=ry,right_error=right_error}
 end
 local function held(bits, mask) return (bits & mask) == mask end
 local function set_intent(d, node, mode)
@@ -791,6 +893,7 @@ local function start_driver()
             input = read_pad()
             d.previous_buttons = input.buttons -- holding A/RT on enable is not a fresh press
             active = d
+            if settings.camera_auto_yaw and install_yaw_hook() then change_camera_mode("griffin") end
             install_fall_hook()
             apply_player_freeze(d, settings.freeze_player)
             local joint_ok,joint_err=pcall(discover_joints,d)
@@ -1322,6 +1425,23 @@ re.on_draw_ui(function()
         end
         imgui.tree_pop()
     end
+    if type(imgui.checkbox)=="function" then
+        local styled=type(imgui.push_style_color)=="function" and type(imgui.pop_style_color)=="function"
+        if styled then imgui.push_style_color(0,0xff40e8ff) end
+        local changed,value=imgui.checkbox("【新增】3档镜头自动跟随转向###BetaCameraYaw",settings.camera_auto_yaw)
+        if styled then imgui.pop_style_color(1) end
+        if changed then
+            settings.camera_auto_yaw=value; yaw_state=nil
+            if value and install_yaw_hook() then change_camera_mode("griffin")
+            elseif not value then yaw_status="自动转向镜头：已关闭，恢复自由观察" end
+            pcall(json.dump_file,settings_path,settings)
+        end
+    end
+    if settings.camera_auto_yaw and type(imgui.slider_float)=="function" then
+        local changed,value=imgui.slider_float("【新增】镜头跟随速度（度／秒）",settings.camera_yaw_speed,15,360)
+        if changed and finite(value) then settings.camera_yaw_speed=math.max(15,math.min(360,value));pcall(json.dump_file,settings_path,settings) end
+    end
+    imgui.text(yaw_status)
     if imgui.tree_node("【本轮】独立镜头测试") then
         imgui.text("互斥选择；取消或结束驾驶恢复。默认原跟随，模式不跨重置保存。")
         if type(imgui.checkbox)=="function" then
