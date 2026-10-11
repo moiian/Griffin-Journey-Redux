@@ -1,7 +1,7 @@
 -- Griffin Mount Experiment: stage 3 read-only flight observation.
 -- Requires the installed aaaNickCore.lua and _NickCore/EnemySpawner.lua.
 -- Keeps spawn_enemy's returned table; never searches by Character ID.
-local VERSION = "0.3.1-stage3-log"
+local VERSION = "0.3.2-stage3-actions"
 local state = "Idle"
 local detail = "Ready for one ordinary Griffin request per script session."
 local shared = nil
@@ -32,6 +32,7 @@ local flight_log_path = "GriffinMountExperiment_Flight_" .. session_id .. ".json
 local flight_log = {schema = 1, version = VERSION, session_id = session_id, samples = {}, events = {}}
 local log_status = "No file write yet. Events and snapshots write the dedicated JSON."
 local recording = false
+local action_probe = false
 local record_start = 0
 local next_sample = 0
 local last_flush = -math.huge
@@ -403,7 +404,7 @@ local function queue_flight_snapshot(source)
         local sample = {
             sequence = #flight_log.samples + 1, source = source, game_time = game_time(),
             utc = os.date("!%Y-%m-%dT%H:%M:%SZ"), friend_enabled = friendly,
-            values = {}, errors = {}
+            values = {}, errors = {}, action_probe_enabled = action_probe
         }
         local ok, err = pcall(function()
             local core = dependency()
@@ -452,6 +453,44 @@ local function queue_flight_snapshot(source)
             end
             inspect_controller("Character.FlightCtrl", char_ctrl)
             if monster_ctrl ~= char_ctrl then inspect_controller("Ch253.FlightControl", monster_ctrl) end
+            if action_probe then
+                -- Opt-in observation only. No action requests, state writes or sequence updates.
+                local probe_failed = false
+                local function action_row(label, getter)
+                    local value = row(label, getter)
+                    if sample.errors[label] then probe_failed = true end
+                    return value
+                end
+                local manager = action_row("Character.ActionManager", function()
+                    return expected.chara:call("get_ActionManager()")
+                end)
+                action_row("ActionManager available", function() return manager ~= nil end)
+                if manager then
+                    action_row("ActionManager.IsEndAction", function() return manager:call("get_IsEndAction()") end)
+                    for _, name in ipairs({"CurrentActionHash", "PrevActionHash"}) do
+                        -- Existing engine action identifiers; no file checksums are computed.
+                        action_row("ActionManager." .. name, function() return manager:call("get_" .. name .. "()") end)
+                    end
+                    for _, field in ipairs({"CurrentAction", "PrevAction"}) do
+                        local info = action_row("ActionManager." .. field .. " present", function()
+                            return manager:get_field(field)
+                        end)
+                        if info then
+                            action_row("ActionManager." .. field .. ".Name", function() return info:get_field("Name") end)
+                            action_row("ActionManager." .. field .. ".IsValid", function() return info:call("get_IsValid()") end)
+                        end
+                    end
+                end
+                if ch253 then
+                    for _, name in ipairs({"MotinoLayerActionBodyName", "MotinoLayerActionWingName"}) do
+                        action_row("Ch253." .. name, function() return ch253:call("get_" .. name .. "()") end)
+                    end
+                end
+                if probe_failed then
+                    action_probe = false
+                    log_event("action_probe_disabled", "Read error; see sample " .. sample.sequence .. ". Original flight recording continues.")
+                end
+            end
             flight_status = "Snapshot complete. Read errors, if any, are shown below. No flight state was written."
         end)
         if not ok then
@@ -508,6 +547,14 @@ re.on_draw_ui(function()
         if not submitted and imgui.button("Spawn ThinkStop Griffin + PRE-ARM Friend") then request_spawn(true) end
     end
     if shared and shared.go and shared.chara then
+        if not action_probe and imgui.button("Enable action-name probe (read only)") then
+            action_probe = true
+            log_event("action_probe_enabled", "Current/previous action names and body/wing names added to flight samples")
+        end
+        if action_probe and imgui.button("Disable action-name probe") then
+            action_probe = false
+            log_event("action_probe_disabled", "Manual disable")
+        end
         if imgui.button("Read THIS Griffin flight snapshot (no control)") then queue_flight_snapshot() end
         if not recording and imgui.button("Start 60s flight recording (5 Hz)") then start_recording() end
         if recording and imgui.button("Stop flight recording + flush log") then
@@ -532,6 +579,7 @@ re.on_draw_ui(function()
     imgui.text("Dedicated log: reframework/data/" .. flight_log_path)
     imgui.text(log_status)
     imgui.text("Automatic recording: " .. tostring(recording) .. " | Samples: " .. #flight_log.samples)
+    imgui.text("Action-name probe: " .. tostring(action_probe) .. " (read only; disables on read error)")
     for _, row in ipairs(flight_rows) do imgui.text(row) end
     imgui.text(relation_status)
     imgui.text(think_status)
