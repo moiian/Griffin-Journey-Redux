@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.19. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.21. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.20-beta"
+local VERSION = "0.1.21-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -15,7 +15,7 @@ local status = "先生成狮鹫，再开始驾驶。"
 local hooks_ready, hooks_tried, friend_value = false, false, nil
 local yaw_state, yaw_hook_ready = nil, false
 local yaw_status = "自动转向镜头：未开启"
-local controls,menu = {},{}
+local controls,menu,passengers = {},{},{}
 local masks = nil
 local input = {x = 0, y = 0, buttons = 0}
 local settings = {distance = 30, fov = 90, player_distance = 20, player_height = 0, freeze_player = true, rider_anchor="head", rider_neck_joint="", rider_height=1.0, rider_forward=0, rider_side=0, camera_x=0, camera_y=0, camera_z=0, sphere_navigation=true, navigation_radius=4.019, steering_yaw=50.276, steering_pitch=22.018, navigation_height=0.991, bumper_pitch=59, controls_revision=1, camera_auto_yaw=false, camera_yaw_speed=120, camera_manual_threshold=0.55}
@@ -597,7 +597,7 @@ stop_driver = function(reason)
     restore_camera()
     if not d then return true end
     d.intent = nil -- queued native action callbacks must see that driving has ended
-    local errors = {}
+    local errors = passengers.restore_all and passengers.restore_all(d) or {}
     local bone_ok,bone_err=pcall(restore_bone,d)
     if not bone_ok then errors[#errors+1]="骨骼恢复 "..tostring(bone_err) end
     if d.moved then
@@ -1006,6 +1006,7 @@ local function start_driver()
         local ok, err = pcall(function()
             local c = assert(core(), "等待 NickCore 加载")
             r.party = capture_party(c, r.owner)
+            passengers.refresh(true)
             validate_spawn(r)
             local bus = rawget(_G, "DD2_OxcartControl")
             assert(not bus or not bus.owner, "请先结束牛车驾驶")
@@ -1015,7 +1016,7 @@ local function start_driver()
                 transform = player:call("get_Transform()"), context = player:get_field("<PosRotContext>k__BackingField"),
                 terrain = terrain, controller = terrain and terrain.MainCharacterController,
                 fall = player:get_field("<FallInfo>k__BackingField"), fsm = player_fsm(player),
-                anchor_mode=anchor_mode, gear=1, controls_active=false, mode = "ground", last_request = -math.huge, started = now(), pending = false}
+                passengers={},anchor_mode=anchor_mode, gear=1, controls_active=false, mode = "ground", last_request = -math.huge, started = now(), pending = false}
             assert(d.transform and d.context and d.controller and d.fall and d.fsm, "Player interfaces unavailable")
             local ft = d.fsm:get_type_definition()
             assert(ft:get_method("get_Enabled()") and ft:get_method("set_Enabled(System.Boolean)"), "FSM Enabled interface unavailable")
@@ -1181,12 +1182,14 @@ local function tick_driver()
         d.trace = {navigation_sphere=sphere,neutral_anchor=neutral,anchor_plan=d.anchor_plan,griffin = pos, player = vector(d.transform:call("get_Position()")), target = target,
             physical = vector(d.controller:call("get_Position()")), flight = flying, ground = ground,
             action = tostring(action_name), mode = d.mode, gear=d.gear, manual_hold=d.manual_hold, external_control=d.external_control, bumpers={rb=held(input.buttons,masks.rb),lb=held(input.buttons,masks.lb)}, anchor_mode=d.anchor_mode, anchor_height = settings.player_height, stick = {x=input.x,y=input.y}}
+        passengers.tick(d)
     end)
     if not ok then stop_driver("驾驶检查或位置同步失败"); failed("驾驶已停止", err) end
 end
 
 -- Seat calculation only. Bone writes use the original Hip experiment callback below.
-local function rider_seat(d)
+local function rider_seat(d,config)
+    config=config or {anchor=settings.rider_anchor,neck_joint=settings.rider_neck_joint,height=settings.rider_height,forward=settings.rider_forward,side=settings.rider_side}
     local ch=validate_spawn(d.spawn)
     assert(ch:call("get_Transform()")==d.rider_griffin_transform,"Griffin anchor changed")
     local base
@@ -1198,10 +1201,10 @@ local function rider_seat(d)
         base={x=base.x+d.heading.x*3,y=base.y+4,z=base.z+d.heading.z*3}
     end
     local selected_name=d.rider_head_name
-    if settings.rider_anchor=="neck" then
+    if config.anchor=="neck" then
         local neck=d.rider_necks and d.rider_necks[1]
         for _,candidate in ipairs(d.rider_necks or {}) do
-            if candidate.name==settings.rider_neck_joint then neck=candidate;break end
+            if candidate.name==config.neck_joint then neck=candidate;break end
         end
         if neck and neck.joint:get_Valid() then
             base=vector(neck.joint:call("get_Position()"));selected_name=neck.name
@@ -1209,15 +1212,232 @@ local function rider_seat(d)
         elseif not d.rider_neck_missing then
             d.rider_neck_missing=true
             status="未找到可用颈部骨骼，座位暂用头部；导航与驾驶继续。"
-            event("rider_neck_unavailable",settings.rider_neck_joint)
+            event("rider_neck_unavailable",config.neck_joint)
         end
     end
     d.rider_seat_joint_name=selected_name
     local fx,fz=d.heading.x,d.heading.z
-    local seat={x=base.x+fx*settings.rider_forward+fz*settings.rider_side,
-        y=base.y+settings.rider_height,z=base.z+fz*settings.rider_forward-fx*settings.rider_side}
+    local seat={x=base.x+fx*config.forward+fz*config.side,
+        y=base.y+config.height,z=base.z+fz*config.forward-fx*config.side}
     return seat,base
 end
+-- Passenger ownership uses live character instances, never character IDs for control.
+passengers.refresh=function(force)
+    local c=core()
+    if not alive or not c or c.properties.isPaused or not c.properties.player then return end
+    if not force and now()<(passengers.next_roster or -math.huge) then return end
+    passengers.next_roster=now()+0.25
+    local ok,party=pcall(c.object.get_party)
+    if not ok or type(party)~="table" or party[1]~=c.properties.player then return end
+    local seen,pawns={[c.properties.player]=true},{}
+    local friends={c.properties.player}
+    for _,ch in ipairs(party) do
+        if ch and ch:get_Valid() and not seen[ch] then
+            seen[ch]=true;pawns[#pawns+1]=ch;friends[#friends+1]=ch
+        end
+    end
+    if force or now()>=(passengers.next_npc or -math.huge) then
+        passengers.next_npc=now()+1
+        local scan_ok,found=pcall(function()
+            local nm=assert(sdk.get_managed_singleton("app.NPCManager"),"NPCManager unavailable")
+            local td=sdk.find_type_definition("app.NPCUtil")
+            local method=assert(td and td:get_method("isAccompanyPLParty(app.Character)"),"NPC membership unavailable")
+            local list,unique={},{}
+            local prior={};for _,ch in ipairs(passengers.npcs or {}) do prior[ch]=true end
+            for _,holder in pairs(assert(nm.NPCHolderDic,"NPC roster unavailable")) do
+                local read_ok,ch=pcall(function() return holder and nm:getCharacter(holder.CharaID) end)
+                if read_ok and ch and ch:get_Valid() and not seen[ch] and not unique[ch] then
+                    local membership_ok,following=pcall(function() return method:call(nil,ch) end)
+                    if membership_ok and following==true or (not membership_ok or type(following)~="boolean") and prior[ch] then
+                        unique[ch]=true;list[#list+1]=ch
+                    end
+                end
+            end
+            table.sort(list,function(a,b) return a:get_address()<b:get_address() end)
+            return list
+        end)
+        if scan_ok then
+            passengers.npcs=found;passengers.npc_status="同行NPC识别正常"
+        else
+            passengers.npc_status="同行NPC扫描暂不可用，保留上次有效名单"
+            if not passengers.npc_error_logged then event("passenger_npc_scan_error",tostring(found));passengers.npc_error_logged=true end
+        end
+    end
+    local companions={}
+    for _,ch in ipairs(passengers.npcs or {}) do
+        if ch:get_Valid() and not seen[ch] then
+            seen[ch]=true;companions[#companions+1]=ch;friends[#friends+1]=ch
+        end
+    end
+    passengers.roster={pawns=pawns,companions=companions}
+    for _,r in ipairs(state.spawns) do
+        if r.friend and r.owner==c.properties.player then
+            local changed=#(r.party or {})~=#friends
+            for i,ch in ipairs(friends) do if (r.party or {})[i]~=ch then changed=true end end
+            r.party=friends
+            if changed then event("friend_roster_refreshed",{pawns=#pawns,companions=#companions}) end
+        end
+    end
+end
+passengers.seat=function(group,index)
+    local key=group=="pawns" and "pawn_seats" or "companion_seats"
+    settings[key]=settings[key] or {}
+    local seat=settings[key][index]
+    if type(seat)~="table" then seat={};settings[key][index]=seat end
+    if seat.enabled==nil then seat.enabled=true end
+    seat.anchor=seat.anchor=="head" and "head" or "neck"
+    if type(seat.neck_joint)~="string" then seat.neck_joint="" end
+    if not finite(seat.height) then seat.height=0.5 end
+    if not finite(seat.forward) then seat.forward=-index*1.2-(group=="companions" and 3.6 or 0) end
+    if not finite(seat.side) then seat.side=index%2==1 and -0.7 or 0.7 end
+    seat.height=math.max(-5,math.min(15,seat.height))
+    seat.forward=math.max(-15,math.min(15,seat.forward))
+    seat.side=math.max(-10,math.min(10,seat.side))
+    return seat
+end
+passengers.restore_one=function(a)
+    if not a.player:get_Valid() then
+        a.bones_applied=nil;a.moved=false;a.fsm_touched=false;return
+    end
+    assert(owned_player(a,false),"Passenger binding changed; retained for recovery")
+    restore_bone(a)
+    if a.moved then
+        if core() and core().properties.player==a.owner then
+            a.transform:call("set_UniversalPosition(via.Position)",a.original_position)
+            sync_player(a)
+        end
+        a.moved=false
+    end
+    if a.fsm_touched then
+        assert(player_fsm(a.player)==a.fsm,"Passenger FSM changed; retained for recovery")
+        -- Do not overwrite a third party that has already re-enabled this FSM.
+        if a.fsm:call("get_Enabled()")==false then a.fsm:call("set_Enabled(System.Boolean)",a.original_fsm) end
+        a.fsm_touched=false
+    end
+end
+passengers.restore_all=function(d)
+    local errors={}
+    for ch,a in pairs(d.passengers or {}) do
+        local ok,err=pcall(passengers.restore_one,a)
+        if ok then d.passengers[ch]=nil else errors[#errors+1]=tostring(err) end
+    end
+    return errors
+end
+passengers.bind=function(d,ch,group,index)
+    assert(ch:get_Valid(),"Passenger unloaded")
+    local terrain=ch:get_field("<AdjustTerrain>k__BackingField")
+    local a={player=ch,owner=d.player,spawn=d.spawn,player_go=ch:call("get_GameObject()"),
+        transform=ch:call("get_Transform()"),context=ch:get_field("<PosRotContext>k__BackingField"),terrain=terrain,
+        controller=terrain and terrain.MainCharacterController,fall=ch:get_field("<FallInfo>k__BackingField"),
+        fsm=player_fsm(ch),group=group,slot=index,anchor_mode="rider"}
+    assert(a.player_go and a.transform and a.context and a.controller and a.fall and a.fsm,"Passenger interfaces unavailable")
+    assert(owned_player(a,false),"Passenger interface ownership mismatch")
+    a.original_position=a.transform:call("get_UniversalPosition()")
+    a.original_fsm=a.fsm:call("get_Enabled()")
+    assert(a.original_position and type(a.original_fsm)=="boolean","Passenger original state unavailable")
+    discover_joints(a)
+    assert(a.hip_joint and a.hip_joint:get_Valid(),"Passenger Hip unavailable")
+    d.passengers[ch]=a -- recovery registered before the first native mutation
+    event("passenger_bound",{group=group,slot=index})
+    return a
+end
+passengers.prepare_rig=function(a,d)
+    a.heading=d.heading;a.rider_griffin_transform=d.rider_griffin_transform
+    a.rider_head=d.rider_head;a.rider_head_name=d.rider_head_name;a.rider_necks=d.rider_necks
+end
+passengers.tick=function(d)
+    d.passengers=d.passengers or {}
+    passengers.last_error=nil
+    local wanted={}
+    for _,group in ipairs({"pawns","companions"}) do
+        for i,ch in ipairs((passengers.roster or {})[group] or {}) do
+            local seat=passengers.seat(group,i)
+            if seat.enabled then wanted[ch]={group=group,slot=i} end
+        end
+    end
+    for ch,a in pairs(d.passengers) do
+        if not wanted[ch] or not ch:get_Valid() then
+            a.anchor_target=nil
+            local ok,err=pcall(passengers.restore_one,a)
+            if ok then d.passengers[ch]=nil;event("passenger_released",{group=a.group,slot=a.slot})
+            elseif not a.restore_error_logged then event("passenger_restore_error",tostring(err));a.restore_error_logged=true end
+        end
+    end
+    d.passenger_trace={}
+    for ch,slot in pairs(wanted) do
+        local ok,err=pcall(function()
+            local a=d.passengers[ch] or passengers.bind(d,ch,slot.group,slot.slot)
+            assert(not a.recovery_pending,"Passenger recovery pending")
+            assert(owned_player(a,false) and player_fsm(ch)==a.fsm,"Passenger binding changed")
+            assert(a.hip_joint and a.hip_joint:get_Valid(),"Passenger Hip unavailable")
+            a.group=slot.group;a.slot=slot.slot
+            passengers.prepare_rig(a,d)
+            restore_bone(a)
+            local current=a.fsm:call("get_Enabled()")
+            if current~=false then
+                a.fsm_touched=true;a.fsm:call("set_Enabled(System.Boolean)",false)
+                assert(a.fsm:call("get_Enabled()")==false,"Passenger freeze readback mismatch")
+            end
+            -- Preset [1] is the shared debug real-position anchor, independent of stick input.
+            local physical=rider_seat(a,settings.seat_presets[1].player)
+            a.moved=true;a.anchor_target=physical;a.neutral_anchor=physical
+            a.transform:call("set_Position(via.vec3)",Vector3f.new(physical.x,physical.y,physical.z))
+            sync_player(a)
+            d.passenger_trace[#d.passenger_trace+1]={group=a.group,slot=a.slot,physical=physical,fsm_enabled=false}
+        end)
+        if not ok then
+            passengers.last_error=slot.group.." "..slot.slot..": "..tostring(err)
+            local key=slot.group..":"..slot.slot
+            passengers.errors=passengers.errors or {}
+            if now()>=(passengers.errors[key] or -math.huge) then
+                passengers.errors[key]=now()+5;event("passenger_control_error",{group=slot.group,slot=slot.slot,error=tostring(err)})
+            end
+            -- A partial write must recover before retrying. Keep failures for stop/reset recovery.
+            local a=d.passengers[ch]
+            if a then
+                a.anchor_target=nil;a.recovery_pending=true
+                local restored=pcall(passengers.restore_one,a)
+                if restored then d.passengers[ch]=nil end
+            end
+        end
+    end
+    if d.trace then d.trace.passengers=d.passenger_trace end
+end
+passengers.pre=function()
+    if not active or not core() or core().properties.isPaused then return end
+    for _,a in pairs(active.passengers or {}) do
+        local ok,err=pcall(restore_bone,a)
+        if not ok then event("passenger_bone_restore_error",tostring(err)) end
+    end
+end
+passengers.post=function()
+    local d=active
+    if not alive or not d or not core() or core().properties.isPaused then return end
+    for _,a in pairs(d.passengers or {}) do
+        if a.anchor_target then
+            local ok,err=pcall(function()
+                assert(owned_player(a,false),"Passenger changed")
+                restore_bone(a)
+                local actor=vector(a.transform:call("get_Position()"))
+                local seat=rider_seat(a,passengers.seat(a.group,a.slot))
+                local items={}
+                for _,spec in ipairs({{joint=a.root_joint,key="root"},{joint=a.hip_joint,key="hip"}}) do
+                    local joint=spec.joint
+                    if joint and joint:get_Valid() then
+                        local original=vector(joint:call("get_Position()"))
+                        local anchor=spec.key=="hip" and seat or a.neutral_anchor
+                        items[#items+1]={joint=joint,original=original,
+                            written={x=anchor.x+original.x-actor.x,y=anchor.y+original.y-actor.y,z=anchor.z+original.z-actor.z}}
+                    end
+                end
+                a.bones_applied=items
+                for _,item in ipairs(items) do item.joint:call("set_Position(via.vec3)",Vector3f.new(item.written.x,item.written.y,item.written.z)) end
+            end)
+            if not ok and not a.pose_error_logged then event("passenger_pose_error",tostring(err));a.pose_error_logged=true end
+        end
+    end
+end
+
 local function spawn()
     if queued or #state.spawns > 0 or state.recovery then return end
     settings.freeze_player=true;block_player_fall=true
@@ -1364,14 +1584,15 @@ re.on_application_entry("UpdateHID",function()
             elseif name=="stop" then menu.stop()
             elseif name=="delete" then menu.delete()
             elseif name=="listen" then menu.listen()
-            elseif name=="preset_next" then menu.apply_preset(settings.seat_index%#settings.seat_presets+1) end
+            elseif name=="preset_next" then menu.next_preset() end
             break
         end
     end
 end)
 
-re.on_pre_application_entry("UpdateBehavior",function() tick_skip_think();tick_driver();tick_camera_follow() end)
+re.on_pre_application_entry("UpdateBehavior",function() passengers.refresh();tick_skip_think();tick_driver();tick_camera_follow() end)
 re.on_pre_application_entry("UpdateJointExpression",function()
+    passengers.pre()
     local d=active
     if not d or not alive or not d.bones_applied or not core() or core().properties.isPaused then return end
     local ok,err=pcall(function()
@@ -1381,6 +1602,7 @@ re.on_pre_application_entry("UpdateJointExpression",function()
     if not ok then stop_driver("骨骼恢复失败");failed("骨骼恢复失败",err) end
 end)
 re.on_application_entry("UpdateJointExpression",function()
+    passengers.post()
     local d,c=active,core()
     if not d or not alive or not c or c.properties.isPaused or not d.anchor_target then return end
     if d.anchor_mode=="full" or not d.neutral_anchor then return end
@@ -1522,9 +1744,9 @@ menu.clone=function(value)
 end
 menu.preset_name="新座位预设"
 menu.snapshot=function(name,source)
-    return {schema=2,name=name,player={anchor=settings.rider_anchor,neck_joint=settings.rider_neck_joint,height=settings.rider_height,forward=settings.rider_forward,side=settings.rider_side},
-        camera={distance=settings.distance,fov=settings.fov},pawns=menu.clone(source and source.pawns or {}),
-        companions=menu.clone(source and source.companions or {})}
+    return {schema=3,name=name,player={anchor=settings.rider_anchor,neck_joint=settings.rider_neck_joint,height=settings.rider_height,forward=settings.rider_forward,side=settings.rider_side},
+        camera={distance=settings.distance,fov=settings.fov},pawns=menu.clone(settings.pawn_seats or source and source.pawns or {}),
+        companions=menu.clone(settings.companion_seats or source and source.companions or {})}
 end
 settings.seat_presets={}
 if loaded_settings and type(loaded_settings.seat_presets)=="table" then
@@ -1536,10 +1758,22 @@ if loaded_settings and type(loaded_settings.seat_presets)=="table" then
     end
 end
 if #settings.seat_presets==0 then settings.seat_presets[1]=menu.snapshot("默认座位（当前设置）") end
-settings.seat_index=math.max(1,math.min(#settings.seat_presets,math.floor(tonumber(loaded_settings and loaded_settings.seat_index) or 1)))
+-- Slot [1] is reserved for debug physical anchoring and never participates in cycling.
+if #settings.seat_presets==1 then
+    settings.seat_presets[2]=menu.clone(settings.seat_presets[1]);settings.seat_presets[2].name="默认乘坐座位"
+end
+settings.seat_index=math.max(2,math.min(#settings.seat_presets,math.floor(tonumber(loaded_settings and loaded_settings.seat_index) or 2)))
+settings.pawn_seats=menu.clone(loaded_settings and loaded_settings.pawn_seats or settings.seat_presets[settings.seat_index].pawns or {})
+settings.companion_seats=menu.clone(loaded_settings and loaded_settings.companion_seats or settings.seat_presets[settings.seat_index].companions or {})
+menu.next_preset=function()
+    local index=settings.seat_index+1
+    menu.apply_preset(index>#settings.seat_presets and 2 or index)
+end
 menu.apply_preset=function(index)
     local preset=settings.seat_presets[index]
-    if not preset then return end
+    if not preset or index==1 then return end
+    settings.pawn_seats=menu.clone(preset.pawns or {})
+    settings.companion_seats=menu.clone(preset.companions or {})
     settings.seat_index=index
     settings.rider_anchor=preset.player.anchor=="neck" and "neck" or "head"
     settings.rider_neck_joint=type(preset.player.neck_joint)=="string" and preset.player.neck_joint or ""
@@ -1552,6 +1786,61 @@ menu.apply_preset=function(index)
     end
     controls.save();status="已应用座位预设："..preset.name
 end
+menu.edit_seat=function(seat,id)
+    if type(imgui.combo)=="function" then
+        local changed,index=imgui.combo("骨骼锚点###"..id.."Anchor",seat.anchor=="neck" and 2 or 1,{"头部","颈部"})
+        if changed then seat.anchor=index==2 and "neck" or "head";controls.save() end
+        if seat.anchor=="neck" then
+            local names={"自动（首个颈部骨骼）"};local selected=1
+            for _,entry in ipairs(active and active.rider_necks or {}) do
+                names[#names+1]=entry.name;if entry.name==seat.neck_joint then selected=#names end
+            end
+            local changed,index=imgui.combo("颈部骨骼###"..id.."Neck",selected,names)
+            if changed then seat.neck_joint=index==1 and "" or names[index];controls.save() end
+        end
+    end
+    for _,spec in ipairs({{"height","上下偏移",-5,15},{"forward","前后偏移",-15,15},{"side","左右偏移",-10,10}}) do
+        if not finite(seat[spec[1]]) then seat[spec[1]]=0 end
+        local changed,value=imgui.slider_float(spec[2].."###"..id..spec[1],seat[spec[1]],spec[3],spec[4])
+        if changed and finite(value) then seat[spec[1]]=math.max(spec[3],math.min(spec[4],value));controls.save() end
+    end
+end
+menu.passenger_seats=function()
+    imgui.text("【新增】乘客实体位置固定取预设[1]，Hip分别使用以下座位；开始驾驶后自动冻结乘客FSM。")
+    for _,spec in ipairs({{"pawns","【新增】随从座位"},{"companions","【新增】同行NPC座位"}}) do
+        if imgui.tree_node(spec[2]) then
+            local group=spec[1]
+            local roster=(passengers.roster or {})[group] or {}
+            local key=group=="pawns" and "pawn_seats" or "companion_seats"
+            local count=math.max(3,#roster,#(settings[key] or {}))
+            imgui.text("当前识别："..#roster.."；按当前名单顺序分配座位。")
+            for i=1,count do
+                if imgui.tree_node((group=="pawns" and "随从 " or "同伴NPC ")..i.."###BetaSeat"..group..i) then
+                    local seat=passengers.seat(group,i)
+                    local changed,value=menu.toggle("自动携带／冻结FSM###BetaSeatEnabled"..group..i,seat.enabled~=false)
+                    if changed then seat.enabled=value;controls.save() end
+                    menu.edit_seat(seat,"BetaSeat"..group..i)
+                    imgui.tree_pop()
+                end
+            end
+            imgui.tree_pop()
+        end
+    end
+    if active then
+        local count=0;for _ in pairs(active.passengers or {}) do count=count+1 end
+        imgui.text("当前接管乘客："..count)
+    end
+    if passengers.last_error then imgui.text("乘客控制提示："..passengers.last_error) end
+end
+menu.physical_preset=function()
+    if imgui.tree_node("【新增】预设[1]：实体位置校正（不参与切换）") then
+        imgui.text("此项直接修改预设[1]；所有乘客Transform／碰撞体共用，不响应摇杆。")
+        menu.edit_seat(settings.seat_presets[1].player,"BetaPhysical")
+        imgui.text(passengers.npc_status or "同行NPC等待扫描")
+        imgui.tree_pop()
+    end
+end
+
 menu.stop=function()
     operation=nil;queued=false
     if type(run_once)~="function" then stop_driver("手动结束");return end
@@ -1667,10 +1956,11 @@ re.on_draw_ui(function()
     if imgui.tree_node("座位预设") then
         local names={};for _,preset in ipairs(settings.seat_presets) do names[#names+1]=preset.name end
         if type(imgui.combo)=="function" then
-            local changed,index=imgui.combo("当前预设",settings.seat_index,names)
-            if changed then menu.apply_preset(index) end
+            local cycle_names={};for i=2,#names do cycle_names[#cycle_names+1]="["..i.."] "..names[i] end
+            local changed,index=imgui.combo("当前预设",settings.seat_index-1,cycle_names)
+            if changed then menu.apply_preset(index+1) end
         else imgui.text("当前预设："..names[settings.seat_index]) end
-        if beta_button("下一预设###BetaPresetNext") then menu.apply_preset(settings.seat_index%#settings.seat_presets+1) end
+        if beta_button("下一预设###BetaPresetNext") then menu.next_preset() end
         if type(imgui.combo)=="function" then
             local changed,index=imgui.combo("【新增】座位骨骼锚点",settings.rider_anchor=="neck" and 2 or 1,{"头部","颈部"})
             if changed then settings.rider_anchor=index==2 and "neck" or "head";controls.save() end
@@ -1707,14 +1997,16 @@ re.on_draw_ui(function()
             if name~="" then settings.seat_presets[settings.seat_index].name=name;controls.save() end
         end
         if beta_button("删除当前预设###BetaPresetDelete") then
-            if #settings.seat_presets>1 then table.remove(settings.seat_presets,settings.seat_index);menu.apply_preset(math.min(settings.seat_index,#settings.seat_presets))
-            else status="至少保留一个座位预设。" end
+            if #settings.seat_presets>2 then table.remove(settings.seat_presets,settings.seat_index);menu.apply_preset(math.min(settings.seat_index,#settings.seat_presets))
+            else status="除DEBUG预设[1]外，至少保留一个乘坐预设。" end
         end
-        imgui.text("调整实时预览；保存后写入预设。当前仅玩家座位。")
+        menu.passenger_seats()
+        imgui.text("调整实时预览；保存包含玩家、随从与同行NPC座位。预设[1]仅DEBUG，不参与切换。")
         imgui.tree_pop()
     end
     if imgui.tree_node("按键设置") then menu.bindings();imgui.tree_pop() end
     if imgui.tree_node("DEBUG") then
+        menu.physical_preset()
         if beta_button((skip_think_enabled and "关闭跳过狮鹫思考" or "开启跳过狮鹫思考").."###BetaThinkToggle") then set_skip_think(not skip_think_enabled) end
         imgui.text(skip_think_status)
         local changed,value=menu.toggle("【测试】拦截玩家坠落死亡请求",block_player_fall)
