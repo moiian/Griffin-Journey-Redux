@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.2. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.3. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.2-beta"
+local VERSION = "0.1.3-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -13,7 +13,7 @@ local status = "先生成狮鹫，再开始驾驶。"
 local hooks_ready, hooks_tried, friend_value = false, false, nil
 local masks = nil
 local input = {x = 0, y = 0, buttons = 0}
-local settings = {distance = 30, fov = 90, player_distance = 20, player_height = 0}
+local settings = {distance = 30, fov = 90, player_distance = 20, player_height = 0, freeze_player = true}
 local settings_path = "GriffinFlightBeta_Settings.json"
 local log_id = os.date("!%Y%m%dT%H%M%SZ") .. "_" .. math.floor(os.clock() * 1000)
 local part, last_flush, next_sample = 1, -math.huge, 0
@@ -61,6 +61,7 @@ end
 if type(json.load_file) == "function" then
     local ok, saved = pcall(json.load_file, settings_path)
     if ok and type(saved) == "table" then
+        if type(saved.freeze_player) == "boolean" then settings.freeze_player = saved.freeze_player end
         if finite(saved.player_height) then settings.player_height = math.max(-80, math.min(80, saved.player_height)) end
         if finite(saved.player_distance) then settings.player_distance = math.max(2, math.min(80, saved.player_distance)) end
         if finite(saved.distance) then settings.distance = math.max(0, math.min(80, saved.distance)) end
@@ -261,6 +262,65 @@ local function dispatch(d)
         if not ok then stop_driver("Action request failed"); failed("动作请求失败", err) end
     end)
 end
+local function apply_player_freeze(d, freeze)
+    assert(owned_player(d, true) and player_fsm(d.player) == d.fsm, "Player FSM binding changed")
+    local desired = d.original_fsm
+    if freeze then desired = false end
+    local current = d.fsm:call("get_Enabled()")
+    assert(type(current) == "boolean", "Cannot read player FSM")
+    if current ~= desired then
+        d.fsm_touched = true -- retain recovery even if the setter raises after writing
+        d.fsm:call("set_Enabled(System.Boolean)", desired)
+    end
+    assert(d.fsm:call("get_Enabled()") == desired, "Player FSM mode readback mismatch")
+    d.freeze_requested = freeze
+    event("player_fsm_mode", {freeze_requested=freeze, enabled=desired, original_enabled=d.original_fsm})
+end
+local freeze_revision = 0
+local function change_player_freeze(freeze)
+    freeze_revision = freeze_revision + 1
+    local revision, d = freeze_revision, active
+    if not d then
+        settings.freeze_player = freeze
+        pcall(json.dump_file, settings_path, settings)
+        return
+    end
+    run_once(function()
+        if not alive or active ~= d or revision ~= freeze_revision then return end
+        local ok, err = pcall(function()
+            validate_spawn(d.spawn)
+            apply_player_freeze(d, freeze)
+            settings.freeze_player = freeze
+            pcall(json.dump_file, settings_path, settings)
+        end)
+        if not ok then stop_driver("FSM 对照切换失败"); failed("FSM 对照切换失败", err) end
+    end)
+end
+
+-- Read-only comparison probe: the same owner/target getters used by Stage 3.
+-- Its failure disables only the probe, never requests a new action/target.
+local function read_target_probe(d)
+    if d.target_probe_failed then return {error=d.target_probe_failed} end
+    local ok, value = pcall(function()
+        assert(owned_player(d, true) and player_fsm(d.player) == d.fsm, "Player binding changed")
+        local ch = validate_spawn(d.spawn)
+        local c = assert(core())
+        local component = c.object.get_component(d.spawn.result.go, "app.Ch253")
+        local tc = component and component:call("get_TargetController()")
+        assert(tc and tc:call("get_Owner()") == d.spawn.result.go and tc:call("get_Chara()") == ch,
+            "TargetController binding mismatch")
+        local ctrl = ch:call("get_FlightCtrl()")
+        assert(ctrl and ctrl:call("get_CachedCharacter()") == ch, "FlightControl binding mismatch")
+        return {target_is_player=tc:call("get_TargetCharacter()") == d.player,
+            flight_target_position=vector(ctrl:call("get_TargetPosition()")),
+            player_fsm_enabled=d.fsm:call("get_Enabled()"), freeze_requested=d.freeze_requested}
+    end)
+    if ok then return value end
+    d.target_probe_failed = tostring(value)
+    event("target_probe_error", d.target_probe_failed)
+    return {error=d.target_probe_failed}
+end
+
 local function start_driver()
     local experiment = rawget(_G, "GriffinMountExperimentControl")
     if experiment and experiment.is_driving() then status = "请先结束实验工具的玩家固定。"; return end
@@ -298,14 +358,12 @@ local function start_driver()
             input = read_pad()
             d.previous_buttons = input.buttons -- holding A/RT on enable is not a fresh press
             active = d
-            d.fsm_touched = true
-            event("fsm_freeze", {original_enabled = d.original_fsm})
-            d.fsm:call("set_Enabled(System.Boolean)", false)
+            apply_player_freeze(d, settings.freeze_player)
             if r.result.chara:call("get_IsFlight()") then
                 set_intent(d, "Ch253HoverWaitHoHomingHeight", "hover")
             end
             status = "驾驶中：A 起飞／降落，RT 冲刺，LT 悬停。"
-            event("driver_started", {ahead = settings.player_distance, height = settings.player_height, lateral = 12, vertical = 10})
+            event("driver_started", {ahead = settings.player_distance, height = settings.player_height, freeze_player = d.freeze_requested, lateral = 12, vertical = 10})
         end)
         if not ok then
             if active then stop_driver("Start failed") end
@@ -454,6 +512,7 @@ re.on_frame(function()
     end
     if active and active.trace and now() >= next_sample then
         next_sample = now()+0.5
+        active.trace.target_probe = read_target_probe(active)
         rotate()
         if #journal.samples < 650 then journal.samples[#journal.samples+1] = {time=now(), data=active.trace} end
     end
@@ -556,7 +615,14 @@ re.on_draw_ui(function()
     if not imgui.tree_node("狮鹫飞行 Beta###GriffinFlightBeta") then return end
     imgui.text("版本 "..VERSION.." | A 起飞／降落 · RT 冲刺 · LT 悬停")
     if beta_button("一键生成狮鹫并设为友方###BetaSpawn") then spawn() end
-    if beta_button("开始驾驶（固定玩家＋冻结 FSM）###BetaStart") then start_driver() end
+    if type(imgui.checkbox) == "function" then
+        local styled = type(imgui.push_style_color)=="function" and type(imgui.pop_style_color)=="function"
+        if styled then imgui.push_style_color(0,0xffa8ecff) end
+        local changed, freeze = imgui.checkbox("【对照测试】冻结玩家 FSM", settings.freeze_player)
+        if styled then imgui.pop_style_color(1) end
+        if changed and type(freeze)=="boolean" then change_player_freeze(freeze) end
+    end
+    if beta_button((settings.freeze_player and "开始驾驶（固定玩家＋冻结 FSM）" or "开始驾驶（固定玩家）").."###BetaStart") then start_driver() end
     if beta_button("结束驾驶／恢复玩家###BetaStop") then
         operation = nil; queued = false
         if type(run_once)~="function" then stop_driver("手动结束");imgui.tree_pop();return end
@@ -573,7 +639,15 @@ re.on_draw_ui(function()
     imgui.text(status)
     if active then
         local labels={ground="等待起飞",taking_off="起飞／降落动作",external="实验工具动作",hover="悬停",dash="冲刺"}
-        imgui.text("当前："..(labels[active.mode] or active.mode).."；左摇杆左右转向／上下调整目标高度。")
+        imgui.text("请求模式："..(labels[active.mode] or active.mode).."；左摇杆左右转向／上下调整目标高度。")
+    end
+    if active and active.trace then
+        imgui.text("实际动作："..active.trace.action)
+        local probe = active.trace.target_probe
+        if probe and probe.target_is_player ~= nil then
+            imgui.text("狮鹫目标是玩家："..(probe.target_is_player and "是" or "否")..
+                "；玩家 FSM："..(probe.player_fsm_enabled and "运行" or "暂停"))
+        elseif probe and probe.error then imgui.text("目标探针读取失败；驾驶仍运行，详情已记录。") end
     end
     if imgui.tree_node("玩家距离与镜头设置") then
         if type(imgui.slider_float)=="function" then
