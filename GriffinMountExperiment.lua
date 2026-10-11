@@ -1,7 +1,7 @@
 -- Griffin Mount Experiment: stage 3 read-only flight observation.
 -- Requires the installed aaaNickCore.lua and _NickCore/EnemySpawner.lua.
--- Keeps spawn_enemy's returned table; never searches by Character ID.
-local VERSION = "0.3.2-stage3-actions"
+-- Keeps an explicit spawn return or user-confirmed instance; never selects by Character ID.
+local VERSION = "0.3.3-stage3-select"
 local state = "Idle"
 local detail = "Ready for one ordinary Griffin request per script session."
 local shared = nil
@@ -37,6 +37,16 @@ local record_start = 0
 local next_sample = 0
 local last_flush = -math.huge
 local recorder_tick = nil
+local candidate = nil
+local candidate_status = "No candidate. Preview checks the nearest enemy within 40m; it must be an ordinary Griffin."
+local target_origin = "none"
+local request_listener_table = nil
+local request_listener_fn = nil
+local request_listener_key = "GriffinMountExperiment action observer"
+local request_listener_status = "Native request observer: not attached"
+local request_event_count = 0
+local request_last = {}
+flight_log.request_observer = {repeated_requests_omitted = 0, capacity_dropped = 0}
 
 local function game_time()
     local core = rawget(_G, "NickCore")
@@ -157,12 +167,119 @@ local function enable_party_friend(core)
     party = members
     hits = {Character = {0, 0}, Holder = {0, 0}}
     friendly = true
-    relation_status = "Enabled for returned Griffin + " .. #party .. " party members."
+    relation_status = "Enabled for bound Griffin + " .. #party .. " party members."
     log_event("friend_enabled", relation_status)
 end
 
+local function attach_request_observer(core)
+    local callbacks = core.functions and core.functions.on_pre_action_request
+    if type(callbacks) ~= "table" then
+        request_listener_status = "Native request observer unavailable: NickCore callback missing"
+        return
+    end
+    if request_listener_table == callbacks and callbacks[request_listener_key] == request_listener_fn then return end
+    request_listener_fn = function(_, data)
+        -- NickCore already decoded these fields. No native calls, disk IO or return override here.
+        if not recording or not action_probe or not shared or not data
+            or data.character ~= shared.chara or core.properties.player ~= owner then return end
+        local now = game_time()
+        local previous = request_last[data.layer]
+        if previous and previous.node == data.node and previous.priority == data.priority
+            and now - previous.time < 1 then
+            flight_log.request_observer.repeated_requests_omitted =
+                flight_log.request_observer.repeated_requests_omitted + 1
+            return
+        end
+        -- Leave event capacity for lifecycle/error events even during busy native action traffic.
+        if #flight_log.events >= 450 then
+            flight_log.request_observer.capacity_dropped = flight_log.request_observer.capacity_dropped + 1
+            return
+        end
+        request_last[data.layer] = {node = data.node, priority = data.priority, time = now}
+        request_event_count = request_event_count + 1
+        flight_log.events[#flight_log.events + 1] = {
+            name = "native_action_request", game_time = now,
+            node = data.node, layer = data.layer, priority = data.priority,
+            friend_enabled = friendly, target_origin = target_origin
+        }
+        -- nil return keeps NickCore's original request processing unchanged.
+    end
+    request_listener_table = callbacks
+    callbacks[request_listener_key] = request_listener_fn
+    request_listener_status = "Native request observer attached through NickCore (recording + probe only)"
+end
+
+local function preview_existing_griffin()
+    if relation_pending or shared or state == "Queued" then return end
+    candidate = nil
+    local core = dependency()
+    if not core or not core.properties.player or core.properties.isPaused ~= false then
+        candidate_status = "Enter active gameplay before preview."
+        return
+    end
+    relation_pending = true
+    local preview_owner = core.properties.player
+    run_once(function()
+        local ok, err = pcall(function()
+            assert(dependency() == core and core.properties.player == preview_owner and not shared,
+                "Player/instance context changed")
+            assert(core.properties.isPaused == false, "Gameplay paused")
+            assert(core.position and type(core.position.get_closest_enemy) == "function",
+                "NickCore.get_closest_enemy unavailable")
+            local chara = core.position.get_closest_enemy(nil, 40.0)
+            assert(chara and chara:get_Valid(), "No valid nearest enemy within 40m")
+            local prefab = chara:get_CharaIDString()
+            assert(prefab == "ch253000_00", "Nearest enemy is " .. tostring(prefab) .. "; move closer to the Griffin")
+            local go = chara:call("get_GameObject()")
+            assert(go and go:get_Valid(), "Candidate GameObject invalid")
+            candidate = {chara = chara:add_ref(), go = go:add_ref(), player = preview_owner}
+            candidate_status = "Candidate ch253000_00 | Character " .. tostring(chara:get_address())
+                .. " | GO " .. tostring(go:get_address()) .. ". Bind keeps THIS reference."
+        end)
+        if not ok then candidate_status = "Preview failed: " .. tostring(err) end
+        relation_pending = false
+    end)
+end
+
+local function bind_existing_griffin()
+    if relation_pending or shared or not candidate or state == "Queued" then return end
+    local chosen = candidate
+    relation_pending = true
+    run_once(function()
+        local ok, err = pcall(function()
+            local core = dependency()
+            assert(core and core.properties.player == chosen.player and not shared, "Candidate context changed")
+            assert(core.properties.isPaused == false, "Gameplay paused")
+            assert(chosen.chara:get_Valid() and chosen.go:get_Valid(), "Candidate no longer valid")
+            assert(chosen.chara:get_CharaIDString() == "ch253000_00", "Candidate is not an ordinary Griffin")
+            assert(chosen.chara:call("get_GameObject()") == chosen.go, "Candidate references no longer match")
+            disable_friendship("Selected instance bound; Friend override remains OFF until explicitly enabled.")
+            shared = {name = "Griffin", chara = chosen.chara, go = chosen.go}
+            owner, target_origin = chosen.player, "selected"
+            early_mode, release_attempted, hate_clear_attempted = false, false, false
+            think_status = "Existing instance: no spawn ThinkStop write is offered."
+            identity = candidate_status
+            candidate = nil
+            report("References ready", "User-selected existing Griffin bound. No spawn, faction or flight writes.")
+        end)
+        if not ok then candidate = nil; candidate_status = "Bind failed: " .. tostring(err) end
+        relation_pending = false
+    end)
+end
+
+local function unbind_griffin()
+    if relation_pending or recording then return end
+    disable_friendship("Disabled: instance unbound. World object left in place.")
+    shared, owner, candidate = nil, nil, nil
+    target_origin = "none"
+    identity = "No instance bound"
+    flight_rows, relation_rows, hate_rows = {}, {}, {}
+    report("Unbound", "Preview another existing Griffin, or rebind the same one. No despawn.")
+end
+
 local function request_spawn(early)
-    if submitted then return end
+    if submitted or shared or relation_pending then return end
+    candidate = nil
     local core = dependency()
     if not core then
         report("Dependency missing", "Wait for NickCore to load; no request sent.")
@@ -206,6 +323,7 @@ local function request_spawn(early)
             return
         end
         shared = result
+        target_origin = "spawned"
         report("Waiting", "Returned table retained; waiting for go and chara.")
     end)
 end
@@ -216,6 +334,8 @@ re.on_frame(function()
     if not core or core.properties.player ~= owner then
         disable_friendship("Disabled: player context changed.")
         shared = nil
+        candidate = nil
+        target_origin = "none"
         recording = false
         report("Detached", "Player context changed. References discarded; no world object removed.")
         return
@@ -404,7 +524,7 @@ local function queue_flight_snapshot(source)
         local sample = {
             sequence = #flight_log.samples + 1, source = source, game_time = game_time(),
             utc = os.date("!%Y-%m-%dT%H:%M:%SZ"), friend_enabled = friendly,
-            values = {}, errors = {}, action_probe_enabled = action_probe
+            values = {}, errors = {}, action_probe_enabled = action_probe, target_origin = target_origin
         }
         local ok, err = pcall(function()
             local core = dependency()
@@ -521,7 +641,10 @@ end
 
 local function start_recording()
     if not shared or not shared.go or not shared.chara then return end
+    local core = dependency()
+    if core and action_probe then attach_request_observer(core) end
     record_start = game_time()
+    request_last = {}
     next_sample = record_start
     recording = true
     log_event("recording_started", "60 gameplay seconds, at most 5 Hz; read-only flight getters")
@@ -529,6 +652,9 @@ end
 
 re.on_script_reset(function()
     recording = false
+    if request_listener_table and request_listener_table[request_listener_key] == request_listener_fn then
+        request_listener_table[request_listener_key] = nil
+    end
     if #flight_log.samples > 0 or #flight_log.events > 0 then
         log_event("script_reset", "Flushed available samples before reference loss")
     end
@@ -538,17 +664,29 @@ re.on_draw_ui(function()
     if not imgui.tree_node("Griffin Mount Experiment - Stage 3 Observe") then return end
     imgui.text("Version: " .. VERSION)
     imgui.text("Dependency: installed NickCore enemySpawner + run_once")
-    imgui.text("Ordinary Griffin / ch253000_00 / requested thinkStop=" .. tostring(early_mode))
+    if target_origin == "selected" then
+        imgui.text("Existing Griffin / ch253000_00 / no spawn ThinkStop requested by this script")
+    else
+        imgui.text("Ordinary Griffin / ch253000_00 / requested thinkStop=" .. tostring(early_mode))
+    end
     imgui.text("Status: " .. state)
     imgui.text(detail)
     if not dependency() then imgui.text("NickCore is not ready. No standalone fallback.") end
-    if not submitted then
+    imgui.text("Bound instance origin: " .. target_origin)
+    if not shared and state ~= "Queued" then
+        if imgui.button("Preview nearest enemy as Griffin (40m)") then preview_existing_griffin() end
+        if candidate and imgui.button("Bind PREVIEWED Griffin instance") then bind_existing_griffin() end
+        imgui.text(candidate_status)
+    end
+    if not submitted and not shared then
         if imgui.button("Spawn ONE ordinary Griffin") then request_spawn(false) end
         if not submitted and imgui.button("Spawn ThinkStop Griffin + PRE-ARM Friend") then request_spawn(true) end
     end
     if shared and shared.go and shared.chara then
         if not action_probe and imgui.button("Enable action-name probe (read only)") then
             action_probe = true
+            local core = dependency()
+            if core then attach_request_observer(core) end
             log_event("action_probe_enabled", "Current/previous action names and body/wing names added to flight samples")
         end
         if action_probe and imgui.button("Disable action-name probe") then
@@ -573,6 +711,7 @@ re.on_draw_ui(function()
         if imgui.button("Read party/Griffin hate (both ways)") then queue_hate_action(false) end
         if friendly and not hate_clear_attempted
             and imgui.button("Clear ONLY party/Griffin hate (once)") then queue_hate_action(true) end
+        if not recording and imgui.button("Unbind THIS Griffin (no despawn)") then unbind_griffin() end
     end
     imgui.text(identity)
     imgui.text(flight_status)
@@ -580,6 +719,7 @@ re.on_draw_ui(function()
     imgui.text(log_status)
     imgui.text("Automatic recording: " .. tostring(recording) .. " | Samples: " .. #flight_log.samples)
     imgui.text("Action-name probe: " .. tostring(action_probe) .. " (read only; disables on read error)")
+    imgui.text(request_listener_status .. " | Request events: " .. request_event_count)
     for _, row in ipairs(flight_rows) do imgui.text(row) end
     imgui.text(relation_status)
     imgui.text(think_status)
@@ -598,6 +738,6 @@ re.on_draw_ui(function()
     imgui.text("Read button also counts as hook hits. Observe AI behaviour separately.")
     imgui.text("Hate clear is manual, pair-only, once per session. No AI reset or damage blocking.")
     imgui.text("No global faction writes, flight or riding edits.")
-    imgui.text("One request per session. Script reset loses ownership; it does not despawn.")
+    imgui.text("One spawn request per session. After reset, preview/bind an existing Griffin; no despawn.")
     imgui.tree_pop()
 end)
