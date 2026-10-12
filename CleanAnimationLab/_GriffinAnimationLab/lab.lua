@@ -8,7 +8,7 @@ local PoseTrace=require("_GriffinAnimationLab.pose_trace")
 local M={}
 function M.new()
     local self={bound=false,enabled=false,flap=false,record=false,trace_calls=false,trace_pose=false,refresh_action=false,ab_test=false,pause_actions=false,revision=0,alive=true,
-        status="全部关闭。先用Beta生成狮鹫并结束驾驶；停止旧工具的隔离播放。",
+        status="全部关闭。先用Beta生成并绑定狮鹫；普通隔离可在Beta驾驶中使用。",
         isolation=Isolation.new(),recorder=Recorder.new()}
     self.call_trace=CallTrace.new(self.recorder)
     self.pose_trace=PoseTrace.new(self.recorder)
@@ -29,7 +29,6 @@ function M.new()
         end
         if not self.bound then self.enabled=false;self.instance=nil;self.status="未绑定；测试关闭。";return end
         local bridge=assert(rawget(_G,"GriffinFlightBetaBridge"),"需要Beta生成的当前实例")
-        assert(not bridge.is_driving(),"请先结束Beta驾驶")
         local old=rawget(_G,"GriffinMountExperimentControl")
         assert(not (old and old.is_driving()),"请先结束旧实验工具驾驶")
         local r=assert(bridge.get_instance(),"Beta当前没有有效狮鹫")
@@ -40,6 +39,9 @@ function M.new()
         end
         self.instance=r
         if self.enabled then
+            if self.ab.active or self.refresh.wait or (not self.isolation.active and (self.ab_test or self.refresh_action)) then
+                assert(not bridge.is_driving(),"A/B或自动刷新需结束Beta驾驶；驾驶中请关闭这两项，使用普通隔离")
+            end
             if not self.isolation.active then
                 assert(not self.pause_actions or self.ab_test,"动作更新隔离仅用于A/B，请先勾选分步对照")
             end
@@ -72,7 +74,8 @@ function M.new()
             local old=rawget(_G,"GriffinMountExperimentControl")
             local ok,valid=pcall(function()
                 if self.ab.active then self.ab:validate(self) end
-                return b and b.get_instance()==self.instance and not b.is_driving()
+                if self.refresh.wait then self.refresh:validate(self,self.refresh.wait) end
+                return b and b.get_instance()==self.instance
                     and not (old and old.is_driving()) and self.isolation:valid(self.isolation.active)
             end)
             if not ok or not valid then self.bound=false;self.enabled=false;self:changed() end
@@ -100,8 +103,8 @@ function M.new()
         self.recorder:tick(self)
     end
     function self:draw()
-        if not imgui.tree_node("狮鹫动画实验室 0.1.8") then return end
-        imgui.text("A/B分步对照保持同一轮隔离；关闭隔离恢复原生控制。")
+        if not imgui.tree_node("狮鹫动画实验室 0.1.9") then return end
+        imgui.text("普通隔离可在Beta驾驶中开启／切换／关闭；驾驶操作继续运行。")
         local changed,value=imgui.checkbox("绑定Beta当前狮鹫",self.bound)
         if changed then self.bound=value;if not value then self.enabled=false end;self:changed() end
         changed,value=imgui.checkbox("启用隔离播放",self.enabled)

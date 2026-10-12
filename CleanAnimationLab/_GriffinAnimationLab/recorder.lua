@@ -4,7 +4,7 @@ local M={}
 function M.new()
     local self={enabled=false,status="关闭",next_sample=0,last_flush=0,
         path="GriffinAnimationLab_"..os.date("!%Y%m%dT%H%M%SZ").."_"..math.floor(os.clock()*1000)..".json",
-        data={version="0.1.8",events={},samples={},sample_limit=3000,sample_hz=20}}
+        data={version="0.1.9",events={},samples={},sample_limit=3000,sample_hz=20}}
     function self:flush()
         if #self.data.events==0 and #self.data.samples==0 then return end
         local ok,result=pcall(json.dump_file,self.path,self.data)
