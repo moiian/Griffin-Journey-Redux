@@ -9,6 +9,7 @@ function M.new()
         self.revision=self.revision+1
     end
     function self:apply()
+        self.recorder:event("应用前",self,"before_apply")
         if not self.enabled or not self.bound then self.isolation:stop() end
         if not self.bound then self.enabled=false;self.instance=nil;self.status="未绑定；测试关闭。";return end
         local bridge=assert(rawget(_G,"GriffinFlightBetaBridge"),"需要Beta生成的当前实例")
@@ -26,7 +27,7 @@ function M.new()
             self.isolation:play(r,self.flap and 5101 or 5100)
             self.status="隔离播放："..(self.flap and "挥翅5101" or "滑翔5100").."；未锁定位置。"
         else self.status="已绑定；隔离播放关闭，原生控制生效。" end
-        self.recorder:event(self.status)
+        self.recorder:event(self.status,self,"after_apply")
     end
     function self:tick()
         if not self.alive then return end
@@ -51,20 +52,21 @@ function M.new()
             run_once(function()
                 self.pending=false
                 if not self.alive or rev~=self.revision then return end
+                if core.properties.isPaused then return end
                 local ok,err=pcall(function() self:apply() end)
                 self.applied=rev
                 if not ok then
                     self.enabled=false
                     local restored,restore_err=pcall(function() self.isolation:stop() end)
                     self.status=tostring(err)..(restored and "" or "；恢复失败："..tostring(restore_err))
-                    self.recorder:event(self.status)
+                    self.recorder:event(self.status,self,"apply_error")
                 end
             end)
         end
-        self.recorder:tick(self.isolation)
+        self.recorder:tick(self)
     end
     function self:draw()
-        if not imgui.tree_node("狮鹫动画实验室 0.1.0") then return end
+        if not imgui.tree_node("狮鹫动画实验室 0.1.1") then return end
         imgui.text("无点击冷却；切换动画保持隔离。关闭隔离才恢复原生控制。")
         local changed,value=imgui.checkbox("绑定Beta当前狮鹫",self.bound)
         if changed then self.bound=value;if not value then self.enabled=false end;self:changed() end
@@ -72,17 +74,27 @@ function M.new()
         if changed then self.enabled=value;self:changed() end
         changed,value=imgui.checkbox("使用挥翅5101（关闭为滑翔5100）",self.flap)
         if changed then self.flap=value;self:changed() end
-        changed,value=imgui.checkbox("启用坐标记录（5Hz）",self.record)
-        if changed then self.record=value;self.recorder.enabled=value;self.recorder:flush() end
+        changed,value=imgui.checkbox("启用状态与坐标记录（20Hz，隔离关闭也记录）",self.record)
+        if changed then
+            self.record=value;self.recorder.enabled=value
+            if value then self.recorder:event("开始记录") else self.recorder:flush() end
+        end
         imgui.text(self.status)
         imgui.text("隔离调用数："..self.isolation.blocked)
         imgui.text("记录："..self.recorder.status)
+        imgui.text("状态样本："..#self.recorder.data.samples.." / 3000（满额后动画继续）")
+        local row=self.recorder.latest
+        if row then
+            imgui.text("着地："..tostring(row.ground).."；飞行："..tostring(row.flight).."；动作："..tostring(row.action))
+        end
         imgui.tree_pop()
     end
     function self:shutdown()
+        self.recorder:event("Reset恢复前",self,"before_reset")
         self.alive=false;self:changed()
         local ok,err=pcall(function() self.isolation:stop() end)
         if not ok then log.error("GriffinAnimationLab restore: "..tostring(err)) end
+        self.recorder:event("Reset恢复后",self,"after_reset")
         self.recorder:flush()
     end
     return self

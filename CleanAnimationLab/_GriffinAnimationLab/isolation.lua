@@ -1,7 +1,7 @@
 -- Exact-instance animation isolation. No Transform writes or native action requests.
 local M = {}
 function M.new()
-    local self = {blocked=0}
+    local self = {blocked=0,serial=0}
     function self:valid(d)
         return d and d.instance.go:get_Valid() and d.instance.chara:get_Valid()
             and d.instance.chara:call("get_Motion()")==d.motion
@@ -74,6 +74,7 @@ function M.new()
                 end
             end
             self:install()
+            self.serial=self.serial+1;d.serial=self.serial
             self.active=d;self.blocked=0
             d.fsm_touched=true;fsm:call("set_Enabled(System.Boolean)",false)
             d.motion_touched=true;motion:call("set_RootMotion(via.motion.RootPlayMode)",none)

@@ -8,7 +8,7 @@
 
 - Beta：Beta/GriffinFlightBeta.lua，0.1.35，保持不改。用户驾驶、Hip座位分离、头部镜头已反复实测；保护等细节以Beta源码/项目AGENTS.md为准，不用本摘要覆盖。
 - 旧实验：根GriffinMountExperiment.lua，0.3.23-stage3-target-ab，保留原样作为参考。不是新工具的运行依赖。
-- 干净工具：CleanAnimationLab/GriffinAnimationLab.lua及_GriffinAnimationLab三个模块，0.1.0。新工具实机待验收；没有加入代码飞行、乘客或镜头。
+- 干净工具：CleanAnimationLab/GriffinAnimationLab.lua及_GriffinAnimationLab四个模块，0.1.1。原隔离首次位移失败；本版新增落地前后只读记录，实机待验收；没有加入代码飞行、乘客或镜头。
 - 游戏：P:\games\steamapps\common\Dragons Dogma 2；部署在reframework/autorun；日志在reframework/data。
 - 本地仓库：D:\_Project\Griffin MOD\Repository；远端https://github.com/moiian/Griffin-Journey-Redux；实验分支experiment/oxcart-preset-ui。仅源码/测试/历史说明入Git，设置、日志、转储、备份不入Git。用户授权本地独立改动提交并推送，实测通过才打verified里程碑。
 - 转储：游戏根il2cpp_dump.json，约1.1GB，按类型定向读取。旧牛车仅参考，禁止重走牛车生成/跳时失败路线。
@@ -44,3 +44,11 @@
 工作区C:\Users\Aelinore\Documents\Codex\2026-10-11\dragon-s-dogma-2-mod-1\outputs：drafts里的terrain-sync和isolation-check都是未部署草稿，不是0.3.24正式版本。STAGE3_0320_VS_0323_ISOLATION_COMPARISON.md及各FAILED/POSE证据仅本地。不要将草稿/API签名存在当作实机成功。
 
 旧关键日志：GriffinMountExperiment_Flight_20261012T143008Z_2029048.json（0.3.20静止）；20261012T163617Z_557209与163820Z_679341（0.3.23近期多轮状态）。旧direct_motion.samples可能只保留最后一轮，events才覆盖此前启动/停止；开关一次不等于一次完整记录。
+
+## 2026-10-13 0.1.1最新进展（覆盖0.1.0待验收描述）
+
+用户实测：首次隔离仍位移，反复启停无效；关闭后确实落地一次，再开启才原地播放，落地不稳定。170907Z日志三个隔离段首末样本位移约4.661/4.693/1.793米，FSM=false、RootMotion=0、拦截持续命中。日志没有覆盖关闭后的落地，不能定位唯一根因。
+
+0.1.1只补证据：新增state_probe.lua，记录仍默认关闭；勾选状态与坐标记录后在隔离关闭时也连续采样，包含原生动作、着地／飞行、SecFall、LandingProcessor、飞控移动向量、实体／上下文／碰撞体。启停和Reset前后另存快照，轮号区分隔离会话，切动画不换轮号。最高20Hz、3000条，满额不结束动画。普通帧两秒保存，记录数据不入Git。字段独立记错；内部非零向量不等于已找到实际位移写入者。
+
+Lua54五文件语法、原生命周期与新增状态记录／错误隔离／归属／暂停队列／上限／恢复失败重试模拟通过。本版没有强制落地、清速度或锁Transform；首次位移未修复，原生读数和性能待实机，不打verified标签。按CleanAnimationLab/README.md做一次对照即可，失败落地过程也有用。Beta0.1.35、旧阶段三0.3.23、配置和其他MOD不改。

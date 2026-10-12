@@ -1,37 +1,49 @@
--- Opt-in recording only; no hooks, position changes, or per-frame disk writes.
+-- Opt-in, bounded read-only recording in NickCore's behavior queue.
+local Probe=require("_GriffinAnimationLab.state_probe")
 local M={}
 function M.new()
     local self={enabled=false,status="关闭",next_sample=0,last_flush=0,
         path="GriffinAnimationLab_"..os.date("!%Y%m%dT%H%M%SZ").."_"..math.floor(os.clock()*1000)..".json",
-        data={version="0.1.0",events={},samples={}}}
+        data={version="0.1.1",events={},samples={},sample_limit=3000,sample_hz=20}}
     function self:flush()
         if #self.data.events==0 and #self.data.samples==0 then return end
         local ok,result=pcall(json.dump_file,self.path,self.data)
         self.status=ok and result~=false and self.path or "写入失败"
     end
-    function self:event(message)
+    function self:snapshot(lab,phase)
+        local ok,row=pcall(Probe.read,lab.instance,lab.isolation,phase)
+        if ok then return row end
+        return {time=os.clock(),phase=phase,errors={snapshot=tostring(row)}}
+    end
+    function self:event(message,lab,phase)
         if not self.enabled then return end
-        if #self.data.events<1000 then self.data.events[#self.data.events+1]={time=os.clock(),message=message} end
+        if #self.data.events<1000 then
+            local row={time=os.clock(),message=message}
+            if lab then row.state=self:snapshot(lab,phase) end
+            self.data.events[#self.data.events+1]=row
+        end
         self:flush()
     end
-    function self:tick(isolation)
+    function self:tick(lab)
         if not self.enabled then return end
         local now=os.clock()
-        if now<self.next_sample then return end
-        self.next_sample=now+0.2
-        local d=isolation.active
-        if d and not d.recovering and #self.data.samples<3000 then
-            local ok,row=pcall(function()
-                assert(isolation:valid(d),"对象失效")
-                local t=d.instance.chara:call("get_Transform()")
-                local p=t:call("get_UniversalPosition()")
-                return {time=now,clip=d.clip,blocked=isolation.blocked,
-                    character=tostring(d.instance.chara:get_address()),position={x=p.x,y=p.y,z=p.z},
-                    root_motion=d.motion:call("get_RootMotion()"),fsm_enabled=d.fsm:call("get_Enabled()")}
-            end)
-            if ok then self.data.samples[#self.data.samples+1]=row else self.status="采样失败："..tostring(row) end
-        end
         if now-self.last_flush>=2 then self.last_flush=now;self:flush() end
+        if self.pending or now<self.next_sample or not lab.instance or not lab.bound or #self.data.samples>=3000 then return end
+        self.next_sample=now+0.05
+        self.pending=true
+        local instance,rev=lab.instance,lab.revision
+        run_once(function()
+            self.pending=false
+            local core=rawget(_G,"NickCore")
+            if not self.enabled or not lab.alive or not lab.bound or lab.instance~=instance or rev~=lab.revision
+                or not core or core.properties.isPaused then return end
+            local bridge=rawget(_G,"GriffinFlightBetaBridge")
+            local ok,current=pcall(function() return bridge and bridge.get_instance()==instance end)
+            if not ok or not current then return end
+            local row=self:snapshot(lab,"sample")
+            self.data.samples[#self.data.samples+1]=row
+            self.latest=row
+        end)
     end
     return self
 end
