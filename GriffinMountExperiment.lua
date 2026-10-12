@@ -1,7 +1,7 @@
 -- Griffin Mount Experiment: stage 3 player-as-target flight control experiment.
 -- Requires the installed aaaNickCore.lua and _NickCore/EnemySpawner.lua.
 -- Keeps an explicit spawn return or user-confirmed instance; never selects by Character ID.
-local VERSION = "0.3.20-stage3-flight-clips"
+local VERSION = "0.3.21-stage3-code-flight"
 local state = "Idle"
 local detail = "Ready for one ordinary Griffin request per script session."
 local shared = nil
@@ -900,7 +900,7 @@ local function tick_skip_think()
 end
 
 -- Direct-motion isolation experiment. No guessed bank/motion IDs and no position clamp.
-local motion_probe,move_isolation
+local motion_probe,move_isolation,code_flight
 local animation_test = {status="先让狮鹫播放待测动作，再捕获实际动画。",samples={},blocked=0}
 function animation_test.instance()
     local b=beta_bridge()
@@ -975,6 +975,7 @@ function animation_test.install()
     animation_test.hooked=true
 end
 function animation_test.stop(reason)
+    if code_flight and code_flight.active then return code_flight.stop(reason) end
     local d=animation_test.active
     if not d then return true end
     d.recovering=true -- stop intercepting even when a restore getter fails
@@ -1042,7 +1043,10 @@ function animation_test.tick()
         local c=dependency()
         if not c or c.properties.isPaused or game_time()<animation_test.next_sample then return end
         animation_test.next_sample=game_time()+0.2
-        if #animation_test.samples>=3000 then animation_test.stop("采样达到3000条");return end
+        if #animation_test.samples>=3000 then
+            if not (code_flight and code_flight.active) then animation_test.stop("采样达到3000条") end
+            return
+        end
         local t=d.instance.chara:call("get_Transform()")
         local p,q=t:call("get_UniversalPosition()"),t:call("get_Rotation()")
         local row={time=game_time(),position={x=p.x,y=p.y,z=p.z},rotation={x=q.x,y=q.y,z=q.z,w=q.w},blocked=animation_test.blocked,layers={}}
@@ -1389,6 +1393,7 @@ local function queue_action_test(action, pilot_token)
 end
 
 local function queue_yaw_test(direction)
+    if code_flight and code_flight.active then yaw_status="代码飞行期间请用专用转向按钮。";return end
     if lure or lure_restore_pending then yaw_status = "摇杆测试期间不直接旋转狮鹫；请先停止并恢复。"; return end
     if relation_pending or not shared or not shared.go or not shared.chara then return end
     if game_time() - last_yaw_request < 1 then
@@ -1609,11 +1614,12 @@ local function install_fall_hook()
         local method=td and td:get_method("requestFallDead()")
         assert(method and sdk.PreHookResult and sdk.PreHookResult.SKIP_ORIGINAL,"Fall request hook unavailable")
         sdk.hook(method,function(args)
-            local d,c=lure,dependency()
+            local code_owner=code_flight and (code_flight.active or code_flight.recovery)
+            local d,c=lure or (code_owner and code_owner.player),dependency()
             if control_alive and d and d.moved and c and not c.properties.isPaused and c.properties.player==d.player
                 and sdk.to_managed_object(args[2])==d.player then
                 fall_hits=fall_hits+1
-                if block_player_fall then fall_blocked=fall_blocked+1;return sdk.PreHookResult.SKIP_ORIGINAL end
+                if block_player_fall or code_owner then fall_blocked=fall_blocked+1;return sdk.PreHookResult.SKIP_ORIGINAL end
             end
         end,function(ret) return ret end)
         fall_hook_installed=true
@@ -1632,6 +1638,7 @@ end
 local function start_lure_test(unlimited)
     local b = rawget(_G, "GriffinFlightBetaBridge")
     if b and b.is_driving() then lure_status = "请先结束 Beta 驾驶。"; return end
+    if code_flight and (code_flight.active or code_flight.recovery) then lure_status="请先结束代码飞行测试。";return end
     if lure or lure_restore_pending or lure_start_pending or relation_pending then return end
     if not shared or not shared.go or not shared.chara then return end
     lure_start_pending = true
@@ -1787,10 +1794,11 @@ restore_lure_camera = function()
 end
 
 local function update_lure_camera()
-    if not lure or not camera_settings.enabled then restore_lure_camera();return end
+    local observed=lure or (code_flight and code_flight.active and code_flight.active.player)
+    if not observed or not camera_settings.enabled then restore_lure_camera();return end
     if camera_suspended then return end
     local core=dependency()
-    if not core or core.properties.player~=lure.player or core.properties.isPaused then restore_lure_camera();return end
+    if not core or core.properties.player~=observed.player or core.properties.isPaused then restore_lure_camera();return end
     local ok,err=pcall(function()
         local manager=sdk.get_managed_singleton("app.CameraManager")
         local camera=sdk.get_primary_camera and sdk.get_primary_camera()
@@ -1823,9 +1831,145 @@ local function update_lure_camera()
     end
 end
 
+-- Minimal authored horizontal flight. Exact retained instance; no native navigation requests.
+code_flight={speed=8,turn_rate=60,height=8,follow=12,follow_height=5,paused=false,input=0,turn_once=0,
+    status="先播放无位移滑翔5100，再开始代码飞行。左摇杆左右转；暂停前进仍跟随。"}
+function code_flight.actor(ch)
+    local terrain=assert(ch:get_field("<AdjustTerrain>k__BackingField"),"没有AdjustTerrain")
+    local a={player=ch,player_go=ch:call("get_GameObject()"),transform=ch:call("get_Transform()"),
+        context=ch:get_field("<PosRotContext>k__BackingField"),terrain=terrain,controller=terrain.MainCharacterController,
+        fall=ch:get_field("<FallInfo>k__BackingField")}
+    assert(a.player_go and a.transform and a.context and a.controller and a.fall,"实体同步接口不完整")
+    return a
+end
+function code_flight.pose(a,p,q,reset_fall)
+    local typed=a.transform:call("get_UniversalPosition()")
+    typed.x=p.x;typed.y=p.y;typed.z=p.z -- returned via.Position is a value copy with verified Double fields
+    assert(math.abs(typed.x-p.x)<0.00001 and math.abs(typed.y-p.y)<0.00001 and math.abs(typed.z-p.z)<0.00001,"位置值复制失败")
+    a.transform:call("set_UniversalPosition(via.Position)",typed)
+    a.transform:call("set_Rotation(via.Quaternion)",q)
+    a.context:call("setPosRot(via.Position, via.Quaternion)",typed,q)
+    a.controller:call("warp()")
+    if reset_fall then
+        a.fall:call("resetBaseHeight(via.Position)",typed);a.fall:call("resetFallHeight()")
+        a.player:set_field("SecFall",0)
+    end
+end
+function code_flight.stop(reason)
+    local d=code_flight.active or code_flight.recovery
+    if not d then return true end
+    code_flight.active=nil;code_flight.recovery=d;code_flight.input=0;code_flight.turn_once=0
+    restore_lure_camera()
+    local ok,err=pcall(function()
+        if player_lure_owned(d.player) and d.player.player:call("get_ActionManager()").Fsm==d.fsm then
+            if d.player.moved then synchronize_lure_player(d.player) end
+            if d.fsm_touched then d.fsm:call("set_Enabled(System.Boolean)",d.original_fsm);d.fsm_touched=false end
+        else d.fsm_touched=false end -- never write a replaced player/context
+    end)
+    if not ok then code_flight.status="代码移动已停止，玩家恢复失败；点击结束重试："..tostring(err);return false end
+    code_flight.recovery=nil
+    animation_test.stop("代码飞行结束："..reason)
+    code_flight.status="代码飞行已结束，玩家在当前位置释放："..reason
+    log_event("code_flight_stop",{reason=reason,frames=d.frames,release="current_position"})
+    return true
+end
+function code_flight.start()
+    if code_flight.active or code_flight.recovery then return end
+    run_once(function()
+        if code_flight.active or code_flight.recovery then return end
+        local ok,err=pcall(function()
+            local b=beta_bridge()
+            assert(not (b and b.is_driving and b.is_driving()) and not pilot and not lure and not lure_restore_pending and not lure_start_pending,"请先结束Beta／四档驾驶／旧玩家固定")
+            assert(not move_isolation.active,"请先关闭失败的位移实验")
+            local isolation=assert(animation_test.active,"请先点无位移滑翔5100")
+            assert(not isolation.recovering and animation_test.saved and animation_test.saved.body_clip==5100,"本轮只使用已验证滑翔5100")
+            assert(animation_test.valid(isolation),"隔离狮鹫已改变")
+            local c=assert(dependency(),"依赖未就绪")
+            assert(not c.properties.isPaused,"请恢复游戏")
+            assert(type(re.on_application_entry)=="function","没有行为更新回调")
+            local bus=rawget(_G,"DD2_OxcartControl")
+            assert(not bus or not bus.owner,"OJR当前持有玩家")
+            local player=code_flight.actor(assert(c.properties.player,"没有玩家"))
+            local actor=code_flight.actor(isolation.instance.chara)
+            local fsm=assert(player.player:call("get_ActionManager()").Fsm,"没有玩家FSM")
+            local enabled=fsm:call("get_Enabled()")
+            assert(type(enabled)=="boolean","无法保存玩家FSM状态")
+            local p=vector_values(actor.transform:call("get_UniversalPosition()"))
+            local q=rotation_values(actor.transform:call("get_Rotation()"))
+            local fx,fz=2*(q.x*q.z+q.w*q.y),1-2*(q.x*q.x+q.y*q.y)
+            assert(fx*fx+fz*fz>0.04,"狮鹫初始朝向过于竖直；请用水平姿态重新测试")
+            local d={isolation=isolation,instance=isolation.instance,actor=actor,player=player,fsm=fsm,original_fsm=enabled,
+                position=p,base_height=p.y,yaw=math.atan(fx,fz),last_time=game_time(),frames=0,next_sample=0}
+            assert(flush_flight_log(),"日志保存失败，未开始移动")
+            install_fall_hook()
+            assert(fall_hook_installed,"玩家防坠落接口不可用")
+            code_flight.active=d;code_flight.paused=false;code_flight.input=0;code_flight.turn_once=0
+            code_flight.samples={};flight_log.code_flight={samples=code_flight.samples,interval=0.2}
+            d.fsm_touched=true;fsm:call("set_Enabled(System.Boolean)",false)
+            camera_suspended=false
+            code_flight.status="代码水平飞行已开启；玩家前上方随行。左摇杆左右转，右摇杆观察。"
+            log_event("code_flight_start",{speed=code_flight.speed,height=code_flight.height,follow=code_flight.follow,
+                character=tostring(d.instance.chara:get_address()),root_motion_disabled=true})
+        end)
+        if not ok then code_flight.stop("启动失败");code_flight.status="代码飞行未开始或已恢复："..tostring(err) end
+    end)
+end
+function code_flight.read_input()
+    if not code_flight.active then return end
+    local ok,value=pcall(read_lure_stick)
+    code_flight.input=ok and -value.x or 0 -- reverse the old lure's world-offset inversion, physical left-stick X right => positive yaw
+    code_flight.input_error=not ok and tostring(value) or nil
+end
+function code_flight.tick()
+    local d=code_flight.active
+    if not d then return end
+    local ok,err=pcall(function()
+        local c=dependency()
+        assert(control_alive and c and player_lure_owned(d.player),"玩家上下文改变")
+        assert(animation_test.active==d.isolation and animation_test.valid(d.isolation),"动画隔离／狮鹫改变")
+        local ch=d.actor.player
+        assert(ch:call("get_Transform()")==d.actor.transform
+            and ch:get_field("<PosRotContext>k__BackingField")==d.actor.context
+            and ch:get_field("<AdjustTerrain>k__BackingField")==d.actor.terrain
+            and d.actor.terrain.MainCharacterController==d.actor.controller,"狮鹫实体上下文改变")
+        local b=beta_bridge();assert(not (b and b.is_driving and b.is_driving()),"Beta开始驾驶")
+        assert(d.player.player:call("get_ActionManager()").Fsm==d.fsm,"玩家FSM改变")
+        local now=game_time()
+        if c.properties.isPaused then d.last_time=now;return end
+        local elapsed=now-d.last_time;d.last_time=now
+        if elapsed<=0 then return end
+        local dt=math.min(elapsed,0.1) -- drop stalls, never catch up by teleporting a long distance
+        d.yaw=(d.yaw+math.rad(code_flight.turn_rate)*code_flight.input*dt+math.rad(code_flight.turn_once)+math.pi)%(2*math.pi)-math.pi
+        code_flight.turn_once=0
+        local fx,fz=math.sin(d.yaw),math.cos(d.yaw)
+        local distance=code_flight.paused and 0 or code_flight.speed*dt
+        d.position={x=d.position.x+fx*distance,y=d.base_height+code_flight.height,z=d.position.z+fz*distance}
+        local q=Quaternion.new(math.cos(d.yaw/2),0,math.sin(d.yaw/2),0)
+        local check=rotation_values(q)
+        assert(math.abs(check.y-math.sin(d.yaw/2))<0.00001 and math.abs(check.w-math.cos(d.yaw/2))<0.00001,"Quaternion参数顺序不匹配")
+        code_flight.pose(d.actor,d.position,q,false)
+        local point={x=d.position.x+fx*code_flight.follow,y=d.position.y+code_flight.follow_height,z=d.position.z+fz*code_flight.follow}
+        d.player.moved=true
+        code_flight.pose(d.player,point,q,true)
+        d.frames=d.frames+1
+        if now>=d.next_sample and #code_flight.samples<3000 then
+            d.next_sample=now+0.2
+            code_flight.samples[#code_flight.samples+1]={time=now,dt=dt,paused=code_flight.paused,speed=code_flight.speed,yaw=d.yaw,
+                expected={x=d.position.x,y=d.position.y,z=d.position.z},actual=vector_values(d.actor.transform:call("get_UniversalPosition()")),
+                controller_scene=vector_values(d.actor.controller:call("get_Position()")),
+                player=vector_values(d.player.transform:call("get_UniversalPosition()")),turn=code_flight.input}
+        end
+        if now-last_flush>=2 then flush_flight_log() end
+    end)
+    if not ok then code_flight.stop("移动或绑定失败");code_flight.status="代码飞行停止："..tostring(err) end
+end
+
+
 if type(re.on_application_entry)=="function" and type(re.on_pre_application_entry)=="function" then
     re.on_application_entry("PrepareRendering",function() update_lure_camera();motion_probe.render() end)
+    re.on_application_entry("UpdateBehavior",code_flight.tick)
     re.on_application_entry("UpdateHID",function()
+        code_flight.read_input()
         if not lure or not lure_stick_enabled then return end
         local ok,value=pcall(read_lure_stick)
         if ok then lure_input=value;lure_input_error=nil
@@ -1835,9 +1979,10 @@ if type(re.on_application_entry)=="function" and type(re.on_pre_application_entr
     re.on_pre_application_entry("UpdateBehavior",function() move_isolation.tick();tick_skip_think();tick_lure_test() end)
 end
 
-local control_bridge = {is_driving=function() return lure ~= nil or lure_start_pending or lure_restore_pending end}
+local control_bridge = {is_driving=function() return lure ~= nil or lure_start_pending or lure_restore_pending or code_flight.active~=nil or code_flight.recovery~=nil end}
 _G.GriffinMountExperimentControl = control_bridge
 re.on_script_reset(function()
+    code_flight.stop("脚本重置")
     motion_probe.stop("脚本重置")
     move_isolation.stop("脚本重置")
     animation_test.stop("脚本重置")
@@ -1948,6 +2093,35 @@ re.on_draw_ui(function()
             pilot_status="四档自动驾驶已关闭；玩家固定保留，可使用单次动作按钮。"
             action_test_status=pilot_status
             log_event("gear_control_manual_release",true)
+        end
+        imgui.text("【本轮新增】代码水平飞行＋玩家随行（不运行原生导航）")
+        imgui.text("先点下方无位移滑翔5100，再开始；左摇杆左右转，菜单打开也响应。")
+        if not code_flight.active and not code_flight.recovery and ui_button("【本轮新增】开始代码飞行＋玩家随行") then code_flight.start() end
+        if code_flight.active then
+            if ui_button(code_flight.paused and "【本轮新增】继续前进（保持随行）" or "【本轮新增】暂停前进（保持随行）") then code_flight.paused=not code_flight.paused end
+            if ui_button("【本轮新增】代码飞行左转15度") then code_flight.turn_once=code_flight.turn_once-15 end
+            if ui_button("【本轮新增】代码飞行右转15度") then code_flight.turn_once=code_flight.turn_once+15 end
+        end
+        if (code_flight.active or code_flight.recovery) and ui_button("【本轮新增】结束代码飞行／当前位置释放玩家") then run_once(function() code_flight.stop("手动结束") end) end
+        if type(imgui.slider_float)=="function" then
+            local changed,value=imgui.slider_float("代码飞行速度（米/秒）",code_flight.speed,0,40);if changed then code_flight.speed=value end
+            changed,value=imgui.slider_float("代码左右转向速度（度/秒）",code_flight.turn_rate,10,120);if changed then code_flight.turn_rate=value end
+            changed,value=imgui.slider_float("代码飞行相对起点高度（米）",code_flight.height,0,60);if changed then code_flight.height=value end
+            changed,value=imgui.slider_float("玩家随行前后距离（负值在后方）",code_flight.follow,-30,30);if changed then code_flight.follow=value end
+            changed,value=imgui.slider_float("玩家随行高度（米）",code_flight.follow_height,0,20);if changed then code_flight.follow_height=value end
+        end
+        imgui.text(code_flight.status)
+        imgui.text("保持水平，无惯性／避障；暂停仍固定玩家，结束则恢复FSM并在当前位置释放。")
+        if code_flight.input_error then imgui.text("摇杆暂不可用，可用左右转按钮："..code_flight.input_error) end
+        if imgui.tree_node("代码飞行观察镜头（距离／FOV）") then
+            if type(imgui.checkbox)=="function" then
+                local changed,value=imgui.checkbox("启用随行观察镜头",camera_settings.enabled);if changed then camera_settings.enabled=value;save_camera_settings() end
+            end
+            if type(imgui.slider_float)=="function" then
+                local changed,value=imgui.slider_float("随行镜头距离偏移",camera_settings.distance,0,80);if changed then camera_settings.distance=value;save_camera_settings() end
+                changed,value=imgui.slider_float("随行镜头FOV",camera_settings.fov,40,120);if changed then camera_settings.fov=value;save_camera_settings() end
+            end
+            imgui.tree_pop()
         end
         imgui.text("【本轮新增】动画隔离测试（不锁位置、不请求导航动作）")
         if ui_button("【本轮新增】1. 捕获当前狮鹫实际动画（只读）") then animation_test.capture() end
