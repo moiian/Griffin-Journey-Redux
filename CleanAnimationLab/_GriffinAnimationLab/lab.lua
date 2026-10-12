@@ -82,7 +82,7 @@ function M.new()
         self.recorder:tick(self)
     end
     function self:draw()
-        if not imgui.tree_node("狮鹫动画实验室 0.1.4") then return end
+        if not imgui.tree_node("狮鹫动画实验室 0.1.5") then return end
         imgui.text("切换动画保持隔离；刷新会自动短暂放行。关闭隔离恢复原生控制。")
         local changed,value=imgui.checkbox("绑定Beta当前狮鹫",self.bound)
         if changed then self.bound=value;if not value then self.enabled=false end;self:changed() end
@@ -95,7 +95,7 @@ function M.new()
             self.refresh_action=value
             self.recorder:event(value and "悬停刷新已开启，下次接管执行" or "悬停刷新已关闭，下次接管生效")
         end
-        imgui.text("需状态记录；每轮一次，自动短暂放行。隔离中改此项只影响下一轮。")
+        imgui.text("需状态记录；分帧请求、放行，原生动作与坐标稳定后复隔离。")
         changed,value=imgui.checkbox("启用状态与坐标记录（20Hz，隔离关闭也记录）",self.record)
         if changed then
             self.record=value;self.recorder.enabled=value
@@ -109,7 +109,7 @@ function M.new()
         end
         imgui.text(self.status)
         imgui.text("隔离调用数："..self.isolation.blocked)
-        imgui.text("悬停刷新："..self.refresh.requests.."次请求／"..self.refresh.returned.."次返回／"..self.refresh.completed.."次确认；"..self.refresh.status)
+        imgui.text("悬停刷新："..self.refresh.requests.."次请求／"..self.refresh.returned.."次返回／"..self.refresh.completed.."次复隔离；"..self.refresh.status)
         imgui.text("记录："..self.recorder.status)
         imgui.text("方法跟踪："..self.call_trace.status.."；保存调用对："..#self.recorder.data.call_trace.pairs.." / 5000")
         imgui.text("状态样本："..#self.recorder.data.samples.." / 3000（满额后动画继续）")

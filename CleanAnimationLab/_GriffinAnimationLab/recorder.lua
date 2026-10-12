@@ -4,7 +4,7 @@ local M={}
 function M.new()
     local self={enabled=false,status="关闭",next_sample=0,last_flush=0,
         path="GriffinAnimationLab_"..os.date("!%Y%m%dT%H%M%SZ").."_"..math.floor(os.clock()*1000)..".json",
-        data={version="0.1.4",events={},samples={},sample_limit=3000,sample_hz=20}}
+        data={version="0.1.5",events={},samples={},sample_limit=3000,sample_hz=20}}
     function self:flush()
         if #self.data.events==0 and #self.data.samples==0 then return end
         local ok,result=pcall(json.dump_file,self.path,self.data)
@@ -17,7 +17,9 @@ function M.new()
                 local w=lab.refresh.wait
                 row.refresh={pending=w~=nil,requests=lab.refresh.requests,returned=lab.refresh.returned,
                     completed=lab.refresh.completed,failed=lab.refresh.failed,behavior=lab.refresh.behavior,
-                    elapsed=w and w.elapsed or nil}
+                    elapsed=w and w.elapsed or nil,stage=w and w.stage or nil,
+                    stable_seconds=w and w.stable_seconds or nil,
+                    observed_action=w and w.stable and w.stable.action or nil}
             end
             return row
         end
