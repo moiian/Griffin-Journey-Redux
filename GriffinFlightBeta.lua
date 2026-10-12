@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.34. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.35. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.34-beta"
+local VERSION = "0.1.35-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -19,6 +19,8 @@ local controls,menu,passengers = {},{},{}
 passengers.frame=0
 -- Session-only independent experiments; never persisted in player settings.
 passengers.fall_experiment={reset=false,ground=false}
+passengers.griffin_fall={reset=false,status="狮鹫跌落实验：关闭"}
+passengers.flash_detail=false
 passengers.protection={damage=true,relocation=true,lost_check=false,destroy=false,counts={}}
 local masks = nil
 local input = {x = 0, y = 0, buttons = 0}
@@ -560,6 +562,7 @@ stop_driver = function(reason)
     queued = false
     local d = active or state.recovery
     active = nil
+    passengers.griffin_fall.actor=nil
     input = {x = 0, y = 0, buttons = 0}
     restore_camera()
     if not d then return true end
@@ -1411,6 +1414,59 @@ passengers.set_fall_experiment=function(key,value)
     end
     event("fall_experiment_mode",{reset=passengers.fall_experiment.reset,ground=passengers.fall_experiment.ground})
 end
+-- Griffin shares Character/FallInfoHolder APIs, but is never a seated passenger.
+passengers.griffin_fall_owned=function(a)
+    return alive and active and a.driver==active and a.spawn==active.spawn
+        and validate_spawn(a.spawn)==a.player and a.player:call("get_Transform()")==a.transform
+        and a.player:get_field("<FallInfo>k__BackingField")==a.fall
+end
+passengers.set_griffin_fall=function(value)
+    local p=passengers.griffin_fall;p.reset=value==true
+    if p.actor then p.actor.fall_experiment_failed=nil;p.actor.probe_at=nil end
+    p.status=p.reset and "狮鹫跌落实验：已开启，驾驶时处理" or "狮鹫跌落实验：关闭"
+    event("griffin_fall_experiment_mode",{reset=p.reset})
+end
+passengers.griffin_fall_tick=function()
+    local p=passengers.griffin_fall;local d=active
+    if not alive or not d then p.actor=nil;return end
+    if menu.gameplay_paused() then return end
+    local ok,err=pcall(function()
+        local ch=validate_spawn(d.spawn)
+        local a=p.actor
+        if not a or a.driver~=d or a.player~=ch then
+            local terrain=ch:get_field("<AdjustTerrain>k__BackingField")
+            a={group="griffin",slot=0,driver=d,spawn=d.spawn,player=ch,transform=ch:call("get_Transform()"),
+                fall=ch:get_field("<FallInfo>k__BackingField"),context=ch:get_field("<PosRotContext>k__BackingField"),
+                controller=terrain and terrain.MainCharacterController}
+            p.actor=a
+        end
+        assert(passengers.griffin_fall_owned(a),"Griffin fall interface changed")
+        local sample=now()>=(a.probe_at or -math.huge)
+        local before=sample and passengers.read_fall_probe(a) or nil
+        if p.reset and not a.fall_experiment_failed then
+            local reset_ok,reset_err=pcall(function()
+                assert(a.fall,"Griffin FallInfoHolder unavailable")
+                passengers.reset_fall(a)
+                a.player:set_field("SecFall",0.0)
+                a.fall_experiment_resets=(a.fall_experiment_resets or 0)+1
+            end)
+            if not reset_ok then
+                a.fall_experiment_failed=true
+                event("griffin_fall_reset_error",tostring(reset_err),true)
+                p.status="狮鹫跌落重置失败："..tostring(reset_err)
+            else p.status="狮鹫跌落重置中："..(a.fall_experiment_resets or 0).." 次" end
+        end
+        if sample then
+            a.probe_at=now()+0.5
+            a.probe={before=before,after=passengers.read_fall_probe(a),reset=p.reset}
+        end
+        if d.trace then d.trace.griffin_fall=a.probe end
+    end)
+    if not ok and now()>=(p.error_at or -math.huge) then
+        p.error_at=now()+5;p.status="狮鹫跌落接口不可用："..tostring(err)
+        event("griffin_fall_probe_error",tostring(err),true)
+    end
+end
 passengers.snapshot=function(value)
     if type(value)~="table" then return value end
     local result={}
@@ -1458,7 +1514,7 @@ passengers.flash_start=function()
     passengers.flash_stop("重新启动");passengers.flash_drain()
     local p={running=true,driver=active,started_wall=os.time(),deadline=os.time()+60,frame_id=1,
         captures=0,windows=0,dropped_stages=0,read_errors=0,clock_cost=0,ring={},queue={},last={},motion={},motion_queue={},motion_samples=0,motion_dropped=0,
-        current={id=1,stages={}},edges={},anomaly_windows=0,timed_windows=0,next_timed=now()+5,
+        current={id=1,stages={}},detail_pose=passengers.flash_detail,edges={},anomaly_windows=0,timed_windows=0,next_timed=now()+5,
         cooldown_until=0,status="逐帧探针：记录中，60秒；定时片段＋新增异常"}
     local ok,err=pcall(function()
         local _,_,tc,ctrl=target_context(active.spawn)
@@ -1476,7 +1532,7 @@ passengers.flash_start=function()
         p.camera={main=main,transform=assert(main:get_field("_Transform"),"Camera transform unavailable")}
     end)
     if not camera_ok then p.camera_error=tostring(camera_err) end
-    if p.griffin then
+    if p.griffin and p.detail_pose then
         local bones_ok,bones_err=pcall(function()
             local candidates={}
             local joints=p.griffin.transform:call("get_Joints()")
@@ -1498,7 +1554,7 @@ passengers.flash_start=function()
     end
     passengers.flash=p
     event("frame_probe_started",{wall_seconds=60,max_frames=18000,max_windows=12,max_anomaly_windows=6,max_timed_windows=6,timed_first=5,timed_interval=10,
-        pre_frames=6,post_frames=6,motion_max_samples=7200,motion_chunk_size=120,pose_joint_names=p.pose_joint_names,pose_joint_error=p.pose_joint_error,camera_error=p.camera_error,griffin_error=p.griffin_error})
+        pre_frames=6,post_frames=6,motion_max_samples=7200,motion_chunk_size=120,detail_pose=p.detail_pose,pose_joint_names=p.pose_joint_names,pose_joint_error=p.pose_joint_error,camera_error=p.camera_error,griffin_error=p.griffin_error})
 end
 passengers.flash_read=function(a,is_griffin)
     local row={group=is_griffin and "griffin" or a.group or "player",slot=is_griffin and 0 or a.slot or 0,
@@ -1526,10 +1582,12 @@ passengers.flash_read=function(a,is_griffin)
             local q=a.transform:call("get_Rotation()")
             assert(q and finite(q.x) and finite(q.y) and finite(q.z) and finite(q.w),"Invalid Griffin rotation")
             row.rotation={x=q.x,y=q.y,z=q.z,w=q.w}
-            local head=active.rider_head
-            assert(head and head:get_Valid(),"Griffin head unavailable")
-            row.head_scene=vector(head:call("get_Position()"))
-            row.head_offset_scene={x=row.head_scene.x-row.scene.x,y=row.head_scene.y-row.scene.y,z=row.head_scene.z-row.scene.z}
+            if passengers.flash.detail_pose then
+                local head=active.rider_head
+                assert(head and head:get_Valid(),"Griffin head unavailable")
+                row.head_scene=vector(head:call("get_Position()"))
+                row.head_offset_scene={x=row.head_scene.x-row.scene.x,y=row.head_scene.y-row.scene.y,z=row.head_scene.z-row.scene.z}
+            end
         end)
         if not pose_ok then row.pose_error=tostring(pose_err) end
     end
@@ -1562,7 +1620,7 @@ passengers.flash_capture=function(stage)
         if p.motion_samples<7200 then
             local motion={frame=p.frame_id,time=snap.time,wall_clock=os.clock(),action=snap.action,gear=snap.gear,
                 input=snap.input,flight_target=snap.flight_target,navigation=active.trace and active.trace.navigation_sphere,
-                camera_target_scene=snap.camera_target_scene}
+                camera_target_scene=snap.camera_target_scene,griffin_fall=passengers.griffin_fall.actor and passengers.griffin_fall.actor.probe}
             for _,row in ipairs(snap.actors) do
                 if row.group=="griffin" then
                     motion.universal=row.universal;motion.scene=row.scene;motion.rotation=row.rotation
@@ -1690,7 +1748,9 @@ passengers.read_instance_info=function(info,a)
 end
 passengers.read_fall_probe=function(a)
     local value={time=now(),behavior_frame=passengers.frame,instance=tostring(a.player)}
-    if not owned_player(a,false) then value.error="Interface ownership changed";return value end
+    local is_griffin=a.group=="griffin"
+    local owner_ok,owned=pcall(function() return is_griffin and passengers.griffin_fall_owned(a) or not is_griffin and owned_player(a,false) end)
+    if not owner_ok or not owned then value.error="Interface ownership changed";return value end
     local function read(key,fn)
         local ok,v=pcall(fn)
         if ok then value[key]=v else value.errors=value.errors or {};value.errors[key]=tostring(v) end
@@ -1698,8 +1758,9 @@ passengers.read_fall_probe=function(a)
     read("ground",function() return a.player:call("get_IsGround()") end)
     value.ground_original=a.ground_original
     value.ground_original_time=a.ground_original_time
-    value.ground_override=passengers.fall_experiment.ground
-    value.continuous_fall_reset=passengers.fall_experiment.reset
+    value.ground_override=not is_griffin and passengers.fall_experiment.ground or false
+    value.continuous_fall_reset=is_griffin and passengers.griffin_fall.reset or not is_griffin and passengers.fall_experiment.reset
+    if is_griffin then read("flight",function() return a.player:call("get_IsFlight()") end) end
     value.fall_reset_count=a.fall_experiment_resets or 0
     value.fall_reset_failed=a.fall_experiment_failed or false
     read("sec_fall",function() return a.player:get_field("SecFall") end)
@@ -2267,7 +2328,7 @@ end)
 re.on_pre_application_entry("UpdateBehavior",function()
     passengers.frame=passengers.frame+1;passengers.flash_capture("behavior_before_anchor")
     if menu.apply_pending_preset then menu.apply_pending_preset() end
-    passengers.refresh();tick_skip_think();tick_driver();tick_camera_follow()
+    passengers.refresh();tick_skip_think();tick_driver();passengers.griffin_fall_tick();tick_camera_follow()
     passengers.flash_capture("behavior_anchored_after")
 end)
 menu.player_visual_pre=function()
@@ -2862,13 +2923,24 @@ re.on_draw_ui(function()
         if changed then passengers.set_fall_experiment("reset",value) end
         changed,value=menu.toggle("【实验2】强制IsGround返回着地",passengers.fall_experiment.ground)
         if changed then passengers.set_fall_experiment("ground",value) end
+        changed,value=menu.toggle("【实验3】狮鹫持续重置跌落高度＋SecFall",passengers.griffin_fall.reset)
+        if changed then passengers.set_griffin_fall(value) end
         if experiment_styled then imgui.pop_style_color(1) end
+        imgui.text(passengers.griffin_fall.status)
+        local griffin_probe=passengers.griffin_fall.actor and passengers.griffin_fall.actor.probe
+        if griffin_probe then
+            local before,after=griffin_probe.before or {},griffin_probe.after or {}
+            imgui.text("狮鹫 SecFall："..tostring(before.sec_fall).." → "..tostring(after.sec_fall)
+                .."；跌落高度："..tostring(before.fall and before.fall.height).." → "..tostring(after.fall and after.fall.height))
+        end
+        changed,value=menu.toggle("详细骨骼姿态记录（定位动画时使用）",passengers.flash_detail)
+        if changed then passengers.flash_detail=value end
         if beta_button((passengers.flash.running and "【新增】停止逐帧探针并保存" or "【新增】开始60秒逐帧探针（含狮鹫）").."###BetaFrameProbe") then
             if passengers.flash.running then passengers.flash_stop("手动停止");passengers.flash_drain();flush()
             else passengers.flash_start() end
         end
         imgui.text(passengers.flash.status)
-        imgui.text("两项默认关闭、相互独立，仅作用于已落座角色；请先分别测试。")
+        imgui.text("实验1/2仅作用于已落座角色；实验3仅处理本次驾驶的狮鹫，均默认关闭。")
         imgui.text("实验2只覆盖着地查询，不等于创建真实地面碰撞；日志保留原始结果。")
         changed,value=menu.toggle("驾驶玩家／乘客扣血拦截",passengers.protection.damage)
         if changed then passengers.protection.damage=value end
