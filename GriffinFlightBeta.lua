@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.30. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.31. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.30-beta"
+local VERSION = "0.1.31-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -17,6 +17,8 @@ local yaw_state, yaw_hook_ready = nil, false
 local yaw_status = "自动转向镜头：未开启"
 local controls,menu,passengers = {},{},{}
 passengers.frame=0
+-- Session-only independent experiments; never persisted in player settings.
+passengers.fall_experiment={reset=false,ground=false}
 passengers.protection={damage=true,relocation=true,lost_check=false,destroy=false,counts={}}
 local masks = nil
 local input = {x = 0, y = 0, buttons = 0}
@@ -214,7 +216,7 @@ end
 local function sync_player(d,reset_fall)
     local pos = d.transform:call("get_UniversalPosition()")
     d.context:call("setPos(via.Position)", pos)
-    -- Fall reset is an attach/preset/release operation, never a continuous movement update.
+    -- Normal fall reset is attach/preset/release only; the explicit DEBUG experiment runs after anchoring.
     if reset_fall or d.fall_reset_pending then passengers.reset_fall(d) end
     d.controller:call("warp()")
 end
@@ -317,6 +319,7 @@ local function write_anchor(d,target,neutral)
     d.transform:call("set_Position(via.vec3)",Vector3f.new(target.x,target.y,target.z))
     passengers.orient(d,passengers.player_config())
     sync_player(d)
+    passengers.apply_fall_experiment(d)
     d.anchor_plan={transform=target,context=target,controller=target}
 end
 
@@ -1384,6 +1387,29 @@ passengers.container_actor=function(container)
     -- Exact captured container only. Never walk parent/shared containers or match IDs.
     return passengers.each_controlled(function(a) if a.generate_container==container then return a end end)
 end
+-- Called only after the controlled entity has been positioned and its controller warped.
+passengers.apply_fall_experiment=function(a)
+    if not passengers.fall_experiment.reset or a.fall_experiment_failed
+        or passengers.controlled(a.player,true)~=a then return end
+    local ok,err=pcall(function()
+        assert(owned_player(a,false),"Fall reset interface ownership changed")
+        passengers.reset_fall(a)
+        a.player:set_field("SecFall",0.0)
+        a.fall_experiment_resets=(a.fall_experiment_resets or 0)+1
+    end)
+    if not ok then
+        a.fall_experiment_failed=true
+        event("fall_reset_experiment_error",{group=a.group or "player",slot=a.slot,error=tostring(err)},true)
+    end
+end
+passengers.set_fall_experiment=function(key,value)
+    assert(key=="reset" or key=="ground")
+    passengers.fall_experiment[key]=value==true
+    if key=="reset" then
+        passengers.each_controlled(function(a) a.fall_experiment_failed=nil end)
+    end
+    event("fall_experiment_mode",{reset=passengers.fall_experiment.reset,ground=passengers.fall_experiment.ground})
+end
 passengers.snapshot=function(value)
     if type(value)~="table" then return value end
     local result={}
@@ -1415,6 +1441,12 @@ passengers.read_fall_probe=function(a)
         if ok then value[key]=v else value.errors=value.errors or {};value.errors[key]=tostring(v) end
     end
     read("ground",function() return a.player:call("get_IsGround()") end)
+    value.ground_original=a.ground_original
+    value.ground_original_time=a.ground_original_time
+    value.ground_override=passengers.fall_experiment.ground
+    value.continuous_fall_reset=passengers.fall_experiment.reset
+    value.fall_reset_count=a.fall_experiment_resets or 0
+    value.fall_reset_failed=a.fall_experiment_failed or false
     read("sec_fall",function() return a.player:get_field("SecFall") end)
     read("fall",function()
         return {height=a.fall:get_field("<FallHeight>k__BackingField"),
@@ -1506,6 +1538,29 @@ passengers.install_protection=function()
         end)
         if not ok then errors[#errors+1]=tostring(err) end
     end
+    -- IsGround has no setter/backing field in app.Character. Override only this query,
+    -- retaining the native result in telemetry; do not forge collision/landing contacts.
+    local ground_ok,ground_err=pcall(function()
+        local td=sdk.find_type_definition("app.Character")
+        local method=assert(td and td:get_method("get_IsGround()"),"Character.IsGround unavailable")
+        sdk.hook(method,function(args)
+            local storage=thread.get_hook_storage()
+            storage.griffin_beta_ground_actor=nil
+            if alive and active and passengers.fall_experiment.ground then
+                local ch=sdk.to_managed_object(args[2])
+                storage.griffin_beta_ground_actor=passengers.controlled(ch,true)
+            end
+        end,function(ret)
+            local a=thread.get_hook_storage().griffin_beta_ground_actor
+            if a and passengers.fall_experiment.ground and passengers.controlled(a.player,true)==a then
+                a.ground_original=sdk.to_int64(ret)~=0
+                a.ground_original_time=now()
+                return sdk.to_ptr(1)
+            end
+            return ret
+        end)
+    end)
+    if not ground_ok then errors[#errors+1]="Ground experiment: "..tostring(ground_err) end
     for _,signature in ipairs({"damageProc(app.HitController.DamageInfo)","updateDamage(app.HitController.DamageInfo, System.UInt32, System.Single, System.Boolean)"}) do
         hook("app.HitController",signature,function(args)
             if not active then return end
@@ -1752,6 +1807,7 @@ passengers.tick=function(d)
             a.transform:call("set_Position(via.vec3)",Vector3f.new(physical.x,physical.y,physical.z))
             passengers.orient(a,passengers.visual_seat(a.group,a.slot))
             sync_player(a)
+            passengers.apply_fall_experiment(a)
             passengers.tick_pose(a)
             d.passenger_trace[#d.passenger_trace+1]={group=a.group,slot=a.slot,physical=physical,fsm_enabled=a.fsm:call("get_Enabled()"),protection=a.protection_counts,health=a.health_probe,orientation=a.orientation_trace,orientation_failed=a.orientation_failed or false}
         end)
@@ -2533,6 +2589,15 @@ re.on_draw_ui(function()
             end
         end
         if menu.show_physical then imgui.text("在座位预设的当前布局中选择[1]，编辑实体位置。") end
+        local experiment_styled=type(imgui.push_style_color)=="function" and type(imgui.pop_style_color)=="function"
+        if experiment_styled then imgui.push_style_color(0,0xffa8ecff) end
+        changed,value=menu.toggle("【实验1】持续重置跌落高度＋SecFall",passengers.fall_experiment.reset)
+        if changed then passengers.set_fall_experiment("reset",value) end
+        changed,value=menu.toggle("【实验2】强制IsGround返回着地",passengers.fall_experiment.ground)
+        if changed then passengers.set_fall_experiment("ground",value) end
+        if experiment_styled then imgui.pop_style_color(1) end
+        imgui.text("两项默认关闭、相互独立，仅作用于已落座角色；请先分别测试。")
+        imgui.text("实验2只覆盖着地查询，不等于创建真实地面碰撞；日志保留原始结果。")
         changed,value=menu.toggle("驾驶玩家／乘客扣血拦截",passengers.protection.damage)
         if changed then passengers.protection.damage=value end
         changed,value=menu.toggle("阻止落座乘客自动传送／丢失",passengers.protection.relocation)
