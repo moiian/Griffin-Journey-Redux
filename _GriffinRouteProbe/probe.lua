@@ -198,7 +198,7 @@ function Probe:tick(force)
     local count=math.min(#self.queue,120)
     local frames={};for i=1,count do frames[i]=self.queue[i] end
     local final=self.pending and count==#self.queue
-    local payload={version="0.1.39",session=self.session,part=self.part+1,instances=self.instances,frames=frames}
+    local payload={version="0.1.40",session=self.session,part=self.part+1,instances=self.instances,frames=frames}
     if final then payload.summary={reason=self.reason,observed_frames=self.frames,observed_stages=self.rows,
         saved_frames=self.saved_frames+count,anomaly_windows=self.windows,read_errors=self.read_errors,
         events=self.events,field_errors=self.errors,baseline_hz=20,pre_frames=5,post_frames_including_trigger=6} end
