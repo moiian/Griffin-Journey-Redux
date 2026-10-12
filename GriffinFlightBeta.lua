@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.44. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.45. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.44-beta"
+local VERSION = "0.1.45-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -66,7 +66,14 @@ local function vector(v)
     return {x = v.x, y = v.y, z = v.z}
 end
 local function flush()
+    if menu.route and menu.route:quiet() then return false end
+    local started=os.clock()
     local ok, result = pcall(json.dump_file, "GriffinFlightBeta_" .. log_id .. "_" .. part .. ".json", journal)
+    menu.log_io=menu.log_io or {sequence=0,recent={}}
+    local io=menu.log_io;io.sequence=io.sequence+1
+    io.recent[#io.recent+1]={sequence=io.sequence,start_clock=started,end_clock=os.clock(),game_time=now(),
+        samples=#journal.samples,events=#journal.events,success=ok and result~=false}
+    if #io.recent>8 then table.remove(io.recent,1) end
     last_flush = now()
     if not ok or result == false then log.error("[GriffinFlightBeta] Log save failed") end
     return ok and result ~= false
@@ -235,7 +242,16 @@ do
                     and result.go:get_Valid() and result.chara:get_Valid()
                     and result.chara:call("get_GameObject()")==result.go
             end,
-            paused=menu.gameplay_paused,time=now,wall=os.time,behavior_frame=function() return passengers.frame end,
+            paused=menu.gameplay_paused,time=now,wall=os.time,clock=os.clock,behavior_frame=function() return passengers.frame end,
+            timing=function()
+                local c=core();local p=c and c.properties or {}
+                return {nick_delta=p.deltaTime,nick_frame=p.frame,log_sequence=menu.log_io and menu.log_io.sequence or 0}
+            end,
+            diagnostics=function()
+                return {normal_log_io=passengers.snapshot(menu.log_io),journal_samples=#journal.samples,journal_events=#journal.events,
+                    anti_jitter=menu.route and menu.route.fall_stop:snapshot(),griffin_anti_jitter=menu.route and menu.route.griffin_stop:snapshot(),
+                    fall_experiments=passengers.snapshot(passengers.fall_experiment)}
+            end,
             dump=function(path,data) return json.dump_file(path,data) end,
             bind=function(d) return menu.route_bind(d) end})
     else menu.route_error="原路线测试模块未加载："..tostring(Route) end
@@ -2290,6 +2306,7 @@ end
 
 re.on_frame(function()
     if not alive then return end
+    if menu.route then menu.route:capture_fine("frame_before_beta_tick") end
     if menu.route then menu.route:tick() end
     if passengers.flash.running and os.time()>=passengers.flash.deadline then passengers.flash_stop("60秒到时") end
     passengers.flash_drain()
@@ -2343,6 +2360,7 @@ re.on_frame(function()
         if #journal.samples < 650 then journal.samples[#journal.samples+1] = {time=now(), data=passengers.snapshot(active.trace)} end
     end
     if active and now()-last_flush >= 2 then flush() end
+    if menu.route then menu.route:capture_fine("frame_after_beta_tick") end
 end)
 re.on_application_entry("UpdateHID",function()
     if not alive then return end
@@ -2443,6 +2461,7 @@ menu.visual_error=function(label,err)
     else stop_driver(label);failed(label,err) end
 end
 re.on_pre_application_entry("UpdateJointExpression",function()
+    if menu.route then menu.route:capture_fine("joint_before_restore") end
     passengers.pre();menu.player_visual_pre()
 end)
 re.on_application_entry("UpdateJointExpression",function()
