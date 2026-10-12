@@ -17,8 +17,8 @@ local function clone(v)
     if type(v)~="table" then return v end
     local r={};for k,x in pairs(v) do r[k]=clone(x) end;return r
 end
-function Probe.new(env,anchor)
-    return setmetatable({env=env,anchor=anchor,running=false,status="玩家位置探针：关闭",queue={},part=0},Probe)
+function Probe.new(env,anchor,fall_stop)
+    return setmetatable({env=env,anchor=anchor,fall_stop=fall_stop,running=false,status="玩家位置探针：关闭",queue={},part=0},Probe)
 end
 function Probe:start()
     if self.running then return end
@@ -111,9 +111,10 @@ function Probe:read(d,stage)
         local action=manager:get_field("CurrentAction")
         r.player_action=action and tostring(action:get_field("Name")) or nil
     end)
-    if stage=="behavior_before_anchor" or stage=="behavior_native_after" or stage=="render_before_seat" then
+    if stage=="behavior_before_anchor" or stage=="behavior_native_after" or stage=="render_before_seat" or stage=="player_free_fall_stop_after" then
         Fall.capture(d,r,group)
     end
+    if self.fall_stop then r.native_fall_stop=self.fall_stop:snapshot() end
     r.gear=d.gear;r.mode=d.mode;r.external_control=d.external_control==true
     r.navigation=clone(d.route_navigation);r.planned_scene=d.anchor_target and vec(d.anchor_target) or nil
     if stage=="player_transform_written" and origin and r.planned_scene then self.expected=add(r.planned_scene,origin) end
@@ -197,7 +198,7 @@ function Probe:tick(force)
     local count=math.min(#self.queue,120)
     local frames={};for i=1,count do frames[i]=self.queue[i] end
     local final=self.pending and count==#self.queue
-    local payload={version="0.1.38",session=self.session,part=self.part+1,instances=self.instances,frames=frames}
+    local payload={version="0.1.39",session=self.session,part=self.part+1,instances=self.instances,frames=frames}
     if final then payload.summary={reason=self.reason,observed_frames=self.frames,observed_stages=self.rows,
         saved_frames=self.saved_frames+count,anomaly_windows=self.windows,read_errors=self.read_errors,
         events=self.events,field_errors=self.errors,baseline_hz=20,pre_frames=5,post_frames_including_trigger=6} end

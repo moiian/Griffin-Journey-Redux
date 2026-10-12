@@ -46,3 +46,6 @@
 
 !/_GriffinRouteProbe/fall.lua
 !/BETA_0138_NATIVE_FALL_PROBE.md
+
+!/_GriffinRouteProbe/fall_stop.lua
+!/BETA_0139_PLAYER_FALL_STOP_TEST.md

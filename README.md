@@ -1,4 +1,4 @@
-# 狮鹫旅程 Redux — Beta 0.1.38
+# 狮鹫旅程 Redux — Beta 0.1.39
 
 依赖已安装的NickCore EnemySpawner和run_once，直接调用其生成接口。只控制接口返回的狮鹫实例，不按Character ID接管其他狮鹫。
 
@@ -151,3 +151,6 @@ Beta0.1.37修正原路线目标字段读取并新增玩家动作／着地／FSM�
 
 
 Beta0.1.38在原路线探针补充玩家原生自由落体与物理接触状态，只读且默认关闭。入口需配套四模块，见BETA_0138_NATIVE_FALL_PROBE.md；尚未修复抽动。
+
+
+Beta0.1.39新增默认关闭的精确当前玩家自由落体停止对照，需原路线探针、旧实验1／2／3关闭。入口配套五模块，见BETA_0139_PLAYER_FALL_STOP_TEST.md；原生效果待实测。

@@ -396,3 +396,10 @@ Lua54四文件、新模块及实际Beta接入与完整既有回归通过；新�
 现有默认关闭原路线探针增加独立fall模块，仅行为写入前／原生行为后／渲染前读取精确当前玩家FreeFallController字段、IsDisableGravityUntilMotionEnd及MainCharacterController的Ground／NumGroundContactPoints／GravityDirection。接口已核对当前转储，保留原生单位；字段按组隔离，无对象记available=false，向量数值复制。不新增Hook／原生写入或设置项，不改变玩家／乘客／狮鹫行为。
 
 Lua54五文件、新增只读状态／复制／缺对象／错误隔离及既有模块与完整Beta接入回归通过，原生读数待实测，尚未修复抽动。入口与四模块配套部署；复用原60秒探针做一次冲刺→悬停状态读取，不重复着地覆盖或锚点对照。见BETA_0138_NATIVE_FALL_PROBE.md。白名单仅新增fall.lua与通用说明，用户JSON／实测分析／日志／转储／备份／测试工具保持本地；其他会话与MOD不改。
+
+
+## Beta0.1.39：停止当前玩家原生自由落体单变量实验（2026-10-13）
+
+新增独立fall_stop模块与默认关闭／不持久化开关，需保持原路线探针，拒绝旧实验1／2／3混用。仅精确当前驾驶玩家同步后，对其当前且激活的FreeFallController调用stop()并读回false；当前转储及启用时核对实例零参System.Void。暂停不调用；控制器更换拒写旧引用，驾驶／玩家／归属／记录变化、异常或退出停用。不处理乘客／狮鹫，不新增Hook、位置setter／着地／AI／FSM／共享重力写入。停用停止后续调用，不重建已取消的旧落体轨迹。
+
+探针记录启用／尝试／成功／错误次数和最近前后状态，成功后增加player_free_fall_stop_after与落体读数。Lua54六文件、新模块门限／归属／替换／读回／暂停／错误／退出、实际Beta同步后接入和快照／探针关闭停用／设置隔离及完整既有回归通过。已部署，原生效果仍待实测，尚未认定修复；测试见BETA_0139_PLAYER_FALL_STOP_TEST.md。源码／通用说明按白名单同步实验分支，用户JSON／日志／分析／转储／备份／本地测试工具不入Git，其他会话及MOD保持。

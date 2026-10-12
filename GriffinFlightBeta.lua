@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.38. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.39. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.38-beta"
+local VERSION = "0.1.39-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -214,6 +214,7 @@ do
     local ok,Route=pcall(require,"_GriffinRouteProbe.route")
     if ok then
         menu.route=Route.new({driver=function() return active end,
+            fall_conflict=function() return passengers.fall_experiment.reset or passengers.fall_experiment.ground or passengers.griffin_fall.reset end,
             owned=function(d)
                 if not alive or state.generation~=generation or not d or active~=d or not owned_player(d,true)
                     or player_fsm(d.player)~=d.fsm then return false end
@@ -342,6 +343,7 @@ local function write_anchor(d,target,neutral)
     sync_player(d)
     if menu.route then menu.route:capture("player_synced") end
     passengers.apply_fall_experiment(d)
+    if menu.route then menu.route:after_anchor(d) end
     d.anchor_plan={transform=target,context=target,controller=target}
 end
 
