@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.31. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.32. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.31-beta"
+local VERSION = "0.1.32-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -555,6 +555,7 @@ local function restore_camera()
     if not ok then event("camera_restore_error", tostring(err)) end
 end
 stop_driver = function(reason)
+    passengers.flash_stop("结束驾驶");passengers.flash_drain()
     operation = nil
     queued = false
     local d = active or state.recovery
@@ -1422,6 +1423,160 @@ passengers.capture_probe_refs=function(a)
     a.generate_container=info and info:call("get_Container()") or nil
     a.brine=a.player:get_field("<BrineProcessor>k__BackingField")
 end
+-- Bounded read-only frame capture. Stage callbacks only read/queue in memory.
+passengers.flash={running=false,status="逐帧探针：未启动"}
+passengers.flash_distance=function(a,b)
+    if not a or not b then return end
+    return math.sqrt((a.x-b.x)^2+(a.y-b.y)^2+(a.z-b.z)^2)
+end
+passengers.flash_stop=function(reason)
+    local p=passengers.flash
+    if not p.running then return end
+    p.running=false
+    if p.pending then
+        if p.current and #p.current.stages>0 then p.pending.frames[#p.pending.frames+1]=p.current end
+        p.pending.incomplete=true;p.queue[#p.queue+1]=p.pending;p.pending=nil
+    end
+    p.summary={reason=reason,frames=p.frame_id-1,captures=p.captures,windows=p.windows,
+        dropped_stages=p.dropped_stages,read_errors=p.read_errors,clock_cost=p.clock_cost,
+        elapsed_wall=os.time()-p.started_wall,thresholds={context=20,controller=10,hip=0.75,jump=15,griffin_acceleration=250}}
+    p.status="逐帧探针已停止："..reason.."；异常窗口 "..p.windows
+    p.driver=nil;p.griffin=nil;p.last={};p.ring={};p.current=nil
+end
+passengers.flash_drain=function()
+    local p=passengers.flash
+    for _,window in ipairs(p.queue or {}) do event("frame_probe_window",window,true) end
+    p.queue={}
+    if p.summary then event("frame_probe_summary",p.summary,true);p.summary=nil end
+end
+passengers.flash_start=function()
+    if not active then passengers.flash.status="请先开始驾驶，再启动逐帧探针";return end
+    passengers.flash_stop("重新启动");passengers.flash_drain()
+    local p={running=true,driver=active,started_wall=os.time(),deadline=os.time()+60,frame_id=1,
+        captures=0,windows=0,dropped_stages=0,read_errors=0,clock_cost=0,ring={},queue={},last={},
+        current={id=1,stages={}},cooldown_until=0,status="逐帧探针：记录中，最多60秒／6个异常窗口"}
+    local ok,err=pcall(function()
+        local _,_,tc,ctrl=target_context(active.spawn)
+        local ch=active.spawn.result.chara
+        local tr=ch:call("get_Transform()")
+        local terrain=ch:get_field("<AdjustTerrain>k__BackingField")
+        p.griffin={player=ch,transform=tr,context=ch:get_field("<PosRotContext>k__BackingField"),
+            controller=terrain and terrain.MainCharacterController,tc=tc,ctrl=ctrl,go=active.spawn.result.go}
+    end)
+    if not ok then p.griffin_error=tostring(err) end
+    passengers.flash=p
+    event("frame_probe_started",{wall_seconds=60,max_frames=3600,max_windows=6,
+        pre_frames=6,post_frames=6,griffin_error=p.griffin_error})
+end
+passengers.flash_read=function(a,is_griffin)
+    local row={group=is_griffin and "griffin" or a.group or "player",slot=is_griffin and 0 or a.slot or 0,
+        instance=tostring(a.player)}
+    local ok,err=pcall(function()
+        assert(a.player:get_Valid(),"Instance invalid")
+        if is_griffin then
+            assert(active.spawn.result.chara==a.player and a.player:call("get_GameObject()")==a.go
+                and a.player:call("get_Transform()")==a.transform,"Griffin interface changed")
+        else assert(passengers.controlled(a.player,true)==a and owned_player(a,false),"Actor no longer controlled") end
+        row.scene=vector(a.transform:call("get_Position()"))
+        row.universal=vector(a.transform:call("get_UniversalPosition()"))
+        if a.context then row.context=vector(a.context:call("get_Pos()")) end
+        if a.controller then row.controller=vector(a.controller:call("get_Position()")) end
+        if not is_griffin and a.hip_joint and a.hip_joint:get_Valid() then
+            row.hip=vector(a.hip_joint:call("get_Position()"))
+            for _,item in ipairs(a.bones_applied or {}) do
+                if item.joint==a.hip_joint then row.hip_expected={x=item.written.x,y=item.written.y,z=item.written.z};break end
+            end
+        end
+    end)
+    if not ok then row.error=tostring(err) end
+    return row
+end
+passengers.flash_capture=function(stage)
+    local p=passengers.flash
+    if not p.running then return end
+    if active~=p.driver or not alive then passengers.flash_stop("驾驶结束或对象变化");return end
+    if os.time()>=p.deadline then passengers.flash_stop("60秒到时");return end
+    if #p.current.stages>=8 then p.dropped_stages=p.dropped_stages+1;return end
+    local began=os.clock()
+    local snap={stage=stage,time=now(),behavior_frame=passengers.frame,actors={},
+        gear=active.gear,action=active.trace and active.trace.action,mode=active.mode,
+        input={x=input.x,y=input.y,buttons=input.buttons},paused=menu.gameplay_paused()}
+    passengers.each_controlled(function(a) snap.actors[#snap.actors+1]=passengers.flash_read(a,false) end)
+    if p.griffin then
+        snap.actors[#snap.actors+1]=passengers.flash_read(p.griffin,true)
+        if stage=="render_native_after" then
+            local ok,target=pcall(function() return vector(p.griffin.ctrl:call("get_TargetPosition()")) end)
+            if ok then snap.flight_target=target else snap.target_error=tostring(target) end
+        end
+    end
+    if stage=="render_native_after" and follow_state then
+        local ok,target=pcall(function() return vector(follow_state.main:call("get_TargetPosition()")) end)
+        if ok then snap.camera_target_scene=target else snap.camera_error=tostring(target) end
+    end
+    p.current.stages[#p.current.stages+1]=snap;p.captures=p.captures+1
+    local reasons={}
+    local function flag(row,kind,amount)
+        if #reasons<12 then reasons[#reasons+1]={group=row.group,slot=row.slot,kind=kind,value=amount,stage=stage} end
+    end
+    for _,row in ipairs(snap.actors) do
+        if row.error then p.read_errors=p.read_errors+1 else
+            local gap=passengers.flash_distance(row.universal,row.context)
+            if gap and gap>20 then flag(row,"context_gap",gap) end
+            gap=passengers.flash_distance(row.scene,row.controller)
+            if gap and gap>10 then flag(row,"controller_gap",gap) end
+            if stage=="joint_seated_after" or stage=="render_seated_after" or stage=="render_native_after" then
+                gap=passengers.flash_distance(row.hip,row.hip_expected)
+                if gap and gap>0.75 then flag(row,"hip_after_seat_gap",gap) end
+            end
+            local key=row.group..":"..row.slot..":"..stage
+            local last=p.last[key]
+            if last and row.universal and last.pos then
+                local dt=snap.time-last.time
+                local step=passengers.flash_distance(row.universal,last.pos)
+                if dt>0 and dt<0.25 and step>math.max(15,160*dt) then flag(row,"world_jump",step) end
+                if row.group=="griffin" and dt>0.005 and dt<0.1 and not snap.paused then
+                    local velocity={x=(row.universal.x-last.pos.x)/dt,y=(row.universal.y-last.pos.y)/dt,z=(row.universal.z-last.pos.z)/dt}
+                    if last.velocity and last.dt and math.abs(dt-last.dt)<0.01 then
+                        local acceleration=passengers.flash_distance(velocity,last.velocity)/dt
+                        if acceleration>250 then flag(row,"griffin_acceleration_candidate",acceleration) end
+                    end
+                    row.velocity=velocity;row.interval=dt
+                    p.last[key]={time=snap.time,pos=row.universal,velocity=velocity,dt=dt}
+                else p.last[key]={time=snap.time,pos=row.universal} end
+            else p.last[key]={time=snap.time,pos=row.universal} end
+        end
+    end
+    if #reasons>0 then
+        if not p.pending and p.windows<6 and p.frame_id>=p.cooldown_until then
+            p.windows=p.windows+1
+            p.pending={index=p.windows,trigger_frame=p.frame_id,reasons=reasons,frames={},remaining=6}
+            for _,frame in ipairs(p.ring) do p.pending.frames[#p.pending.frames+1]=frame end
+        elseif p.pending and #p.pending.reasons<24 then
+            for _,reason in ipairs(reasons) do
+                if #p.pending.reasons>=24 then break end
+                p.pending.reasons[#p.pending.reasons+1]=reason
+            end
+        end
+    end
+    p.clock_cost=p.clock_cost+(os.clock()-began)
+end
+passengers.flash_finish_frame=function()
+    local p=passengers.flash
+    if not p.running then return end
+    if #p.current.stages>0 then
+        if p.pending then
+            p.pending.frames[#p.pending.frames+1]=p.current;p.pending.remaining=p.pending.remaining-1
+            if p.pending.remaining<=0 then
+                p.pending.remaining=nil;p.queue[#p.queue+1]=p.pending;p.pending=nil;p.cooldown_until=p.frame_id+30
+            end
+        end
+        p.ring[#p.ring+1]=p.current;if #p.ring>6 then table.remove(p.ring,1) end
+    end
+    p.frame_id=p.frame_id+1;p.current={id=p.frame_id,stages={}}
+    if p.frame_id>3600 then passengers.flash_stop("帧数上限")
+    elseif p.windows>=6 and not p.pending then passengers.flash_stop("已记录6个异常窗口") end
+end
+
 passengers.read_instance_info=function(info,a)
     local argument_ch=info:get_field("<Chara>k__BackingField")
     local container=info:get_field("<Container>k__BackingField")
@@ -1925,6 +2080,8 @@ end
 
 re.on_frame(function()
     if not alive then return end
+    if passengers.flash.running and os.time()>=passengers.flash.deadline then passengers.flash_stop("60秒到时") end
+    passengers.flash_drain()
     local c = core()
     if not c or menu.gameplay_paused() then return end
     passengers.probe_tick()
@@ -2007,7 +2164,12 @@ re.on_application_entry("UpdateHID",function()
     end
 end)
 
-re.on_pre_application_entry("UpdateBehavior",function() passengers.frame=passengers.frame+1;if menu.apply_pending_preset then menu.apply_pending_preset() end;passengers.refresh();tick_skip_think();tick_driver();tick_camera_follow() end)
+re.on_pre_application_entry("UpdateBehavior",function()
+    passengers.frame=passengers.frame+1;passengers.flash_capture("behavior_before_anchor")
+    if menu.apply_pending_preset then menu.apply_pending_preset() end
+    passengers.refresh();tick_skip_think();tick_driver();tick_camera_follow()
+    passengers.flash_capture("behavior_anchored_after")
+end)
 menu.player_visual_pre=function()
     local d=active
     if not d or not alive or not d.bones_applied or not menu.visual_allowed() then return end
@@ -2067,9 +2229,12 @@ re.on_pre_application_entry("UpdateJointExpression",function()
     passengers.pre();menu.player_visual_pre()
 end)
 re.on_application_entry("UpdateJointExpression",function()
+    passengers.flash_capture("joint_native_before_seat")
     passengers.post();menu.player_visual_post()
+    passengers.flash_capture("joint_seated_after")
 end)
 re.on_pre_application_entry("PrepareRendering",function()
+    passengers.flash_capture("render_before_seat")
     if not menu.visual_allowed() then return end
     -- Menu transitions can replace the pose before NickCore reports pause. Keep
     -- this fallback active every rendered frame, using the same Hip restore path.
@@ -2079,8 +2244,10 @@ re.on_pre_application_entry("PrepareRendering",function()
     passengers.pre();menu.player_visual_pre()
     passengers.post();menu.player_visual_post()
     menu.rendering_visual=false
+    passengers.flash_capture("render_seated_after")
 end)
 re.on_application_entry("PrepareRendering",function()
+    passengers.flash_capture("render_native_after");passengers.flash_finish_frame()
     if not core() or menu.gameplay_paused() then return end
     read_camera_follow()
     local d = active
@@ -2596,6 +2763,11 @@ re.on_draw_ui(function()
         changed,value=menu.toggle("【实验2】强制IsGround返回着地",passengers.fall_experiment.ground)
         if changed then passengers.set_fall_experiment("ground",value) end
         if experiment_styled then imgui.pop_style_color(1) end
+        if beta_button((passengers.flash.running and "【新增】停止逐帧探针并保存" or "【新增】开始60秒逐帧探针（含狮鹫）").."###BetaFrameProbe") then
+            if passengers.flash.running then passengers.flash_stop("手动停止");passengers.flash_drain();flush()
+            else passengers.flash_start() end
+        end
+        imgui.text(passengers.flash.status)
         imgui.text("两项默认关闭、相互独立，仅作用于已落座角色；请先分别测试。")
         imgui.text("实验2只覆盖着地查询，不等于创建真实地面碰撞；日志保留原始结果。")
         changed,value=menu.toggle("驾驶玩家／乘客扣血拦截",passengers.protection.damage)
