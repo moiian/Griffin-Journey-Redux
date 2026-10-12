@@ -28,3 +28,10 @@
 
 !/CleanAnimationLab/_GriffinAnimationLab/isolation_ab.lua
 !/CleanAnimationLab/TEST_016_ISOLATION_AB.md
+
+!/_GriffinRouteProbe/
+/_GriffinRouteProbe/*
+!/_GriffinRouteProbe/anchor.lua
+!/_GriffinRouteProbe/probe.lua
+!/_GriffinRouteProbe/route.lua
+!/BETA_0136_ORIGINAL_ROUTE_TEST.md

@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.35. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.36. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.35-beta"
+local VERSION = "0.1.36-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -100,7 +100,7 @@ if type(json.load_file) == "function" then
         if finite(saved.camera_manual_threshold) then settings.camera_manual_threshold=math.max(0.25,math.min(0.95,saved.camera_manual_threshold)) end
         if finite(saved.camera_yaw_speed) then settings.camera_yaw_speed=math.max(15,math.min(360,saved.camera_yaw_speed)) end
         if type(saved.freeze_player) == "boolean" then settings.freeze_player = saved.freeze_player end
-        if finite(saved.navigation_radius) then settings.navigation_radius=math.max(2,math.min(30,saved.navigation_radius)) end
+        if finite(saved.navigation_radius) then settings.navigation_radius=math.max(2,math.min(130,saved.navigation_radius)) end
         if finite(saved.navigation_height) then settings.navigation_height=math.max(-27,math.min(27,saved.navigation_height)) end
         if finite(saved.steering_yaw) then settings.steering_yaw=math.max(1,math.min(85,saved.steering_yaw)) end
         -- First controls migration adopts the user's screenshot, not an older cached pitch.
@@ -208,6 +208,24 @@ end
 local function player_fsm(player)
     local manager = player:call("get_ActionManager()")
     return manager and manager.Fsm
+end
+-- Optional modules: disabled by default, no new native hooks or settings keys.
+do
+    local ok,Route=pcall(require,"_GriffinRouteProbe.route")
+    if ok then
+        menu.route=Route.new({driver=function() return active end,
+            owned=function(d)
+                if not alive or state.generation~=generation or not d or active~=d or not owned_player(d,true)
+                    or player_fsm(d.player)~=d.fsm then return false end
+                local r=d.spawn;local result=r and r.result
+                return result and r.owner==d.player and result.go and result.chara
+                    and result.go:get_Valid() and result.chara:get_Valid()
+                    and result.chara:call("get_GameObject()")==result.go
+            end,
+            paused=menu.gameplay_paused,time=now,wall=os.time,behavior_frame=function() return passengers.frame end,
+            dump=function(path,data) return json.dump_file(path,data) end,
+            bind=function(d) return menu.route_bind(d) end})
+    else menu.route_error="原路线测试模块未加载："..tostring(Route) end
 end
 passengers.reset_fall=function(d)
     local pos=d.transform:call("get_UniversalPosition()")
@@ -320,7 +338,9 @@ local function write_anchor(d,target,neutral)
     d.anchor_target=target;d.neutral_anchor=neutral;d.moved=true
     d.transform:call("set_Position(via.vec3)",Vector3f.new(target.x,target.y,target.z))
     passengers.orient(d,passengers.player_config())
+    if menu.route then menu.route:capture("player_transform_written") end
     sync_player(d)
+    if menu.route then menu.route:capture("player_synced") end
     passengers.apply_fall_experiment(d)
     d.anchor_plan={transform=target,context=target,controller=target}
 end
@@ -557,6 +577,7 @@ local function restore_camera()
     if not ok then event("camera_restore_error", tostring(err)) end
 end
 stop_driver = function(reason)
+    if menu.route then menu.route:stop() end
     passengers.flash_stop("结束驾驶");passengers.flash_drain()
     operation = nil
     queued = false
@@ -809,6 +830,14 @@ local function target_context(r)
     assert(ctrl and ctrl:call("get_CachedCharacter()") == ch, "FlightControl binding mismatch")
     return player, transform, tc, ctrl
 end
+menu.route_bind=function(d)
+    local _,_,tc,ctrl=target_context(d.spawn)
+    local result=d.spawn.result
+    local manager=result.chara:call("get_ActionManager()")
+    assert(manager and manager:call("get_GameObject()")==result.go,"ActionManager binding changed")
+    return {go=result.go,character=result.chara,transform=result.chara:call("get_Transform()"),
+        tc=tc,ctrl=ctrl,manager=manager}
+end
 local target_enum_names={}
 local function target_type_name(value)
     local key=tostring(value)
@@ -1013,6 +1042,10 @@ local function navigation_anchor(d,ch,tr,fx,fz)
     assert(d.rider_head and d.rider_head:get_Valid(),"未找到狮鹫头部，不能建立头部球面导航")
     assert(validate_spawn(d.spawn)==ch,"Griffin reference changed")
     local center=vector(d.rider_head:call("get_Position()"))
+    local anchor_detail={mode="head"}
+    if menu.route then center,anchor_detail=menu.route:center(d,tr,center,fx,fz) end
+    d.route_navigation={center=vector(center),anchor=anchor_detail,input={x=input.x,y=input.y},heading={x=fx,z=fz},
+        radius=settings.navigation_radius,height=settings.navigation_height}
     local radius=settings.navigation_radius
     local nav_x,nav_y=input.x,input.y
     if d.controls_active and not d.external_control and (d.gear==2 or d.manual_hold) then nav_x,nav_y=0,0 end
@@ -2241,6 +2274,7 @@ end
 
 re.on_frame(function()
     if not alive then return end
+    if menu.route then menu.route:tick() end
     if passengers.flash.running and os.time()>=passengers.flash.deadline then passengers.flash_stop("60秒到时") end
     passengers.flash_drain()
     local c = core()
@@ -2326,10 +2360,15 @@ re.on_application_entry("UpdateHID",function()
 end)
 
 re.on_pre_application_entry("UpdateBehavior",function()
+    if menu.route then menu.route:capture("behavior_before_anchor") end
     passengers.frame=passengers.frame+1;passengers.flash_capture("behavior_before_anchor")
     if menu.apply_pending_preset then menu.apply_pending_preset() end
     passengers.refresh();tick_skip_think();tick_driver();passengers.griffin_fall_tick();tick_camera_follow()
     passengers.flash_capture("behavior_anchored_after")
+    if menu.route then menu.route:capture("behavior_before_native") end
+end)
+re.on_application_entry("UpdateBehavior",function()
+    if menu.route then menu.route:capture("behavior_native_after") end
 end)
 menu.player_visual_pre=function()
     local d=active
@@ -2390,11 +2429,14 @@ re.on_pre_application_entry("UpdateJointExpression",function()
     passengers.pre();menu.player_visual_pre()
 end)
 re.on_application_entry("UpdateJointExpression",function()
+    if menu.route then menu.route:capture("joint_native_before_seat") end
     passengers.flash_capture("joint_native_before_seat")
     passengers.post();menu.player_visual_post()
     passengers.flash_capture("joint_seated_after")
+    if menu.route then menu.route:capture("joint_seated_after") end
 end)
 re.on_pre_application_entry("PrepareRendering",function()
+    if menu.route then menu.route:capture("render_before_seat") end
     passengers.flash_capture("render_before_seat")
     if not menu.visual_allowed() then return end
     -- Menu transitions can replace the pose before NickCore reports pause. Keep
@@ -2406,8 +2448,10 @@ re.on_pre_application_entry("PrepareRendering",function()
     passengers.post();menu.player_visual_post()
     menu.rendering_visual=false
     passengers.flash_capture("render_seated_after")
+    if menu.route then menu.route:capture("render_seated_after") end
 end)
 re.on_application_entry("PrepareRendering",function()
+    if menu.route then menu.route:capture("render_native_after") end
     passengers.flash_capture("render_native_after");passengers.flash_finish_frame()
     if not core() or menu.gameplay_paused() then return end
     read_camera_follow()
@@ -2484,6 +2528,7 @@ _G.GriffinFlightBetaBridge = bridge
 
 re.on_script_reset(function()
     stop_driver("脚本重置")
+    if menu.route then menu.route:shutdown() end
     alive = false
     skip_think_enabled=false;skip_think_expected=nil;block_player_fall=false
     if rawget(_G, "GriffinFlightBetaBridge") == bridge then _G.GriffinFlightBetaBridge = nil end
@@ -2885,7 +2930,7 @@ re.on_draw_ui(function()
         menu.slider("steering_yaw","左右转向灵敏度（最大角度）",1,85)
         menu.slider("steering_pitch","摇杆上下微调（最大角度）",1,80)
         menu.slider("bumper_pitch","RB／LB 升降角度（最高59°）",1,59)
-        menu.slider("navigation_radius","头部导航半径（米）",2,30)
+        menu.slider("navigation_radius","头部导航半径（米）",2,130)
         menu.slider("navigation_height","球面回中高度（米）",-settings.navigation_radius*0.9,settings.navigation_radius*0.9)
         imgui.tree_pop()
     end
@@ -2908,6 +2953,7 @@ re.on_draw_ui(function()
     end
     if imgui.tree_node("按键设置") then menu.bindings();imgui.tree_pop() end
     if imgui.tree_node("DEBUG") then
+        if menu.route then menu.route:draw() elseif menu.route_error then imgui.text(menu.route_error) end
         local changed,value=menu.toggle("显示预设[1]（仅手动调试）",menu.show_physical)
         if changed then
             menu.show_physical=value
