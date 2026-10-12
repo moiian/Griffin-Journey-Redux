@@ -35,3 +35,6 @@
 !/_GriffinRouteProbe/probe.lua
 !/_GriffinRouteProbe/route.lua
 !/BETA_0136_ORIGINAL_ROUTE_TEST.md
+
+!/CleanAnimationLab/_GriffinAnimationLab/action_gate.lua
+!/CleanAnimationLab/TEST_017_ACTION_GATE.md

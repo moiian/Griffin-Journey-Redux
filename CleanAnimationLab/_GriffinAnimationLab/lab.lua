@@ -3,14 +3,16 @@ local Recorder=require("_GriffinAnimationLab.recorder")
 local CallTrace=require("_GriffinAnimationLab.call_trace")
 local ActionRefresh=require("_GriffinAnimationLab.action_refresh")
 local IsolationAB=require("_GriffinAnimationLab.isolation_ab")
+local ActionGate=require("_GriffinAnimationLab.action_gate")
 local M={}
 function M.new()
-    local self={bound=false,enabled=false,flap=false,record=false,trace_calls=false,refresh_action=false,ab_test=false,revision=0,alive=true,
+    local self={bound=false,enabled=false,flap=false,record=false,trace_calls=false,refresh_action=false,ab_test=false,pause_actions=false,revision=0,alive=true,
         status="全部关闭。先用Beta生成狮鹫并结束驾驶；停止旧工具的隔离播放。",
         isolation=Isolation.new(),recorder=Recorder.new()}
     self.call_trace=CallTrace.new(self.recorder)
     self.refresh=ActionRefresh.new()
     self.ab=IsolationAB.new()
+    self.action_gate=ActionGate.new()
     function self:changed()
         self.revision=self.revision+1
     end
@@ -19,6 +21,7 @@ function M.new()
         if not polling then self.recorder:event("应用前",self,"before_apply") end
         if not self.enabled or not self.bound then
             self.refresh:cancel(self,"刷新取消，恢复原生控制")
+            self.action_gate:cancel()
             self.ab:cancel()
             self.isolation:stop()
         end
@@ -35,6 +38,9 @@ function M.new()
         end
         self.instance=r
         if self.enabled then
+            if not self.isolation.active then
+                assert(not self.pause_actions or self.ab_test,"动作更新隔离仅用于A/B，请先勾选分步对照")
+            end
             if self.ab.active then self.ab:advance(self)
             elseif not self.isolation.active and self.ab_test then self.ab:begin(self,r)
             elseif self.refresh.wait then self.refresh:advance(self)
@@ -79,6 +85,7 @@ function M.new()
                 self.applied=rev
                 if not ok then
                     self.enabled=false
+                    self.action_gate:cancel()
                     self.ab:cancel()
                     self.refresh:cancel(self,tostring(err),true)
                     local restored,restore_err=pcall(function() self.isolation:stop() end)
@@ -90,7 +97,7 @@ function M.new()
         self.recorder:tick(self)
     end
     function self:draw()
-        if not imgui.tree_node("狮鹫动画实验室 0.1.6") then return end
+        if not imgui.tree_node("狮鹫动画实验室 0.1.7") then return end
         imgui.text("A/B分步对照保持同一轮隔离；关闭隔离恢复原生控制。")
         local changed,value=imgui.checkbox("绑定Beta当前狮鹫",self.bound)
         if changed then self.bound=value;if not value then self.enabled=false end;self:changed() end
@@ -102,6 +109,11 @@ function M.new()
         if changed then
             self.ab_test=value
             self.recorder:event(value and "A/B对照已开启，下次接管生效" or "A/B对照已关闭，下次接管生效")
+        end
+        changed,value=imgui.checkbox("隔离时暂停原生动作更新（仅A/B，下次开启生效）",self.pause_actions)
+        if changed then
+            self.pause_actions=value
+            self.recorder:event(value and "动作更新隔离已开启，下次A阶段生效" or "动作更新隔离已关闭，下次A阶段生效")
         end
         imgui.text("需状态记录、关闭悬停刷新；先准备原生空中HoverWait。A/B内挥翅选项不生效。")
         if self.ab.active and self.ab.active.ab_stage=="A" then
@@ -127,6 +139,7 @@ function M.new()
         end
         imgui.text(self.status)
         imgui.text("隔离调用数："..self.isolation.blocked)
+        imgui.text("动作更新隔离："..self.action_gate.blocked.."次拦截；"..self.action_gate.status)
         imgui.text("悬停刷新："..self.refresh.requests.."次请求／"..self.refresh.returned.."次返回／"..self.refresh.completed.."次复隔离；"..self.refresh.status)
         imgui.text("记录："..self.recorder.status)
         imgui.text("方法跟踪："..self.call_trace.status.."；保存调用对："..#self.recorder.data.call_trace.pairs.." / 5000")
@@ -144,6 +157,7 @@ function M.new()
         self.call_trace:shutdown()
         self.alive=false;self:changed()
         self.refresh:cancel(self,"Reset取消刷新")
+        self.action_gate:cancel()
         self.ab:cancel()
         local ok,err=pcall(function() self.isolation:stop() end)
         if not ok then log.error("GriffinAnimationLab restore: "..tostring(err)) end

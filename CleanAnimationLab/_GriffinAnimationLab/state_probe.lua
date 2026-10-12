@@ -28,7 +28,7 @@ function M.boundary(instance,isolation,phase)
     local d=isolation.active
     local row={time=os.clock(),phase=phase,character=tostring(ch:get_address()),
         mode=d and (d.recovering and "recovering" or d.released and "refreshing" or "isolated") or "native",
-        ab_stage=d and d.ab_stage,interval=d and d.serial or isolation.serial or 0,requested_clip=d and d.clip}
+        action_update_blocked=d and d.action_gate and d.action_gate.blocked,ab_stage=d and d.ab_stage,interval=d and d.serial or isolation.serial or 0,requested_clip=d and d.clip}
     local read=reader(row)
     read("position",function() return vector(ch:call("get_Transform()"):call("get_UniversalPosition()")) end)
     read("scene_position",function() return vector(ch:call("get_Transform()"):call("get_Position()")) end)
@@ -43,7 +43,7 @@ end
 function M.read(instance,isolation,phase)
     local d=isolation.active
     local row={time=os.clock(),phase=phase,mode=d and (d.recovering and "recovering" or d.released and "refreshing" or "isolated") or "native",
-        ab_stage=d and d.ab_stage,interval=d and d.serial or isolation.serial or 0,blocked=isolation.blocked,errors={}}
+        action_update_blocked=d and d.action_gate and d.action_gate.blocked,ab_stage=d and d.ab_stage,interval=d and d.serial or isolation.serial or 0,blocked=isolation.blocked,errors={}}
     local function read(key,fn)
         local ok,value=pcall(fn)
         if ok and value~=nil then row[key]=value

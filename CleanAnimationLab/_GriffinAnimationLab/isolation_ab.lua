@@ -15,6 +15,10 @@ function M.new()
         assert(bridge.get_instance()==d.instance and lab.instance==d.instance and not bridge.is_driving()
             and not (old and old.is_driving()),"A/B实例或驾驶归属变化")
         assert(lab.isolation.active==d and not d.recovering and not d.released and lab.isolation:valid(d),"A/B隔离组件失效")
+        if d.action_gate then
+            assert(lab.action_gate.active==d.action_gate,"动作更新隔离提前停止，请保存记录")
+            lab.action_gate:validate(lab,d)
+        end
         local ch=d.instance.chara
         assert(ch:call("get_ActionManager()")==self.manager and self.manager.Fsm==d.fsm
             and self.manager:call("get_GameObject()")==d.instance.go,"A/B动作管理器归属变化")
@@ -34,9 +38,12 @@ function M.new()
         local base=assert(ch:call("get_Motion()"):call("getLayer(System.UInt32)",0),"没有基础层")
         local bank,id=base:call("get_MotionBankID()"),base:call("get_MotionID()")
         assert(not (bank==0 and (id==5100 or id==5101)),"基础层仍是隔离资源，请先恢复原生悬停")
+        local gate
+        if lab.pause_actions then gate=lab.action_gate:arm(lab,instance,manager) end
         lab.recorder:event("A前：原生悬停；准备只隔离控制",lab,"ab_before_controls")
         lab.isolation:play(instance,nil,true)
         self.active=lab.isolation.active;self.manager=manager
+        if gate then gate.d=self.active;self.active.action_gate=gate end
         self:validate(lab)
         lab.recorder:event(self:status(),lab,"ab_controls")
     end
