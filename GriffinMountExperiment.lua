@@ -1,7 +1,7 @@
 -- Griffin Mount Experiment: stage 3 player-as-target flight control experiment.
 -- Requires the installed aaaNickCore.lua and _NickCore/EnemySpawner.lua.
 -- Keeps an explicit spawn return or user-confirmed instance; never selects by Character ID.
-local VERSION = "0.3.18-stage3-direct-motion"
+local VERSION = "0.3.19-stage3-blend-probe"
 local state = "Idle"
 local detail = "Ready for one ordinary Griffin request per script session."
 local shared = nil
@@ -900,6 +900,7 @@ local function tick_skip_think()
 end
 
 -- Direct-motion isolation experiment. No guessed bank/motion IDs and no position clamp.
+local motion_probe,move_isolation
 local animation_test = {status="先让狮鹫播放待测动作，再捕获实际动画。",samples={},blocked=0}
 function animation_test.instance()
     local b=beta_bridge()
@@ -977,6 +978,7 @@ function animation_test.play()
     if animation_test.active then return end
     run_once(function()
         local ok,err=pcall(function()
+            assert(not (move_isolation and move_isolation.active),"请先关闭仅隔离原生位移实验")
             local b=beta_bridge()
             assert(not (b and b.is_driving and b.is_driving()) and not pilot,"先结束驾驶，避免驾驶器抢动作；不用删除狮鹫")
             local s=animation_test.saved
@@ -1036,6 +1038,247 @@ function animation_test.tick()
         if game_time()-last_flush>=2 then flush_flight_log() end
     end)
     if not ok then animation_test.stop("采样错误");animation_test.status="采样错误："..tostring(err) end
+end
+
+
+-- Read-only native blend/flight-variable observation. Render callback never writes JSON.
+motion_probe={status="让狮鹫原生冲刺，再开始20秒自动记录；不用抓挥翅瞬间。",serial=0}
+function motion_probe.flush()
+    local d=motion_probe.data
+    if not d or not motion_probe.dirty then return end
+    motion_probe.last_flush=os.clock() -- rate-limit retries after a disk error as well
+    local ok,value=pcall(json.dump_file,motion_probe.path,d)
+    if ok and value~=false then motion_probe.dirty=false
+    else motion_probe.status="扑翼记录保存失败；数据暂留内存，可再次点停止保存。" end
+end
+function motion_probe.stop(reason)
+    local d=motion_probe.active
+    if d then
+        motion_probe.active=nil
+        motion_probe.data.reason=reason
+        motion_probe.data.finished_utc=os.date("!%Y-%m-%dT%H:%M:%SZ")
+        motion_probe.dirty=true
+        motion_probe.status="扑翼记录已停止："..reason.."；样本 "..#motion_probe.data.samples
+    end
+    motion_probe.flush()
+end
+function motion_probe.start()
+    if motion_probe.active then return end
+    if motion_probe.dirty then motion_probe.flush();if motion_probe.dirty then return end end
+    run_once(function()
+        if motion_probe.active then return end
+        local ok,err=pcall(function()
+            assert(not animation_test.active,"请先停止动画隔离播放，再记录原生飞行")
+            assert(type(re.on_application_entry)=="function","没有渲染采样回调")
+            local r=animation_test.instance()
+            assert(r and r.go:get_Valid() and r.chara:get_Valid(),"当前狮鹫无效")
+            local c=assert(dependency(),"依赖未就绪")
+            assert(not c.properties.isPaused,"请恢复游戏")
+            local motion=assert(r.chara:call("get_Motion()"),"没有Motion")
+            local flight=assert(r.chara:call("get_FlightCtrl()"),"没有FlightControl")
+            assert(flight:call("get_CachedCharacter()")==r.chara,"飞行控制器归属不符")
+            local count=motion:call("getLayerCount()")
+            assert(count>0 and count<=16,"动画层数量异常")
+            local manager=assert(r.chara:call("get_ActionManager()"),"没有动作管理器")
+            motion_probe.serial=motion_probe.serial+1
+            motion_probe.path="GriffinMountExperiment_MotionProbe_"..session_id.."_"..motion_probe.serial..".json"
+            motion_probe.data={schema=1,version=VERSION,character=tostring(r.chara:get_address()),
+                started_utc=os.date("!%Y-%m-%dT%H:%M:%SZ"),interval=0.05,duration_wall_seconds=20,
+                limits={samples=420,layers=16,nodes_per_view=12,total_nodes_per_sample=64},samples={},errors={},error_count=0}
+            motion_probe.active={instance=r,motion=motion,flight=flight,manager=manager,player=c.properties.player,
+                deadline=os.clock()+20,next_sample=0,disabled={}}
+            motion_probe.dirty=true;motion_probe.last_flush=-math.huge
+            motion_probe.status="正在记录原生扑翼／滑翔（20秒，只读，自动停止）。"
+            motion_probe.flush()
+            log_event("motion_probe_start",{path=motion_probe.path,character=motion_probe.data.character})
+        end)
+        if not ok then motion_probe.status="扑翼探针未开始："..tostring(err) end
+    end)
+end
+function motion_probe.section(d,key,fn)
+    if d.disabled[key] then return nil end
+    local ok,value=pcall(fn)
+    if ok then return value end
+    d.disabled[key]=true
+    motion_probe.data.errors[key]=tostring(value)
+    motion_probe.data.error_count=motion_probe.data.error_count+1
+    motion_probe.dirty=true
+    return nil
+end
+function motion_probe.render()
+    local d=motion_probe.active
+    if not d or d.finish then return end
+    local now=os.clock()
+    if now>=d.deadline then d.finish="20秒完成";return end
+    local c=dependency()
+    if not c or c.properties.isPaused then return end
+    if now<d.next_sample then return end
+    d.next_sample=now+0.05 -- at most one sample per callback, no catch-up bursts
+    if #motion_probe.data.samples>=420 then d.finish="采样上限";return end
+    local ok,err=pcall(function()
+        assert(control_alive and c.properties.player==d.player and animation_test.valid(d),"当前狮鹫／玩家已改变")
+        assert(d.instance.chara:call("get_FlightCtrl()")==d.flight,"飞行控制器已改变")
+        if animation_test.active then d.finish="切换为隔离播放";return end
+        local action=d.manager.CurrentAction
+        local row={time=game_time(),wall_elapsed=20-(d.deadline-now),action=action and action.Name or "unknown",
+            layers={},flight={},variables={},node_reads=0,movement_isolated=move_isolation and move_isolation.active~=nil or false,
+            movement_blocked=move_isolation and move_isolation.hits or 0,root_mode=d.motion:call("get_RootMotion()")}
+        row.position=motion_probe.section(d,"position",function()
+            local p=d.instance.chara:call("get_Transform()"):call("get_UniversalPosition()")
+            return {x=p.x,y=p.y,z=p.z}
+        end)
+        local count=d.motion:call("getLayerCount()")
+        assert(count>0 and count<=16,"动画层数量改变或异常")
+        for i=0,count-1 do
+            local layer=d.motion:call("getLayer(System.UInt32)",i)
+            if layer and layer:call("get_Enabled()") then
+                local item=motion_probe.section(d,"layer:"..i,function()
+                    return {index=i,bank=layer:call("get_MotionBankID()"),id=layer:call("get_MotionID()"),
+                        frame=layer:call("get_Frame()"),speed=layer:call("get_Speed()"),loop=layer:call("get_Loop()")}
+                end)
+                if item then
+                    for _,view in ipairs({{key="nodes",count="getMotionNodeCount()",get="getMotionNode(System.UInt32)"},
+                        {key="raw_nodes",count="getRawMotionNodeCount()",get="getRawMotionNode(System.UInt32)"}}) do
+                        local key="layer:"..i..":"..view.key
+                        local nodes=motion_probe.section(d,key,function()
+                            local n=layer:call(view.count)
+                            assert(type(n)=="number" and n>=0 and n<=4096,"节点数量异常")
+                            local result={count=n,items={}}
+                            local limit=math.min(n,12,64-row.node_reads)
+                            result.truncated=n>limit
+                            for j=0,limit-1 do
+                                row.node_reads=row.node_reads+1
+                                local node=layer:call(view.get,j)
+                                if node then
+                                    local entry=motion_probe.section(d,key..":"..j,function()
+                                        local result={index=j,empty=node:call("get_Empty()"),active=node:call("get_Active()"),weight=node:call("get_Weight()")}
+                                        if result.empty then return result end
+                                        result.name=node:call("get_Name()")
+                                        result.bank=node:call("get_MotionBankID()")
+                                        result.id=node:call("get_MotionID()")
+                                        result.frame=node:call("get_Frame()")
+                                        result.loaded=d.motion:call("hasMotion(System.UInt32, System.UInt32)",result.bank,result.id)
+                                        if result.loaded then result.motion_name=node:call("get_MotionName()") end
+                                        return result
+                                    end)
+                                    if entry then result.items[#result.items+1]=entry end
+                                end
+                            end
+                            return result
+                        end)
+                        item[view.key]=nodes
+                    end
+                    row.layers[#row.layers+1]=item
+                end
+            end
+        end
+        for _,name in ipairs({"FlightShakeBlend","FlightShakeSpeed","FlightBodyBankBlendRate"}) do
+            row.flight[name]=motion_probe.section(d,"flight:"..name,function() return d.flight:call("get_"..name.."()") end)
+        end
+        for _,name in ipairs({"VariableFlappingRate","VariableFlightBlendX","VariableFlightBlendZ"}) do
+            row.variables[name]=motion_probe.section(d,"variable:"..name,function()
+                local variable=d.flight:get_field(name)
+                if not variable then return {present=false} end
+                return {present=true,type_kind=variable:call("get_TypeKind()"),value_f=variable:call("get_F()")}
+            end)
+        end
+        for _,name in ipairs({"FlightMoveMotionTimer","FlightLayer1MotionFrame","_FlightAttitudeMotionSpeed"}) do
+            row.flight[name]=motion_probe.section(d,"field:"..name,function() return d.flight:get_field(name) end)
+        end
+        motion_probe.data.samples[#motion_probe.data.samples+1]=row
+        motion_probe.dirty=true
+    end)
+    if not ok then d.finish="采样停止："..tostring(err) end
+end
+function motion_probe.tick()
+    local d=motion_probe.active
+    if d then
+        if not control_alive then d.finish="脚本重置" end
+        if os.clock()>=d.deadline and not d.finish then d.finish="20秒完成" end
+        if d.finish then motion_probe.stop(d.finish);return end
+    end
+    if motion_probe.dirty and os.clock()-(motion_probe.last_flush or 0)>=2 then motion_probe.flush() end
+end
+
+
+-- Isolate native flight displacement while leaving FSM/flight animation scheduling enabled.
+move_isolation={status="关闭；保留完整动作调度，仅测试位移入口。",hits=0}
+function move_isolation.stop(reason)
+    local d=move_isolation.active
+    if not d then return true end
+    d.recovering=true
+    local ok,err=pcall(function()
+        if d.instance.go:get_Valid() and d.instance.chara:get_Valid()
+            and d.instance.chara:call("get_Motion()")==d.motion then
+            d.motion:call("set_RootMotion(via.motion.RootPlayMode)",d.original_root)
+        end
+    end)
+    if not ok then move_isolation.status="位移实验恢复失败，请再次关闭："..tostring(err);return false end
+    move_isolation.active=nil
+    move_isolation.status="位移隔离已关闭："..reason
+    log_event("movement_isolation_stop",{reason=reason,blocked=move_isolation.hits,root_reapplied=d.root_reapplied})
+    return true
+end
+function move_isolation.start()
+    if move_isolation.active then return end
+    run_once(function()
+        if move_isolation.active then return end
+        local ok,err=pcall(function()
+            assert(not animation_test.active,"请先停止完整动画隔离播放")
+            local r=animation_test.instance()
+            local c=assert(dependency(),"依赖未就绪")
+            assert(not c.properties.isPaused and r and r.go:get_Valid() and r.chara:get_Valid(),"请在游戏中绑定有效狮鹫")
+            local motion=assert(r.chara:call("get_Motion()"),"没有Motion")
+            local flight=assert(r.chara:call("get_FlightCtrl()"),"没有FlightControl")
+            assert(flight:call("get_CachedCharacter()")==r.chara,"飞行控制器归属不符")
+            local enum=sdk.find_type_definition("via.motion.RootPlayMode")
+            local none=assert(enum and enum:get_field("None"),"没有RootPlayMode.None"):get_data(nil)
+            local original=motion:call("get_RootMotion()")
+            assert(type(none)=="number" and type(original)=="number","根位移状态无法保存")
+            if not move_isolation.hooked then
+                local td=sdk.find_type_definition("app.FlightControl")
+                local method=assert(td and td:get_method("updatePosition()"),"缺少位移入口updatePosition()")
+                sdk.hook(method,function(args)
+                    local d=move_isolation.active
+                    if d and not d.recovering and sdk.to_ptr(args[2])==d.flight_ptr then
+                        move_isolation.hits=move_isolation.hits+1
+                        return sdk.PreHookResult.SKIP_ORIGINAL
+                    end
+                end,function(retval) return retval end)
+                move_isolation.hooked=true
+            end
+            local b=beta_bridge()
+            local d={instance=r,motion=motion,flight=flight,flight_ptr=sdk.to_ptr(flight),original_root=original,none=none,
+                player=c.properties.player,root_reapplied=0,was_driving=b and b.is_driving and b.is_driving() or false}
+            assert(flush_flight_log(),"日志保存失败，未开始位移实验")
+            move_isolation.active=d;move_isolation.hits=0
+            motion:call("set_RootMotion(via.motion.RootPlayMode)",none)
+            move_isolation.status="已开启：只拦截FlightControl.updatePosition＋关闭根位移；FSM、扑翼调度、目标和朝向仍运行。"
+            log_event("movement_isolation_start",{character=tostring(r.chara:get_address()),original_root=original,root=none})
+        end)
+        if not ok then move_isolation.stop("启动失败");move_isolation.status="位移实验未开始或已恢复："..tostring(err) end
+    end)
+end
+function move_isolation.tick()
+    local d=move_isolation.active
+    if not d or d.recovering then return end
+    local ok,err=pcall(function()
+        local c=dependency()
+        if not control_alive or not c or c.properties.player~=d.player or not animation_test.valid(d)
+            or d.instance.chara:call("get_FlightCtrl()")~=d.flight then move_isolation.stop("对象或玩家改变");return end
+        local b=beta_bridge()
+        if b and b.is_driving then
+            local driving=b.is_driving()
+            if d.was_driving and not driving then move_isolation.stop("Beta驾驶结束");return end
+            d.was_driving=driving
+        end
+        if c.properties.isPaused then return end
+        if d.motion:call("get_RootMotion()")~=d.none then
+            d.motion:call("set_RootMotion(via.motion.RootPlayMode)",d.none)
+            d.root_reapplied=d.root_reapplied+1
+        end
+    end)
+    if not ok then move_isolation.stop("位移实验错误");move_isolation.status="位移实验错误："..tostring(err) end
 end
 
 
@@ -1360,6 +1603,8 @@ local function install_fall_hook()
 end
 control_frame=function()
     animation_test.tick()
+    motion_probe.tick()
+    move_isolation.tick()
     if fall_hits~=fall_logged and game_time()-fall_log_at>=1 then
         fall_logged=fall_hits;fall_log_at=game_time();log_event("player_fall_request",{hits=fall_hits,blocked=fall_blocked})
     end
@@ -1560,7 +1805,7 @@ local function update_lure_camera()
 end
 
 if type(re.on_application_entry)=="function" and type(re.on_pre_application_entry)=="function" then
-    re.on_application_entry("PrepareRendering",update_lure_camera)
+    re.on_application_entry("PrepareRendering",function() update_lure_camera();motion_probe.render() end)
     re.on_application_entry("UpdateHID",function()
         if not lure or not lure_stick_enabled then return end
         local ok,value=pcall(read_lure_stick)
@@ -1568,12 +1813,14 @@ if type(re.on_application_entry)=="function" and type(re.on_pre_application_entr
         else lure_input={x=0,y=0,raw_x=0,raw_y=0};lure_input_error=tostring(value) end
     end)
     -- Supply the real player target before the game's behavior/AI stage.
-    re.on_pre_application_entry("UpdateBehavior",function() tick_skip_think();tick_lure_test() end)
+    re.on_pre_application_entry("UpdateBehavior",function() move_isolation.tick();tick_skip_think();tick_lure_test() end)
 end
 
 local control_bridge = {is_driving=function() return lure ~= nil or lure_start_pending or lure_restore_pending end}
 _G.GriffinMountExperimentControl = control_bridge
 re.on_script_reset(function()
+    motion_probe.stop("脚本重置")
+    move_isolation.stop("脚本重置")
     animation_test.stop("脚本重置")
     control_alive=false;skip_think_enabled=false;skip_think_expected=nil;block_player_fall=false
     if rawget(_G, "GriffinMountExperimentControl") == control_bridge then _G.GriffinMountExperimentControl = nil end
@@ -1688,6 +1935,19 @@ re.on_draw_ui(function()
         if ui_button("【本轮新增】2. 隔离重播捕获动画（先结束驾驶）") then animation_test.play() end
         if ui_button("【本轮新增】3. 停止隔离播放／恢复原生控制") then run_once(function() animation_test.stop("手动停止") end) end
         imgui.text(animation_test.status)
+        if not move_isolation.active and ui_button("【本轮新增】仅隔离原生位移（保留扑翼调度）") then move_isolation.start() end
+        if move_isolation.active and ui_button("【本轮新增】关闭位移隔离／恢复原生位移") then run_once(function() move_isolation.stop("手动关闭") end) end
+        imgui.text(move_isolation.status)
+        if move_isolation.active then imgui.text("位移拦截次数："..move_isolation.hits.."；本实验不接管朝向，不写实体坐标。") end
+        if not motion_probe.active and ui_button("【本轮新增】开始20秒扑翼记录（只读）") then motion_probe.start() end
+        if (motion_probe.active or motion_probe.dirty) and ui_button("【本轮新增】停止扑翼记录并保存") then motion_probe.stop("手动停止") end
+        imgui.text(motion_probe.status)
+        if motion_probe.path then imgui.text("扑翼专属日志：reframework/data/"..motion_probe.path) end
+        if animation_test.saved then
+            for _,row in ipairs(animation_test.saved.layers) do
+                imgui.text("已捕获层 "..row.index.." | Bank "..row.bank.." | Motion "..row.id.." | Frame "..string.format("%.2f",row.frame))
+            end
+        end
         imgui.text("捕获的是当前时刻的动画片段，不保证整个动作的开始／循环都相同。")
         imgui.text("已测试动作（单次请求，无3秒间隔）")
         imgui.text("默认允许跨阶段；可直接测试空中或地面动作。")
