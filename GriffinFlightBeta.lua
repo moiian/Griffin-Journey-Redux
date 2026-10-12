@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.43. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.44. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.43-beta"
+local VERSION = "0.1.44-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}

@@ -3,13 +3,13 @@
 local M={};M.__index=M
 local start_signatures={
     {"start(app.FreeFallController.StartParameter)",1},
-    {"start(via.vec3,via.vec3,System.Single,System.Single)",4},
-    {"start(via.vec3,via.vec3,System.Single,System.Single,app.FreeFallController.StartParameter.ParabolicTypeEnum,System.Single)",6},
-    {"startWithFrame(System.Single,via.vec3,System.Single)",3},
-    {"startWithFrame(via.vec3,System.Single)",2},
+    {"start(via.vec3, via.vec3, System.Single, System.Single)",4},
+    {"start(via.vec3, via.vec3, System.Single, System.Single, app.FreeFallController.StartParameter.ParabolicTypeEnum, System.Single)",6},
+    {"startWithFrame(System.Single, via.vec3, System.Single)",3},
+    {"startWithFrame(via.vec3, System.Single)",2},
     {"startWithFrameKeepGravityAccel(via.vec3)",1},
-    {"startWithSec(System.Single,via.vec3,System.Single)",3},
-    {"startWithSec(via.vec3,System.Single)",2},
+    {"startWithSec(System.Single, via.vec3, System.Single)",3},
+    {"startWithSec(via.vec3, System.Single)",2},
 }
 local installed,managers={},setmetatable({},{__mode="k"})
 local function install_hooks(td)
