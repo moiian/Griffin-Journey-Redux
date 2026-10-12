@@ -5,3 +5,13 @@
 !/README.md
 !/VERSION_HISTORY.md
 !/TESTING.md
+!/NEW_SESSION_HANDOFF.md
+!/CleanAnimationLab/
+/CleanAnimationLab/*
+!/CleanAnimationLab/GriffinAnimationLab.lua
+!/CleanAnimationLab/README.md
+!/CleanAnimationLab/_GriffinAnimationLab/
+/CleanAnimationLab/_GriffinAnimationLab/*
+!/CleanAnimationLab/_GriffinAnimationLab/lab.lua
+!/CleanAnimationLab/_GriffinAnimationLab/isolation.lua
+!/CleanAnimationLab/_GriffinAnimationLab/recorder.lua
