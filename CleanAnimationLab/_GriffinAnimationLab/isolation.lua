@@ -1,4 +1,4 @@
--- Exact-instance animation isolation. No Transform writes or native action requests.
+-- Exact-instance animation isolation. Optional preparation runs once before freezing.
 local M = {}
 function M.new()
     local self = {blocked=0,serial=0}
@@ -16,7 +16,7 @@ function M.new()
         for _,method in ipairs(methods) do
             sdk.hook(method,function(args)
                 local d=self.active
-                if d and not d.recovering and sdk.to_ptr(args[2])==d.flight_ptr then
+                if d and not d.recovering and not d.preparing and sdk.to_ptr(args[2])==d.flight_ptr then
                     self.blocked=self.blocked+1
                     return sdk.PreHookResult.SKIP_ORIGINAL
                 end
@@ -34,13 +34,14 @@ function M.new()
                 d.motion_touched=false
             end
             if d.fsm_touched then
+                assert(d.instance.chara:call("get_ActionManager()").Fsm==d.fsm,"FSM归属变化，恢复保留待检查")
                 d.fsm:call("set_Enabled(System.Boolean)",d.original_enabled)
                 d.fsm_touched=false
             end
         end
         self.active=nil
     end
-    function self:play(instance,clip)
+    function self:play(instance,clip,before_freeze)
         assert(clip==5100 or clip==5101,"只测试已确认资源")
         local d=self.active
         if d then
@@ -76,6 +77,16 @@ function M.new()
             self:install()
             self.serial=self.serial+1;d.serial=self.serial
             self.active=d;self.blocked=0
+            if before_freeze then
+                -- Save the original control values before native reset can touch them.
+                d.preparing=true;d.fsm_touched=true;d.motion_touched=true
+                before_freeze(d)
+                assert(self:valid(d) and manager.Fsm==d.fsm,"准备后组件变化")
+                assert(motion:call("hasMotion(System.UInt32, System.UInt32)",0,clip),"准备后动画资源不可用")
+                base=assert(motion:call("getLayer(System.UInt32)",0),"准备后基础层不可用")
+                assert(base:call("get_Enabled()"),"准备后基础层未启用")
+                d.preparing=nil
+            end
             d.fsm_touched=true;fsm:call("set_Enabled(System.Boolean)",false)
             d.motion_touched=true;motion:call("set_RootMotion(via.motion.RootPlayMode)",none)
             for _,row in ipairs(d.layers) do

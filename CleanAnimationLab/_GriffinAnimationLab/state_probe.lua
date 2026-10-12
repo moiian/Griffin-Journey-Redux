@@ -27,7 +27,7 @@ function M.boundary(instance,isolation,phase)
     local ch=instance.chara
     local d=isolation.active
     local row={time=os.clock(),phase=phase,character=tostring(ch:get_address()),
-        mode=d and (d.recovering and "recovering" or "isolated") or "native",
+        mode=d and (d.recovering and "recovering" or d.preparing and "preparing" or "isolated") or "native",
         interval=d and d.serial or isolation.serial or 0,requested_clip=d and d.clip}
     local read=reader(row)
     read("position",function() return vector(ch:call("get_Transform()"):call("get_UniversalPosition()")) end)
@@ -42,7 +42,7 @@ function M.boundary(instance,isolation,phase)
 end
 function M.read(instance,isolation,phase)
     local d=isolation.active
-    local row={time=os.clock(),phase=phase,mode=d and (d.recovering and "recovering" or "isolated") or "native",
+    local row={time=os.clock(),phase=phase,mode=d and (d.recovering and "recovering" or d.preparing and "preparing" or "isolated") or "native",
         interval=d and d.serial or isolation.serial or 0,blocked=isolation.blocked,errors={}}
     local function read(key,fn)
         local ok,value=pcall(fn)

@@ -1,12 +1,14 @@
 local Isolation=require("_GriffinAnimationLab.isolation")
 local Recorder=require("_GriffinAnimationLab.recorder")
 local CallTrace=require("_GriffinAnimationLab.call_trace")
+local TaskReset=require("_GriffinAnimationLab.task_reset")
 local M={}
 function M.new()
-    local self={bound=false,enabled=false,flap=false,record=false,trace_calls=false,revision=0,alive=true,
+    local self={bound=false,enabled=false,flap=false,record=false,trace_calls=false,reset_task=false,revision=0,alive=true,
         status="全部关闭。先用Beta生成狮鹫并结束驾驶；停止旧工具的隔离播放。",
         isolation=Isolation.new(),recorder=Recorder.new()}
     self.call_trace=CallTrace.new(self.recorder)
+    self.task_reset=TaskReset.new()
     function self:changed()
         self.revision=self.revision+1
     end
@@ -26,7 +28,8 @@ function M.new()
         end
         self.instance=r
         if self.enabled then
-            self.isolation:play(r,self.flap and 5101 or 5100)
+            local prepare=self.reset_task and function(d) self.task_reset:run(self,d) end or nil
+            self.isolation:play(r,self.flap and 5101 or 5100,prepare)
             self.status="隔离播放："..(self.flap and "挥翅5101" or "滑翔5100").."；未锁定位置。"
         else self.status="已绑定；隔离播放关闭，原生控制生效。" end
         self.recorder:event(self.status,self,"after_apply")
@@ -69,7 +72,7 @@ function M.new()
         self.recorder:tick(self)
     end
     function self:draw()
-        if not imgui.tree_node("狮鹫动画实验室 0.1.2") then return end
+        if not imgui.tree_node("狮鹫动画实验室 0.1.3") then return end
         imgui.text("无点击冷却；切换动画保持隔离。关闭隔离才恢复原生控制。")
         local changed,value=imgui.checkbox("绑定Beta当前狮鹫",self.bound)
         if changed then self.bound=value;if not value then self.enabled=false end;self:changed() end
@@ -77,6 +80,12 @@ function M.new()
         if changed then self.enabled=value;self:changed() end
         changed,value=imgui.checkbox("使用挥翅5101（关闭为滑翔5100）",self.flap)
         if changed then self.flap=value;self:changed() end
+        changed,value=imgui.checkbox("接管前重置原生任务（实验，每轮一次）",self.reset_task)
+        if changed then
+            self.reset_task=value
+            self.recorder:event(value and "原生重置实验已开启，下次接管执行" or "原生重置实验已关闭")
+        end
+        imgui.text("重置选项只影响下次接管；隔离中切换此项不会立即重置。")
         changed,value=imgui.checkbox("启用状态与坐标记录（20Hz，隔离关闭也记录）",self.record)
         if changed then
             self.record=value;self.recorder.enabled=value
@@ -90,6 +99,7 @@ function M.new()
         end
         imgui.text(self.status)
         imgui.text("隔离调用数："..self.isolation.blocked)
+        imgui.text("原生重置："..self.task_reset.attempts.."次调用／"..self.task_reset.returned.."次返回；"..self.task_reset.status)
         imgui.text("记录："..self.recorder.status)
         imgui.text("方法跟踪："..self.call_trace.status.."；保存调用对："..#self.recorder.data.call_trace.pairs.." / 5000")
         imgui.text("状态样本："..#self.recorder.data.samples.." / 3000（满额后动画继续）")

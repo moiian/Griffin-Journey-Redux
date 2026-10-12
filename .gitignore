@@ -20,3 +20,6 @@
 
 !/CleanAnimationLab/_GriffinAnimationLab/call_trace.lua
 !/CleanAnimationLab/TEST_012_CALL_TRACE.md
+
+!/CleanAnimationLab/_GriffinAnimationLab/task_reset.lua
+!/CleanAnimationLab/TEST_013_TASK_RESET.md

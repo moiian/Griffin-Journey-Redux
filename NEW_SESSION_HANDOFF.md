@@ -8,7 +8,7 @@
 
 - Beta：Beta/GriffinFlightBeta.lua，0.1.35，保持不改。用户驾驶、Hip座位分离、头部镜头已反复实测；保护等细节以Beta源码/项目AGENTS.md为准，不用本摘要覆盖。
 - 旧实验：根GriffinMountExperiment.lua，0.3.23-stage3-target-ab，保留原样作为参考。不是新工具的运行依赖。
-- 干净工具：CleanAnimationLab/GriffinAnimationLab.lua及_GriffinAnimationLab五个模块，0.1.2。已部署实际基础层读数与原生方法前后只读定位，实机待验收；首次位移未修复，没有加入代码飞行、乘客或镜头。
+- 干净工具：CleanAnimationLab/GriffinAnimationLab.lua及_GriffinAnimationLab六个模块，0.1.3。已部署默认关闭的接管前原生任务重置实验，实机待验收；首次位移尚未确认修复，没有代码飞行、乘客或镜头。
 - 游戏：P:\games\steamapps\common\Dragons Dogma 2；部署在reframework/autorun；日志在reframework/data。
 - 本地仓库：D:\_Project\Griffin MOD\Repository；远端https://github.com/moiian/Griffin-Journey-Redux；实验分支experiment/oxcart-preset-ui。仅源码/测试/历史说明入Git，设置、日志、转储、备份不入Git。用户授权本地独立改动提交并推送，实测通过才打verified里程碑。
 - 转储：游戏根il2cpp_dump.json，约1.1GB，按类型定向读取。旧牛车仅参考，禁止重走牛车生成/跳时失败路线。
@@ -62,3 +62,10 @@ state_probe增加基础层实际Bank／MotionID／Frame／Enabled，缺字段独
 Lua54六文件语法、既有生命周期及新增精确正反例／原返回保持／数值历史／嵌套配对／字段失败／限频心跳与容量／暂停及旧队列／部分模块失败／恢复回归通过。源码与游戏对应文件内容比较一致；备份在CleanAnimationLab_backups/0.1.1_时间目录。实机命中／性能／首次位移根因仍待验收，不打verified标签。测试见CleanAnimationLab/README.md及TEST_012_CALL_TRACE.md；本轮需勾选新的方法跟踪，先原生2秒、首次隔离3—4秒、关闭最多10秒，若自然落地再隔离与切片各3秒，关闭隔离2秒后关跟踪、关记录。未落地也保存；不反复开关。
 
 仓库仅同步本版六Lua、README、TEST_012_CALL_TRACE、版本／交接说明和精确白名单；本地日志分析／用户测试证据、转储、设置、备份和测试运行时不入库。Beta0.1.35、旧阶段三0.3.23及其他MOD不改。
+
+## 2026-10-13 CleanAnimationLab 0.1.3：单次原生任务重置，已部署待实测
+新增默认关闭task_reset模块及“接管前重置原生任务（实验，每轮一次）”；需状态记录。保存原FSM／root后、冻结前，精确当前角色调用一次resetActionAndAI(app.Character.ResetActionAndAIOption)，ActionName=Wait、IsResetAI=true、Catch/Caught=false。参数从当前转储确认为System.Object引用类并调用真实.ctor()，不是枚举，不传0或nil。前后独立状态快照mode=preparing，调用返回不等于取消成功。
+每轮首次接管一次，切动画及隔离内改选项不重置；准备期原飞控回调放行。构造／字段读回／接口／归属／原false FSM／暂停／旧队列检查失败拒绝或退出，按重置前原控制值恢复，无自动重复调用。重置后重新取基础层、核对Motion/FSM/FlightControl；恢复不写已更换旧FSM，失败保留重试。不恢复已取消任务、不写Transform／碰撞体／速度、不强制落地。Beta0.1.35、旧阶段三0.3.23及配置不动。
+Lua54七文件及既有／新增对象构造、一次时序、准备回调、切片、精确实例、原值恢复、失败、组件变更、记录／暂停／旧队列回归通过；源码／游戏／仓库内容一致，0.1.2备份在CleanAnimationLab_backups。原生重置是否同步生效／能否结束残留任务仍需实机，不打verified标签。
+测试用新生成狮鹫，绑定开记录约2秒后显式开启重置实验，首次隔离5100观察5秒，不等原任务执行完或落地；静止则同隔离切5101约5秒，计数应仍1次调用／1次返回。失败直接保存，不反复开关。关闭隔离约2秒后关跟踪／记录。方法跟踪4/5为该角色缺回滚模块的已知现象，不必为此重测。详见CleanAnimationLab/README.md、TEST_013_TASK_RESET.md。
+仓库白名单扩展到七Lua、README和TEST_013_TASK_RESET；原始日志／实测分析／设置／转储／备份／本地回归不入库。
