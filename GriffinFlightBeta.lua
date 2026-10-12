@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.42. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.43. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.42-beta"
+local VERSION = "0.1.43-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -209,7 +209,7 @@ local function player_fsm(player)
     local manager = player:call("get_ActionManager()")
     return manager and manager.Fsm
 end
--- Optional modules: disabled by default, no new native hooks or settings keys.
+-- Optional modules: disabled by default; anti-jitter installs scoped start hooks on enable, no settings keys.
 do
     local ok,Route=pcall(require,"_GriffinRouteProbe.route")
     if ok then

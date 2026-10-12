@@ -44,12 +44,14 @@ function Route:draw()
     if changed then self.fall_stop:set_enabled(value) end
     imgui.text(self.fall_stop.status)
     if self.fall_stop.enabled then
+        imgui.text("已阻止重新落体：玩家 "..self.fall_stop.start_calls.." 次；座位NPC "..self.fall_stop.passenger_start_calls.." 次")
         imgui.text("座位NPC已停止 "..self.fall_stop.passenger_calls.." 次；异常 "..self.fall_stop.passenger_errors.." 次")
         if self.fall_stop.passenger_last and self.fall_stop.passenger_last.error then imgui.text(self.fall_stop.passenger_last.error) end
     end
     changed,value=imgui.checkbox("【原路线防抖】狮鹫停止原生自由落体",self.griffin_stop.enabled)
     if changed then self.griffin_stop:set_enabled(value) end
     imgui.text(self.griffin_stop.status)
+    if self.griffin_stop.enabled then imgui.text("已阻止狮鹫重新落体 "..self.griffin_stop.start_calls.." 次") end
     imgui.text(self.status);imgui.text(self.probe.status)
 end
 function Route:stop()
