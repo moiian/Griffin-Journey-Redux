@@ -4,12 +4,14 @@ local CallTrace=require("_GriffinAnimationLab.call_trace")
 local ActionRefresh=require("_GriffinAnimationLab.action_refresh")
 local IsolationAB=require("_GriffinAnimationLab.isolation_ab")
 local ActionGate=require("_GriffinAnimationLab.action_gate")
+local PoseTrace=require("_GriffinAnimationLab.pose_trace")
 local M={}
 function M.new()
-    local self={bound=false,enabled=false,flap=false,record=false,trace_calls=false,refresh_action=false,ab_test=false,pause_actions=false,revision=0,alive=true,
+    local self={bound=false,enabled=false,flap=false,record=false,trace_calls=false,trace_pose=false,refresh_action=false,ab_test=false,pause_actions=false,revision=0,alive=true,
         status="全部关闭。先用Beta生成狮鹫并结束驾驶；停止旧工具的隔离播放。",
         isolation=Isolation.new(),recorder=Recorder.new()}
     self.call_trace=CallTrace.new(self.recorder)
+    self.pose_trace=PoseTrace.new(self.recorder)
     self.refresh=ActionRefresh.new()
     self.ab=IsolationAB.new()
     self.action_gate=ActionGate.new()
@@ -62,6 +64,7 @@ function M.new()
         end
         self.recorder.enabled=self.record
         self.call_trace:tick(self)
+        self.pose_trace:tick(self)
         if core.properties.isPaused then self.refresh:pause();return end
         if self.ab.active and not self.record and self.enabled then self.enabled=false;self:changed() end
         if self.isolation.active and self.applied==self.revision then
@@ -97,7 +100,7 @@ function M.new()
         self.recorder:tick(self)
     end
     function self:draw()
-        if not imgui.tree_node("狮鹫动画实验室 0.1.7") then return end
+        if not imgui.tree_node("狮鹫动画实验室 0.1.8") then return end
         imgui.text("A/B分步对照保持同一轮隔离；关闭隔离恢复原生控制。")
         local changed,value=imgui.checkbox("绑定Beta当前狮鹫",self.bound)
         if changed then self.bound=value;if not value then self.enabled=false end;self:changed() end
@@ -137,12 +140,19 @@ function M.new()
             if not value then self.call_trace:shutdown() end
             self.recorder:event(value and "开启方法跟踪" or "关闭方法跟踪")
         end
+        changed,value=imgui.checkbox("记录根应用与飞控碰撞回调（只读，需状态记录）",self.trace_pose)
+        if changed then
+            self.trace_pose=value
+            if not value then self.pose_trace:shutdown() end
+            self.recorder:event(value and "开启位置入口只读跟踪" or "关闭位置入口只读跟踪")
+        end
         imgui.text(self.status)
         imgui.text("隔离调用数："..self.isolation.blocked)
         imgui.text("动作更新隔离："..self.action_gate.blocked.."次拦截；"..self.action_gate.status)
         imgui.text("悬停刷新："..self.refresh.requests.."次请求／"..self.refresh.returned.."次返回／"..self.refresh.completed.."次复隔离；"..self.refresh.status)
         imgui.text("记录："..self.recorder.status)
         imgui.text("方法跟踪："..self.call_trace.status.."；保存调用对："..#self.recorder.data.call_trace.pairs.." / 5000")
+        imgui.text("位置入口："..self.pose_trace.status.."；保存调用对："..#self.recorder.data.pose_trace.pairs.." / 4000")
         imgui.text("状态样本："..#self.recorder.data.samples.." / 3000（满额后动画继续）")
         local row=self.recorder.latest
         if row then
@@ -155,6 +165,7 @@ function M.new()
     function self:shutdown()
         self.recorder:event("Reset恢复前",self,"before_reset")
         self.call_trace:shutdown()
+        self.pose_trace:shutdown()
         self.alive=false;self:changed()
         self.refresh:cancel(self,"Reset取消刷新")
         self.action_gate:cancel()

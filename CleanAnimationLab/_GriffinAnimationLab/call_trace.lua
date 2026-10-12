@@ -17,11 +17,14 @@ local function delta(a,b)
     local x,y,z=b.x-a.x,b.y-a.y,b.z-a.z
     return math.sqrt(x*x+y*y+z*z)
 end
-function M.new(recorder)
+function M.new(recorder,options)
+    options=options or {}
+    local entries=options.methods or methods
+    local flag=options.flag or "trace_calls"
     local self={enabled=false,epoch=0,sequence=0,status="关闭",recorder=recorder,installed={},next_sample={}}
-    local data={sample_hz_per_method=20,per_method_limit=1000,heartbeat_seconds=1,change_threshold_m=0.000001,methods={},pairs={}}
-    recorder.data.call_trace=data
-    for _,spec in ipairs(methods) do
+    local data={sample_hz_per_method=20,per_method_limit=1000,heartbeat_seconds=1,change_threshold_m=0.000001,method_count=#entries,pair_limit=#entries*1000,methods={},pairs={}}
+    recorder.data[options.data_key or "call_trace"]=data
+    for _,spec in ipairs(entries) do
         data.methods[spec.key]={name=spec.type.."."..spec.method,available=false,hits=0,paired=0,stored=0,changed=0,errors=0,dropped=0}
     end
     function self:problem(key,err)
@@ -34,7 +37,7 @@ function M.new(recorder)
     function self:current(ctx,spec)
         local lab=ctx.lab
         if self.context~=ctx or not self.enabled or not self.recorder.enabled or not lab.record
-            or not lab.trace_calls or not lab.alive or not lab.bound or lab.instance~=ctx.instance
+            or not lab[flag] or not lab.alive or not lab.bound or lab.instance~=ctx.instance
             or lab.revision~=ctx.revision then return false end
         local core=rawget(_G,"NickCore")
         if not core or core.properties.isPaused then return false end
@@ -49,8 +52,12 @@ function M.new(recorder)
         local stat=data.methods[spec.key]
         local td=assert(sdk.find_type_definition(spec.type),"缺少"..spec.type)
         local method=assert(td:get_method(spec.method),"缺少"..stat.name)
+        if spec.params~=nil then
+            assert(not method:is_static() and method:get_num_params()==spec.params
+                and method:get_return_type():get_full_name()=="System.Void","位置入口签名变化："..stat.name)
+        end
         assert(thread and type(thread.get_hook_storage)=="function","缺少Hook线程存储")
-        local storage_key="griffin_animation_lab_trace_"..spec.key
+        local storage_key="griffin_animation_lab_"..(options.data_key or "trace").."_"..spec.key
         sdk.hook(method,function(args)
             -- Unknown objects are never converted or inspected.
             local ctx=self.context
@@ -100,10 +107,10 @@ function M.new(recorder)
         self.installed[spec.key]=true;stat.available=true
     end
     function self:tick(lab)
-        self.enabled=lab.trace_calls
-        if not lab.alive or not lab.trace_calls or not lab.record or not lab.bound or not lab.instance then
+        self.enabled=lab[flag]
+        if not lab.alive or not lab[flag] or not lab.record or not lab.bound or not lab.instance then
             if self.context then self:clear() end
-            self.status=lab.trace_calls and "等待绑定并开启状态记录" or "关闭";return
+            self.status=lab[flag] and "等待绑定并开启状态记录" or "关闭";return
         end
         local ctx=self.context
         if ctx and (ctx.instance~=lab.instance or ctx.revision~=lab.revision) then self:clear();ctx=nil end
@@ -113,13 +120,13 @@ function M.new(recorder)
         run_once(function()
             self.pending=false
             local core=rawget(_G,"NickCore")
-            if self.epoch~=epoch or not lab.alive or not lab.trace_calls or not lab.record or not lab.bound
+            if self.epoch~=epoch or not lab.alive or not lab[flag] or not lab.record or not lab.bound
                 or lab.instance~=instance or lab.revision~=rev or not core or core.properties.isPaused then return end
             local ok,err=pcall(function()
                 local bridge=rawget(_G,"GriffinFlightBetaBridge")
                 assert(bridge and bridge.get_instance()==instance and instance.go:get_Valid() and instance.chara:get_Valid(),"实例已变化")
                 local targets,count={},0
-                for _,spec in ipairs(methods) do
+                for _,spec in ipairs(entries) do
                     local valid,value=pcall(function()
                         local obj=assert(spec.get(instance.chara),"没有对应模块")
                         assert(not spec.owns or spec.owns(obj,instance.chara),"模块归属不符")
@@ -129,7 +136,7 @@ function M.new(recorder)
                     if valid then targets[spec.key]=value;count=count+1 else self:problem(spec.key,value) end
                 end
                 self.context={instance=instance,revision=rev,lab=lab,targets=targets}
-                self.status="只读跟踪："..count.." / 5个入口；每入口最高20Hz"
+                self.status=(options.label or "只读跟踪").."："..count.." / "..#entries.."个入口；每入口最高20Hz"
             end)
             if not ok then self.status="跟踪未启用："..tostring(err) end
         end)
