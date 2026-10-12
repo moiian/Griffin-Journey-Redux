@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.32. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.33. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.32-beta"
+local VERSION = "0.1.33-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -1439,8 +1439,9 @@ passengers.flash_stop=function(reason)
     end
     p.summary={reason=reason,frames=p.frame_id-1,captures=p.captures,windows=p.windows,
         dropped_stages=p.dropped_stages,read_errors=p.read_errors,clock_cost=p.clock_cost,
-        elapsed_wall=os.time()-p.started_wall,thresholds={context=20,controller=10,hip=0.75,jump=15,griffin_acceleration=250}}
-    p.status="逐帧探针已停止："..reason.."；异常窗口 "..p.windows
+        elapsed_wall=os.time()-p.started_wall,timed_windows=p.timed_windows,anomaly_windows=p.anomaly_windows,
+        thresholds={context=20,controller=10,hip=0.75,jump=15}}
+    p.status="逐帧探针已停止："..reason.."；记录窗口 "..p.windows
     p.driver=nil;p.griffin=nil;p.last={};p.ring={};p.current=nil
 end
 passengers.flash_drain=function()
@@ -1454,7 +1455,8 @@ passengers.flash_start=function()
     passengers.flash_stop("重新启动");passengers.flash_drain()
     local p={running=true,driver=active,started_wall=os.time(),deadline=os.time()+60,frame_id=1,
         captures=0,windows=0,dropped_stages=0,read_errors=0,clock_cost=0,ring={},queue={},last={},
-        current={id=1,stages={}},cooldown_until=0,status="逐帧探针：记录中，最多60秒／6个异常窗口"}
+        current={id=1,stages={}},edges={},anomaly_windows=0,timed_windows=0,next_timed=now()+5,
+        cooldown_until=0,status="逐帧探针：记录中，60秒；定时片段＋新增异常"}
     local ok,err=pcall(function()
         local _,_,tc,ctrl=target_context(active.spawn)
         local ch=active.spawn.result.chara
@@ -1465,7 +1467,7 @@ passengers.flash_start=function()
     end)
     if not ok then p.griffin_error=tostring(err) end
     passengers.flash=p
-    event("frame_probe_started",{wall_seconds=60,max_frames=3600,max_windows=6,
+    event("frame_probe_started",{wall_seconds=60,max_frames=18000,max_windows=12,max_anomaly_windows=6,max_timed_windows=6,timed_first=5,timed_interval=10,
         pre_frames=6,post_frames=6,griffin_error=p.griffin_error})
 end
 passengers.flash_read=function(a,is_griffin)
@@ -1518,15 +1520,23 @@ passengers.flash_capture=function(stage)
     local function flag(row,kind,amount)
         if #reasons<12 then reasons[#reasons+1]={group=row.group,slot=row.slot,kind=kind,value=amount,stage=stage} end
     end
+    -- Persistent per-stage discrepancies are telemetry, not repeated new faults.
+    local function gap_edge(row,kind,amount,threshold)
+        local key=row.group..":"..row.slot..":"..stage..":"..kind
+        local present=amount~=nil and amount>threshold
+        row[kind]=amount
+        if present and not p.edges[key] then flag(row,kind,amount) end
+        p.edges[key]=present
+    end
     for _,row in ipairs(snap.actors) do
         if row.error then p.read_errors=p.read_errors+1 else
             local gap=passengers.flash_distance(row.universal,row.context)
-            if gap and gap>20 then flag(row,"context_gap",gap) end
+            gap_edge(row,"context_gap",gap,20)
             gap=passengers.flash_distance(row.scene,row.controller)
-            if gap and gap>10 then flag(row,"controller_gap",gap) end
+            gap_edge(row,"controller_gap",gap,10)
             if stage=="joint_seated_after" or stage=="render_seated_after" or stage=="render_native_after" then
                 gap=passengers.flash_distance(row.hip,row.hip_expected)
-                if gap and gap>0.75 then flag(row,"hip_after_seat_gap",gap) end
+                gap_edge(row,"hip_after_seat_gap",gap,0.75)
             end
             local key=row.group..":"..row.slot..":"..stage
             local last=p.last[key]
@@ -1538,7 +1548,7 @@ passengers.flash_capture=function(stage)
                     local velocity={x=(row.universal.x-last.pos.x)/dt,y=(row.universal.y-last.pos.y)/dt,z=(row.universal.z-last.pos.z)/dt}
                     if last.velocity and last.dt and math.abs(dt-last.dt)<0.01 then
                         local acceleration=passengers.flash_distance(velocity,last.velocity)/dt
-                        if acceleration>250 then flag(row,"griffin_acceleration_candidate",acceleration) end
+                        row.acceleration_candidate=acceleration -- Data only: frame timing makes this too noisy as a trigger.
                     end
                     row.velocity=velocity;row.interval=dt
                     p.last[key]={time=snap.time,pos=row.universal,velocity=velocity,dt=dt}
@@ -1546,10 +1556,18 @@ passengers.flash_capture=function(stage)
             else p.last[key]={time=snap.time,pos=row.universal} end
         end
     end
-    if #reasons>0 then
-        if not p.pending and p.windows<6 and p.frame_id>=p.cooldown_until then
+    local timed=snap.time>=p.next_timed and p.timed_windows<6
+    local anomaly=#reasons>0 and p.anomaly_windows<6 and p.frame_id>=p.cooldown_until
+    if timed then
+        reasons[#reasons+1]={kind="timed_sample",stage=stage,time=snap.time}
+        p.next_timed=snap.time+10;p.timed_windows=p.timed_windows+1
+    end
+    if timed or anomaly or (p.pending and #reasons>0) then
+        if not p.pending and p.windows<12 then
             p.windows=p.windows+1
-            p.pending={index=p.windows,trigger_frame=p.frame_id,reasons=reasons,frames={},remaining=6}
+            if not timed then p.anomaly_windows=p.anomaly_windows+1 end
+            p.pending={index=p.windows,trigger_frame=p.frame_id,reasons=reasons,frames={},remaining=6,
+                source=timed and "timed" or "anomaly"}
             for _,frame in ipairs(p.ring) do p.pending.frames[#p.pending.frames+1]=frame end
         elseif p.pending and #p.pending.reasons<24 then
             for _,reason in ipairs(reasons) do
@@ -1573,8 +1591,7 @@ passengers.flash_finish_frame=function()
         p.ring[#p.ring+1]=p.current;if #p.ring>6 then table.remove(p.ring,1) end
     end
     p.frame_id=p.frame_id+1;p.current={id=p.frame_id,stages={}}
-    if p.frame_id>3600 then passengers.flash_stop("帧数上限")
-    elseif p.windows>=6 and not p.pending then passengers.flash_stop("已记录6个异常窗口") end
+    if p.frame_id>18000 then passengers.flash_stop("帧数上限") end
 end
 
 passengers.read_instance_info=function(info,a)
