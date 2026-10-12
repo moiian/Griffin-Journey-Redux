@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.40. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.41. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.40-beta"
+local VERSION = "0.1.41-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -215,6 +215,20 @@ do
     if ok then
         menu.route=Route.new({driver=function() return active end,
             fall_conflict=function() return passengers.fall_experiment.reset or passengers.fall_experiment.ground or passengers.griffin_fall.reset end,
+            griffin_conflict=function() return passengers.griffin_fall.reset end,
+            passenger_owned=function(d,a)
+                return a and a.owner==d.player and a.spawn==d.spawn and passengers.controlled(a.player)==a
+                    and owned_player(a,false) and player_fsm(a.player)==a.fsm
+            end,
+            griffin=function(d)
+                local result=d.spawn and d.spawn.result
+                return result and result.chara,result and result.go
+            end,
+            griffin_owned=function(d,ch,go)
+                local result=d.spawn and d.spawn.result
+                return result and result.chara==ch and result.go==go and ch:get_Valid() and go:get_Valid()
+                    and ch:call("get_GameObject()")==go
+            end,
             owned=function(d)
                 if not alive or state.generation~=generation or not d or active~=d or not owned_player(d,true)
                     or player_fsm(d.player)~=d.fsm then return false end
@@ -2043,6 +2057,7 @@ passengers.visual_seat=function(group,index)
     return passengers.seat(group,index)
 end
 passengers.restore_one=function(a)
+    if menu.route then menu.route:forget_passenger(a) end
     if not a.player:get_Valid() then
         a.bones_applied=nil;a.moved=false;a.fsm_touched=false;return
     end
@@ -2159,6 +2174,7 @@ passengers.tick=function(d)
             passengers.orient(a,passengers.visual_seat(a.group,a.slot))
             sync_player(a)
             passengers.apply_fall_experiment(a)
+            if menu.route then menu.route:after_passenger(d,a) end
             passengers.tick_pose(a)
             d.passenger_trace[#d.passenger_trace+1]={group=a.group,slot=a.slot,physical=physical,fsm_enabled=a.fsm:call("get_Enabled()"),protection=a.protection_counts,health=a.health_probe,orientation=a.orientation_trace,orientation_failed=a.orientation_failed or false}
         end)
@@ -2366,6 +2382,7 @@ re.on_pre_application_entry("UpdateBehavior",function()
     passengers.frame=passengers.frame+1;passengers.flash_capture("behavior_before_anchor")
     if menu.apply_pending_preset then menu.apply_pending_preset() end
     passengers.refresh();tick_skip_think();tick_driver();passengers.griffin_fall_tick();tick_camera_follow()
+    if menu.route then menu.route:after_behavior() end
     passengers.flash_capture("behavior_anchored_after")
     if menu.route then menu.route:capture("behavior_before_native") end
 end)
