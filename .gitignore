@@ -43,3 +43,6 @@
 
 !/CleanAnimationLab/_GriffinAnimationLab/pose_trace.lua
 !/CleanAnimationLab/TEST_018_POSE_TRACE.md
+
+!/_GriffinRouteProbe/fall.lua
+!/BETA_0138_NATIVE_FALL_PROBE.md

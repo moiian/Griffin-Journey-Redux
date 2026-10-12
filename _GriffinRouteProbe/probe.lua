@@ -1,3 +1,4 @@
+local Fall=require("_GriffinRouteProbe.fall")
 -- Reads every observed stage; stores 20 Hz complete frames plus bounded anomaly windows.
 -- Native callbacks enqueue numeric snapshots only. File output is tick/shutdown only.
 local Probe={};Probe.__index=Probe
@@ -110,6 +111,9 @@ function Probe:read(d,stage)
         local action=manager:get_field("CurrentAction")
         r.player_action=action and tostring(action:get_field("Name")) or nil
     end)
+    if stage=="behavior_before_anchor" or stage=="behavior_native_after" or stage=="render_before_seat" then
+        Fall.capture(d,r,group)
+    end
     r.gear=d.gear;r.mode=d.mode;r.external_control=d.external_control==true
     r.navigation=clone(d.route_navigation);r.planned_scene=d.anchor_target and vec(d.anchor_target) or nil
     if stage=="player_transform_written" and origin and r.planned_scene then self.expected=add(r.planned_scene,origin) end
@@ -193,7 +197,7 @@ function Probe:tick(force)
     local count=math.min(#self.queue,120)
     local frames={};for i=1,count do frames[i]=self.queue[i] end
     local final=self.pending and count==#self.queue
-    local payload={version="0.1.37",session=self.session,part=self.part+1,instances=self.instances,frames=frames}
+    local payload={version="0.1.38",session=self.session,part=self.part+1,instances=self.instances,frames=frames}
     if final then payload.summary={reason=self.reason,observed_frames=self.frames,observed_stages=self.rows,
         saved_frames=self.saved_frames+count,anomaly_windows=self.windows,read_errors=self.read_errors,
         events=self.events,field_errors=self.errors,baseline_hz=20,pre_frames=5,post_frames_including_trigger=6} end
