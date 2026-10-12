@@ -1,7 +1,7 @@
 -- Griffin Mount Experiment: stage 3 player-as-target flight control experiment.
 -- Requires the installed aaaNickCore.lua and _NickCore/EnemySpawner.lua.
 -- Keeps an explicit spawn return or user-confirmed instance; never selects by Character ID.
-local VERSION = "0.3.17-stage3-think-fall"
+local VERSION = "0.3.18-stage3-direct-motion"
 local state = "Idle"
 local detail = "Ready for one ordinary Griffin request per script session."
 local shared = nil
@@ -91,8 +91,12 @@ local function save_camera_settings()
     local ok,result=pcall(json.dump_file,camera_settings_path,camera_settings)
     if not ok or result==false then camera_status="镜头参数保存失败；本次调整仍有效。" end
 end
-local candidate_groups = {"悬停侧移与升高", "原生飞行转向", "目标高度版本", "悬停闪避方向", "飞行模式与降落", "战斗转向（后测；包含攻击）"}
+local candidate_groups = {"记录中出现的补充空中动作", "悬停侧移与升高", "原生飞行转向", "目标高度版本", "悬停闪避方向", "飞行模式与降落", "战斗转向（后测；包含攻击）"}
 local test_actions = {
+    {key="Test recorded Ch253WrapAroundEnd",label="目标飞行结束",node="Ch253WrapAroundEnd",phase="air",candidate_group="记录中出现的补充空中动作",observed=true},
+    {key="Test recorded Ch253ThreatAir",label="空中威吓",node="Ch253ThreatAir",phase="air",candidate_group="记录中出现的补充空中动作",observed=true},
+    {key="Test recorded Ch253WingWindAttackStartLoop",label="翼风攻击开始／循环（攻击）",node="Ch253WingWindAttackStartLoop",phase="air",candidate_group="记录中出现的补充空中动作",observed=true},
+    {key="Test recorded Ch253WingWindAttackEnd",label="翼风攻击结束",node="Ch253WingWindAttackEnd",phase="air",candidate_group="记录中出现的补充空中动作",observed=true},
     {key = "Test candidate HoverLateralL", label = "悬停左移", node = "HoverLateralL", phase = "air", candidate_group = "悬停侧移与升高"},
     {key = "Test candidate HoverLateralR", label = "悬停右移", node = "HoverLateralR", phase = "air", candidate_group = "悬停侧移与升高"},
     {key = "Test candidate HoverUpward", label = "悬停上升", node = "HoverUpward", phase = "air", candidate_group = "悬停侧移与升高"},
@@ -895,10 +899,150 @@ local function tick_skip_think()
     else skip_think_enabled=false;skip_think_expected=nil;skip_think_status="跳过思考已关闭："..tostring(err);log_event("skip_think_error",skip_think_status) end
 end
 
+-- Direct-motion isolation experiment. No guessed bank/motion IDs and no position clamp.
+local animation_test = {status="先让狮鹫播放待测动作，再捕获实际动画。",samples={},blocked=0}
+function animation_test.instance()
+    local b=beta_bridge()
+    return b and b.get_instance() or shared
+end
+function animation_test.valid(d)
+    return d and animation_test.instance()==d.instance and d.instance.go:get_Valid()
+        and d.instance.chara:get_Valid() and d.instance.chara:call("get_Motion()")==d.motion
+end
+function animation_test.capture()
+    if animation_test.active then animation_test.status="先停止隔离播放。";return end
+    run_once(function()
+        local ok,err=pcall(function()
+            local r=animation_test.instance()
+            assert(r and r.go:get_Valid() and r.chara:get_Valid(),"当前狮鹫无效")
+            assert(not dependency().properties.isPaused,"请恢复游戏")
+            local motion=r.chara:call("get_Motion()")
+            local count=motion:call("getLayerCount()")
+            assert(count>0 and count<=16,"动画层数量异常")
+            local manager=r.chara:call("get_ActionManager()")
+            local action=manager.CurrentAction
+            local saved={instance=r,motion=motion,node=action and action.Name or "unknown",layers={}}
+            for i=0,count-1 do
+                local layer=motion:call("getLayer(System.UInt32)",i)
+                if layer and layer:call("get_Enabled()") then
+                    local bank,id=layer:call("get_MotionBankID()"),layer:call("get_MotionID()")
+                    if motion:call("hasMotion(System.UInt32, System.UInt32)",bank,id) then
+                        saved.layers[#saved.layers+1]={index=i,bank=bank,id=id,frame=layer:call("get_Frame()"),loop=layer:call("get_Loop()"),speed=layer:call("get_Speed()")}
+                    end
+                end
+            end
+            assert(#saved.layers>0,"未读到已加载动画，不会猜测编号")
+            animation_test.saved=saved
+            animation_test.status="已捕获 "..saved.node.."，动画层数 "..#saved.layers.."；结束驾驶后可隔离播放。"
+            log_event("direct_motion_capture",{node=saved.node,layers=saved.layers,character=tostring(r.chara:get_address())})
+        end)
+        if not ok then animation_test.status="捕获失败："..tostring(err) end
+    end)
+end
+function animation_test.install()
+    if animation_test.hooked then return end
+    local td=sdk.find_type_definition("app.FlightControl")
+    local methods={}
+    for _,name in ipairs({"update()","lateUpdate()","eventFlightUpdate(via.GameObject)"}) do
+        methods[#methods+1]=assert(td and td:get_method(name),"缺少FlightControl接口："..name)
+    end
+    for _,method in ipairs(methods) do
+        sdk.hook(method,function(args)
+            local d=animation_test.active
+            if d and not d.recovering and sdk.to_ptr(args[2])==d.flight_ptr then
+                animation_test.blocked=animation_test.blocked+1
+                return sdk.PreHookResult.SKIP_ORIGINAL
+            end
+        end,function(retval) return retval end)
+    end
+    animation_test.hooked=true
+end
+function animation_test.stop(reason)
+    local d=animation_test.active
+    if not d then return true end
+    d.recovering=true -- stop intercepting even when a restore getter fails
+    local ok,err=pcall(function()
+        if d.instance.go:get_Valid() and d.instance.chara:get_Valid() then
+            if d.motion_touched then d.motion:call("set_RootMotion(via.motion.RootPlayMode)",d.original_root);d.motion_touched=false end
+            if d.fsm_touched then d.fsm:call("set_Enabled(System.Boolean)",d.original_enabled);d.fsm_touched=false end
+        end
+    end)
+    if not ok then animation_test.status="恢复失败，可再次点击停止："..tostring(err);return false end
+    animation_test.active=nil
+    animation_test.status="隔离播放已停止，恢复原根位移与FSM："..tostring(reason)
+    log_event("direct_motion_stop",{reason=reason,blocked=animation_test.blocked,samples=#animation_test.samples})
+    return true
+end
+function animation_test.play()
+    if animation_test.active then return end
+    run_once(function()
+        local ok,err=pcall(function()
+            local b=beta_bridge()
+            assert(not (b and b.is_driving and b.is_driving()) and not pilot,"先结束驾驶，避免驾驶器抢动作；不用删除狮鹫")
+            local s=animation_test.saved
+            assert(animation_test.valid(s),"捕获对象已改变，请重新捕获当前狮鹫")
+            assert(not dependency().properties.isPaused,"请恢复游戏")
+            local r=s.instance
+            local manager=r.chara:call("get_ActionManager()")
+            local fsm=assert(manager.Fsm,"没有动作FSM")
+            local flight=assert(r.chara:call("get_FlightCtrl()"),"没有飞行控制器")
+            assert(flight:call("get_CachedCharacter()")==r.chara,"飞行控制器归属不同")
+            local enum=sdk.find_type_definition("via.motion.RootPlayMode")
+            local none=assert(enum and enum:get_field("None"),"没有RootPlayMode.None"):get_data(nil)
+            assert(type(none)=="number","无法读取根位移枚举")
+            local d={instance=r,motion=s.motion,fsm=fsm,flight_ptr=sdk.to_ptr(flight),
+                original_enabled=fsm:call("get_Enabled()"),original_root=s.motion:call("get_RootMotion()"),node=s.node}
+            assert(type(d.original_enabled)=="boolean" and type(d.original_root)=="number","原状态无法保存")
+            animation_test.install()
+            assert(flush_flight_log(),"日志写入失败，未开始测试")
+            animation_test.active=d;animation_test.blocked=0;animation_test.samples={};animation_test.next_sample=0
+            flight_log.direct_motion={node=s.node,layers=s.layers,samples=animation_test.samples,root_motion=none,flight_update_isolated=true}
+            d.fsm_touched=true;fsm:call("set_Enabled(System.Boolean)",false)
+            d.motion_touched=true;s.motion:call("set_RootMotion(via.motion.RootPlayMode)",none)
+            for _,row in ipairs(s.layers) do
+                local layer=s.motion:call("getLayer(System.UInt32)",row.index)
+                assert(layer and s.motion:call("hasMotion(System.UInt32, System.UInt32)",row.bank,row.id),"捕获动画已卸载")
+                layer:call("changeMotion(System.UInt32, System.UInt32, System.Single, System.Single, via.motion.InterpolationMode, via.motion.InterpolationCurve)",row.bank,row.id,0.0,12.0,1,1)
+            end
+            animation_test.status="正在隔离重播 "..s.node.."；FSM关闭／根位移关闭／飞行控制器隔离。没有锁定Transform。"
+            log_event("direct_motion_start",{node=s.node,layers=s.layers})
+        end)
+        if not ok then
+            animation_test.stop("启动失败")
+            animation_test.status="未开始或已恢复："..tostring(err)
+            log_event("direct_motion_error",tostring(err))
+        end
+    end)
+end
+function animation_test.tick()
+    local d=animation_test.active
+    if not d or d.recovering then return end
+    local ok,err=pcall(function()
+        if not animation_test.valid(d) or not control_alive then animation_test.stop("对象失效或更换");return end
+        local b=beta_bridge()
+        if b and b.is_driving and b.is_driving() then animation_test.stop("开始驾驶，归还控制");return end
+        local c=dependency()
+        if not c or c.properties.isPaused or game_time()<animation_test.next_sample then return end
+        animation_test.next_sample=game_time()+0.2
+        if #animation_test.samples>=3000 then animation_test.stop("采样达到3000条");return end
+        local t=d.instance.chara:call("get_Transform()")
+        local p,q=t:call("get_UniversalPosition()"),t:call("get_Rotation()")
+        local row={time=game_time(),position={x=p.x,y=p.y,z=p.z},rotation={x=q.x,y=q.y,z=q.z,w=q.w},blocked=animation_test.blocked,layers={}}
+        for _,saved in ipairs(animation_test.saved.layers) do
+            local layer=d.motion:call("getLayer(System.UInt32)",saved.index)
+            row.layers[#row.layers+1]={index=saved.index,bank=layer:call("get_MotionBankID()"),id=layer:call("get_MotionID()"),frame=layer:call("get_Frame()")}
+        end
+        animation_test.samples[#animation_test.samples+1]=row
+        if game_time()-last_flush>=2 then flush_flight_log() end
+    end)
+    if not ok then animation_test.stop("采样错误");animation_test.status="采样错误："..tostring(err) end
+end
+
+
 local function queue_action_test(action, pilot_token)
+    if animation_test.active then action_test_status="请先停止动画隔离播放。";return end
     local b = not pilot_token and beta_bridge()
     if b then
-        if game_time() - last_action_request < 3 then action_test_status = "请等待至少3个游戏运行秒。"; return end
         local ok, accepted, err = pcall(b.request_action, action.node, cross_phase, action.phase)
         if ok and accepted then
             last_action_request = game_time()
@@ -909,8 +1053,8 @@ local function queue_action_test(action, pilot_token)
     if pilot and not pilot_token then action_test_status="请先关闭四档驾驶，再用单次动作按钮。";return end
     if lure_restore_pending then action_test_status = "请先恢复玩家位置。"; return end
     if relation_pending or not shared or not shared.go or not shared.chara then return end
-    if game_time() - last_action_request < (pilot_token and 0.35 or 3) then
-        action_test_status = "请等待至少3个游戏运行秒，再提交下一个动作。"
+    if pilot_token and game_time() - last_action_request < 0.35 then
+        action_test_status = "四档自动驾驶动作间隔0.35秒。"
         return
     end
     local expected, allow_cross = shared, pilot_token ~= nil or cross_phase
@@ -953,7 +1097,7 @@ local function queue_action_test(action, pilot_token)
             flight_log.events[#flight_log.events].request = {
                 node = action.node, layer = 0, priority = 10, cross_phase = allow_cross,
                 is_flight_before = flying, is_ground_before = grounded,
-                candidate_group = action.candidate_group, source = pilot_token and "user_verified_gear_control" or action.candidate_group and "dump_enum_unverified" or "observed_native_request",
+                candidate_group = action.candidate_group, source = pilot_token and "user_verified_gear_control" or action.observed and "captured_native_action" or action.candidate_group and "dump_enum_unverified" or "observed_native_request",
                 pilot_gear = pilot_token and pilot_token.gear or nil,
                 character_address = tostring(expected.chara:get_address()), target_origin = target_origin
             }
@@ -1215,6 +1359,7 @@ local function install_fall_hook()
     if not ok then fall_hook_status="坠落请求 Hook 不可用："..tostring(err);log_event("fall_hook_error",fall_hook_status) end
 end
 control_frame=function()
+    animation_test.tick()
     if fall_hits~=fall_logged and game_time()-fall_log_at>=1 then
         fall_logged=fall_hits;fall_log_at=game_time();log_event("player_fall_request",{hits=fall_hits,blocked=fall_blocked})
     end
@@ -1429,6 +1574,7 @@ end
 local control_bridge = {is_driving=function() return lure ~= nil or lure_start_pending or lure_restore_pending end}
 _G.GriffinMountExperimentControl = control_bridge
 re.on_script_reset(function()
+    animation_test.stop("脚本重置")
     control_alive=false;skip_think_enabled=false;skip_think_expected=nil;block_player_fall=false
     if rawget(_G, "GriffinMountExperimentControl") == control_bridge then _G.GriffinMountExperimentControl = nil end
     lure_start_cancelled=true
@@ -1537,14 +1683,20 @@ re.on_draw_ui(function()
             action_test_status=pilot_status
             log_event("gear_control_manual_release",true)
         end
-        imgui.text("已测试动作（每次只点一个，至少间隔3秒）")
+        imgui.text("【本轮新增】动画隔离测试（不锁位置、不请求导航动作）")
+        if ui_button("【本轮新增】1. 捕获当前狮鹫实际动画（只读）") then animation_test.capture() end
+        if ui_button("【本轮新增】2. 隔离重播捕获动画（先结束驾驶）") then animation_test.play() end
+        if ui_button("【本轮新增】3. 停止隔离播放／恢复原生控制") then run_once(function() animation_test.stop("手动停止") end) end
+        imgui.text(animation_test.status)
+        imgui.text("捕获的是当前时刻的动画片段，不保证整个动作的开始／循环都相同。")
+        imgui.text("已测试动作（单次请求，无3秒间隔）")
         imgui.text("默认允许跨阶段；可直接测试空中或地面动作。")
         for _, action in ipairs(test_actions) do
             if action.slow_probe and ui_button(action.key) then queue_action_test(action) end
         end
         imgui.text(action_test_status)
         imgui.text("【本轮新增】方向候选：按组展开测试，组内从上到下。")
-        imgui.text("仅转储名称；可用性和中文含义待实机确认。每次单次请求。")
+        imgui.text("补充组来自实际记录；其他候选来自转储。新增动作效果待实测，均为完整原生动作。")
         imgui.text("跨阶段：" .. (cross_phase and "已开启" or "关闭；先进入空中"))
         for _, group in ipairs(candidate_groups) do
             if imgui.tree_node("【本轮新增】" .. group) then
@@ -1555,7 +1707,7 @@ re.on_draw_ui(function()
             end
         end
         if imgui.tree_node("已有动作按钮（起飞／前移／快速飞行／落地）") then
-            imgui.text("每次只点一个动作，关闭界面观察；至少间隔3秒。")
+            imgui.text("每次点击提交一个动作；已取消3秒间隔。")
             imgui.text("跨阶段测试：" .. (cross_phase and "已开启" or "关闭（按地面/空中检查）"))
             if ui_button("Toggle cross phase") then
                 cross_phase = not cross_phase
