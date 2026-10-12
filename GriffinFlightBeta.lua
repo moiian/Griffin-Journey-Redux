@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.33. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.34. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.33-beta"
+local VERSION = "0.1.34-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -1433,28 +1433,31 @@ passengers.flash_stop=function(reason)
     local p=passengers.flash
     if not p.running then return end
     p.running=false
+    if p.motion and #p.motion>0 then p.motion_queue[#p.motion_queue+1]={samples=p.motion};p.motion={} end
     if p.pending then
         if p.current and #p.current.stages>0 then p.pending.frames[#p.pending.frames+1]=p.current end
         p.pending.incomplete=true;p.queue[#p.queue+1]=p.pending;p.pending=nil
     end
     p.summary={reason=reason,frames=p.frame_id-1,captures=p.captures,windows=p.windows,
-        dropped_stages=p.dropped_stages,read_errors=p.read_errors,clock_cost=p.clock_cost,
+        dropped_stages=p.dropped_stages,read_errors=p.read_errors,clock_cost=p.clock_cost,motion_samples=p.motion_samples,motion_dropped=p.motion_dropped,
         elapsed_wall=os.time()-p.started_wall,timed_windows=p.timed_windows,anomaly_windows=p.anomaly_windows,
         thresholds={context=20,controller=10,hip=0.75,jump=15}}
     p.status="逐帧探针已停止："..reason.."；记录窗口 "..p.windows
-    p.driver=nil;p.griffin=nil;p.last={};p.ring={};p.current=nil
+    p.driver=nil;p.griffin=nil;p.camera=nil;p.last={};p.ring={};p.current=nil
 end
 passengers.flash_drain=function()
     local p=passengers.flash
     for _,window in ipairs(p.queue or {}) do event("frame_probe_window",window,true) end
     p.queue={}
+    for _,chunk in ipairs(p.motion_queue or {}) do event("frame_probe_motion",chunk,true) end
+    p.motion_queue={}
     if p.summary then event("frame_probe_summary",p.summary,true);p.summary=nil end
 end
 passengers.flash_start=function()
     if not active then passengers.flash.status="请先开始驾驶，再启动逐帧探针";return end
     passengers.flash_stop("重新启动");passengers.flash_drain()
     local p={running=true,driver=active,started_wall=os.time(),deadline=os.time()+60,frame_id=1,
-        captures=0,windows=0,dropped_stages=0,read_errors=0,clock_cost=0,ring={},queue={},last={},
+        captures=0,windows=0,dropped_stages=0,read_errors=0,clock_cost=0,ring={},queue={},last={},motion={},motion_queue={},motion_samples=0,motion_dropped=0,
         current={id=1,stages={}},edges={},anomaly_windows=0,timed_windows=0,next_timed=now()+5,
         cooldown_until=0,status="逐帧探针：记录中，60秒；定时片段＋新增异常"}
     local ok,err=pcall(function()
@@ -1466,9 +1469,36 @@ passengers.flash_start=function()
             controller=terrain and terrain.MainCharacterController,tc=tc,ctrl=ctrl,go=active.spawn.result.go}
     end)
     if not ok then p.griffin_error=tostring(err) end
+    local camera_ok,camera_err=pcall(function()
+        local manager=assert(sdk.get_managed_singleton("app.CameraManager"),"CameraManager unavailable")
+        local main=assert(manager._MainCameraControllers[0],"Main camera unavailable")
+        assert(main:call("get_TargetCharacter()")==active.player,"Camera is not owned by driver")
+        p.camera={main=main,transform=assert(main:get_field("_Transform"),"Camera transform unavailable")}
+    end)
+    if not camera_ok then p.camera_error=tostring(camera_err) end
+    if p.griffin then
+        local bones_ok,bones_err=pcall(function()
+            local candidates={}
+            local joints=p.griffin.transform:call("get_Joints()")
+            for _,joint in pairs(joints and joints:get_elements() or {}) do
+                if joint and joint:get_Valid() then
+                    local name=tostring(joint:call("get_Name()"));local low=name:lower()
+                    local priority=(low=="root" or low=="hip") and 1 or low:find("spine",1,true) and 2
+                        or low:find("chest",1,true) and 3 or low:find("wing",1,true) and 4
+                    if priority then candidates[#candidates+1]={joint=joint,name=name,priority=priority} end
+                end
+            end
+            table.sort(candidates,function(a,b) return a.priority==b.priority and a.name<b.name or a.priority<b.priority end)
+            p.griffin.pose_joints={};p.pose_joint_names={}
+            for i=1,math.min(8,#candidates) do
+                p.griffin.pose_joints[i]=candidates[i];p.pose_joint_names[i]=candidates[i].name
+            end
+        end)
+        if not bones_ok then p.pose_joint_error=tostring(bones_err) end
+    end
     passengers.flash=p
     event("frame_probe_started",{wall_seconds=60,max_frames=18000,max_windows=12,max_anomaly_windows=6,max_timed_windows=6,timed_first=5,timed_interval=10,
-        pre_frames=6,post_frames=6,griffin_error=p.griffin_error})
+        pre_frames=6,post_frames=6,motion_max_samples=7200,motion_chunk_size=120,pose_joint_names=p.pose_joint_names,pose_joint_error=p.pose_joint_error,camera_error=p.camera_error,griffin_error=p.griffin_error})
 end
 passengers.flash_read=function(a,is_griffin)
     local row={group=is_griffin and "griffin" or a.group or "player",slot=is_griffin and 0 or a.slot or 0,
@@ -1491,6 +1521,18 @@ passengers.flash_read=function(a,is_griffin)
         end
     end)
     if not ok then row.error=tostring(err) end
+    if is_griffin and not row.error then
+        local pose_ok,pose_err=pcall(function()
+            local q=a.transform:call("get_Rotation()")
+            assert(q and finite(q.x) and finite(q.y) and finite(q.z) and finite(q.w),"Invalid Griffin rotation")
+            row.rotation={x=q.x,y=q.y,z=q.z,w=q.w}
+            local head=active.rider_head
+            assert(head and head:get_Valid(),"Griffin head unavailable")
+            row.head_scene=vector(head:call("get_Position()"))
+            row.head_offset_scene={x=row.head_scene.x-row.scene.x,y=row.head_scene.y-row.scene.y,z=row.head_scene.z-row.scene.z}
+        end)
+        if not pose_ok then row.pose_error=tostring(pose_err) end
+    end
     return row
 end
 passengers.flash_capture=function(stage)
@@ -1514,6 +1556,47 @@ passengers.flash_capture=function(stage)
     if stage=="render_native_after" and follow_state then
         local ok,target=pcall(function() return vector(follow_state.main:call("get_TargetPosition()")) end)
         if ok then snap.camera_target_scene=target else snap.camera_error=tostring(target) end
+    end
+    if stage=="render_native_after" and not p.current.motion_captured then
+        p.current.motion_captured=true
+        if p.motion_samples<7200 then
+            local motion={frame=p.frame_id,time=snap.time,wall_clock=os.clock(),action=snap.action,gear=snap.gear,
+                input=snap.input,flight_target=snap.flight_target,navigation=active.trace and active.trace.navigation_sphere,
+                camera_target_scene=snap.camera_target_scene}
+            for _,row in ipairs(snap.actors) do
+                if row.group=="griffin" then
+                    motion.universal=row.universal;motion.scene=row.scene;motion.rotation=row.rotation
+                    motion.head_scene=row.head_scene;motion.head_offset_scene=row.head_offset_scene
+                    motion.pose_error=row.pose_error;motion.griffin_error=row.error
+                elseif row.group=="player" then motion.player_scene=row.scene end
+            end
+            motion.joints={}
+            for _,item in ipairs(p.griffin and p.griffin.pose_joints or {}) do
+                local pose={name=item.name}
+                local joint_ok,joint_err=pcall(function()
+                    assert(item.joint:get_Valid(),"Joint invalid")
+                    pose.scene=vector(item.joint:call("get_Position()"))
+                    local q=item.joint:call("get_Rotation()")
+                    assert(q and finite(q.x) and finite(q.y) and finite(q.z) and finite(q.w),"Invalid joint rotation")
+                    pose.rotation={x=q.x,y=q.y,z=q.z,w=q.w}
+                end)
+                if not joint_ok then pose.error=tostring(joint_err) end
+                motion.joints[#motion.joints+1]=pose
+            end
+            local camera_ok,camera_err=pcall(function()
+                local camera=assert(p.camera,p.camera_error or "Camera not captured")
+                assert(camera.main:get_Valid() and camera.transform:get_Valid(),"Camera invalid")
+                assert(camera.main:call("get_TargetCharacter()")==active.player,"Camera ownership changed")
+                motion.camera_universal=vector(camera.transform:call("get_UniversalPosition()"))
+                motion.camera_scene=vector(camera.transform:call("get_Position()"))
+                local q=camera.transform:call("get_Rotation()")
+                assert(q and finite(q.x) and finite(q.y) and finite(q.z) and finite(q.w),"Invalid camera rotation")
+                motion.camera_rotation={x=q.x,y=q.y,z=q.z,w=q.w}
+            end)
+            if not camera_ok then motion.camera_pose_error=tostring(camera_err) end
+            p.motion[#p.motion+1]=motion;p.motion_samples=p.motion_samples+1
+            if #p.motion>=120 then p.motion_queue[#p.motion_queue+1]={samples=p.motion};p.motion={} end
+        else p.motion_dropped=p.motion_dropped+1 end
     end
     p.current.stages[#p.current.stages+1]=snap;p.captures=p.captures+1
     local reasons={}
