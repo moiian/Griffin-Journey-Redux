@@ -53,15 +53,19 @@ function M.new()
         d.fsm_touched=false
         assert(d.motion:call("get_RootMotion()")==d.original_root and d.fsm:call("get_Enabled()")==d.original_enabled,"放行读回失败")
     end
-    function self:play(instance,clip)
-        assert(clip==5100 or clip==5101,"只测试已确认资源")
+    function self:play(instance,clip,controls_only)
+        assert(controls_only and clip==nil or not controls_only and (clip==5100 or clip==5101),"只测试已确认资源")
+        assert(not controls_only or not self.active,"只隔离控制必须从新一轮开始")
         local d=self.active
         if d then
             assert(not d.recovering,"恢复未完成，请先取消隔离重试")
             assert(d.instance==instance and self:valid(d),"绑定对象已变化")
         end
         local motion=d and d.motion or instance.chara:call("get_Motion()")
-        assert(motion and motion:call("hasMotion(System.UInt32, System.UInt32)",0,clip),"当前狮鹫未加载该动画")
+        assert(motion,"没有动画组件")
+        if not controls_only then
+            assert(motion:call("hasMotion(System.UInt32, System.UInt32)",0,clip),"当前狮鹫未加载该动画")
+        end
         local base=assert(motion:call("getLayer(System.UInt32)",0),"没有基础层")
         assert(base:call("get_Enabled()"),"基础层未启用")
         if not d then
@@ -73,7 +77,7 @@ function M.new()
             local enum=assert(sdk.find_type_definition("via.motion.RootPlayMode"),"缺少根位移枚举")
             local none=assert(enum:get_field("None"),"缺少None"):get_data(nil)
             d={instance=instance,motion=motion,fsm=fsm,flight_ptr=sdk.to_ptr(flight),
-                original_enabled=fsm:call("get_Enabled()"),original_root=motion:call("get_RootMotion()"),none=none,layers={}}
+                original_enabled=fsm:call("get_Enabled()"),original_root=motion:call("get_RootMotion()"),none=none,layers={},ab_stage=controls_only and "A" or nil}
             assert(type(none)=="number" and type(d.original_root)=="number" and type(d.original_enabled)=="boolean","无法保存原状态")
             local count=motion:call("getLayerCount()")
             assert(count>0 and count<=16,"层数异常")
@@ -92,7 +96,7 @@ function M.new()
             d.fsm_touched=true;fsm:call("set_Enabled(System.Boolean)",false)
             d.motion_touched=true;motion:call("set_RootMotion(via.motion.RootPlayMode)",none)
             for _,row in ipairs(d.layers) do
-                if row.index~=0 then
+                if not controls_only and row.index~=0 then
                     motion:call("getLayer(System.UInt32)",row.index):call("changeMotion(System.UInt32, System.UInt32, System.Single, System.Single, via.motion.InterpolationMode, via.motion.InterpolationCurve)",row.bank,row.id,0.0,12.0,1,1)
                 end
             end
@@ -103,6 +107,7 @@ function M.new()
             d.motion_touched=true;motion:call("set_RootMotion(via.motion.RootPlayMode)",d.none)
             d.released=nil
         end
+        if controls_only then return end
         base:call("changeMotion(System.UInt32, System.UInt32, System.Single, System.Single, via.motion.InterpolationMode, via.motion.InterpolationCurve)",0,clip,0.0,12.0,1,1)
         d.clip=clip
     end

@@ -25,3 +25,6 @@
 !/CleanAnimationLab/TEST_013_TASK_RESET.md
 !/CleanAnimationLab/TEST_014_ACTION_REFRESH.md
 !/CleanAnimationLab/TEST_015_REFRESH_SEQUENCE.md
+
+!/CleanAnimationLab/_GriffinAnimationLab/isolation_ab.lua
+!/CleanAnimationLab/TEST_016_ISOLATION_AB.md

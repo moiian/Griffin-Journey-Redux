@@ -2,13 +2,15 @@ local Isolation=require("_GriffinAnimationLab.isolation")
 local Recorder=require("_GriffinAnimationLab.recorder")
 local CallTrace=require("_GriffinAnimationLab.call_trace")
 local ActionRefresh=require("_GriffinAnimationLab.action_refresh")
+local IsolationAB=require("_GriffinAnimationLab.isolation_ab")
 local M={}
 function M.new()
-    local self={bound=false,enabled=false,flap=false,record=false,trace_calls=false,refresh_action=false,revision=0,alive=true,
+    local self={bound=false,enabled=false,flap=false,record=false,trace_calls=false,refresh_action=false,ab_test=false,revision=0,alive=true,
         status="全部关闭。先用Beta生成狮鹫并结束驾驶；停止旧工具的隔离播放。",
         isolation=Isolation.new(),recorder=Recorder.new()}
     self.call_trace=CallTrace.new(self.recorder)
     self.refresh=ActionRefresh.new()
+    self.ab=IsolationAB.new()
     function self:changed()
         self.revision=self.revision+1
     end
@@ -17,6 +19,7 @@ function M.new()
         if not polling then self.recorder:event("应用前",self,"before_apply") end
         if not self.enabled or not self.bound then
             self.refresh:cancel(self,"刷新取消，恢复原生控制")
+            self.ab:cancel()
             self.isolation:stop()
         end
         if not self.bound then self.enabled=false;self.instance=nil;self.status="未绑定；测试关闭。";return end
@@ -32,13 +35,15 @@ function M.new()
         end
         self.instance=r
         if self.enabled then
-            if self.refresh.wait then self.refresh:advance(self)
+            if self.ab.active then self.ab:advance(self)
+            elseif not self.isolation.active and self.ab_test then self.ab:begin(self,r)
+            elseif self.refresh.wait then self.refresh:advance(self)
             else
                 local first=not self.isolation.active
                 self.isolation:play(r,self.flap and 5101 or 5100)
                 if first and self.refresh_action then self.refresh:begin(self,self.isolation.active) end
             end
-            self.status=self.refresh.wait and self.refresh.status
+            self.status=self.ab.active and self.ab:status() or self.refresh.wait and self.refresh.status
                 or "隔离播放："..(self.flap and "挥翅5101" or "滑翔5100").."；未锁定位置。"
         else self.status="已绑定；隔离播放关闭，原生控制生效。" end
         if not polling then self.recorder:event(self.status,self,"after_apply") end
@@ -52,10 +57,12 @@ function M.new()
         self.recorder.enabled=self.record
         self.call_trace:tick(self)
         if core.properties.isPaused then self.refresh:pause();return end
+        if self.ab.active and not self.record and self.enabled then self.enabled=false;self:changed() end
         if self.isolation.active and self.applied==self.revision then
             local b=rawget(_G,"GriffinFlightBetaBridge")
             local old=rawget(_G,"GriffinMountExperimentControl")
             local ok,valid=pcall(function()
+                if self.ab.active then self.ab:validate(self) end
                 return b and b.get_instance()==self.instance and not b.is_driving()
                     and not (old and old.is_driving()) and self.isolation:valid(self.isolation.active)
             end)
@@ -72,6 +79,7 @@ function M.new()
                 self.applied=rev
                 if not ok then
                     self.enabled=false
+                    self.ab:cancel()
                     self.refresh:cancel(self,tostring(err),true)
                     local restored,restore_err=pcall(function() self.isolation:stop() end)
                     self.status=tostring(err)..(restored and "" or "；恢复失败："..tostring(restore_err))
@@ -82,14 +90,24 @@ function M.new()
         self.recorder:tick(self)
     end
     function self:draw()
-        if not imgui.tree_node("狮鹫动画实验室 0.1.5") then return end
-        imgui.text("切换动画保持隔离；刷新会自动短暂放行。关闭隔离恢复原生控制。")
+        if not imgui.tree_node("狮鹫动画实验室 0.1.6") then return end
+        imgui.text("A/B分步对照保持同一轮隔离；关闭隔离恢复原生控制。")
         local changed,value=imgui.checkbox("绑定Beta当前狮鹫",self.bound)
         if changed then self.bound=value;if not value then self.enabled=false end;self:changed() end
         changed,value=imgui.checkbox("启用隔离播放",self.enabled)
         if changed then self.enabled=value;self:changed() end
         changed,value=imgui.checkbox("使用挥翅5101（关闭为滑翔5100）",self.flap)
         if changed then self.flap=value;self:changed() end
+        changed,value=imgui.checkbox("分步对照：先只隔离控制，不换动画（下次开启生效）",self.ab_test)
+        if changed then
+            self.ab_test=value
+            self.recorder:event(value and "A/B对照已开启，下次接管生效" or "A/B对照已关闭，下次接管生效")
+        end
+        imgui.text("需状态记录、关闭悬停刷新；先准备原生空中HoverWait。A/B内挥翅选项不生效。")
+        if self.ab.active and self.ab.active.ab_stage=="A" then
+            if imgui.button("进入B：只换基础层5100（保持隔离）") then self.ab:request_motion(self) end
+        end
+        if self.ab.active then imgui.text(self.ab:status()) end
         changed,value=imgui.checkbox("接管时刷新旧指令（悬停后重新隔离，实验）",self.refresh_action)
         if changed then
             self.refresh_action=value
@@ -126,6 +144,7 @@ function M.new()
         self.call_trace:shutdown()
         self.alive=false;self:changed()
         self.refresh:cancel(self,"Reset取消刷新")
+        self.ab:cancel()
         local ok,err=pcall(function() self.isolation:stop() end)
         if not ok then log.error("GriffinAnimationLab restore: "..tostring(err)) end
         self.recorder:event("Reset恢复后",self,"after_reset")
