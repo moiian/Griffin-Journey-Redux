@@ -86,7 +86,6 @@ function Probe:read(d,stage)
         end
     end)
     group("targets",function()
-        assert(b.tc:get_Valid() and b.ctrl:get_Valid(),"Target modules invalid")
         assert(b.tc:call("get_Owner()")==b.go and b.tc:call("get_Chara()")==b.character
             and b.ctrl:call("get_CachedCharacter()")==b.character,"Target ownership changed")
         r.character_target_scene=vec(b.tc:call("get_TargetPosition()"))
@@ -96,10 +95,20 @@ function Probe:read(d,stage)
     end)
     group("state",function()
         assert(b.manager:get_Valid() and b.character:call("get_ActionManager()")==b.manager,"ActionManager changed")
-        r.player_fsm=d.fsm:call("get_Enabled()")
+        r.player_fsm=d.fsm:call("get_Enabled()");r.freeze_requested=d.freeze_requested==true
         r.player_sec_fall=d.player:get_field("SecFall")
         local action=b.manager:get_field("CurrentAction")
         r.griffin_action=action and tostring(action:get_field("Name")) or nil
+    end)
+    group("player_ground",function()
+        r.player_ground=d.player:call("get_IsGround()")
+        r.player_ground_original=d.ground_original;r.player_ground_original_time=d.ground_original_time
+    end)
+    group("player_action",function()
+        local manager=assert(d.player:call("get_ActionManager()"),"Player ActionManager unavailable")
+        assert(manager:call("get_GameObject()")==d.player_go and manager.Fsm==d.fsm,"Player ActionManager ownership changed")
+        local action=manager:get_field("CurrentAction")
+        r.player_action=action and tostring(action:get_field("Name")) or nil
     end)
     r.gear=d.gear;r.mode=d.mode;r.external_control=d.external_control==true
     r.navigation=clone(d.route_navigation);r.planned_scene=d.anchor_target and vec(d.anchor_target) or nil
@@ -184,7 +193,7 @@ function Probe:tick(force)
     local count=math.min(#self.queue,120)
     local frames={};for i=1,count do frames[i]=self.queue[i] end
     local final=self.pending and count==#self.queue
-    local payload={version="0.1.36",session=self.session,part=self.part+1,instances=self.instances,frames=frames}
+    local payload={version="0.1.37",session=self.session,part=self.part+1,instances=self.instances,frames=frames}
     if final then payload.summary={reason=self.reason,observed_frames=self.frames,observed_stages=self.rows,
         saved_frames=self.saved_frames+count,anomaly_windows=self.windows,read_errors=self.read_errors,
         events=self.events,field_errors=self.errors,baseline_hz=20,pre_frames=5,post_frames_including_trigger=6} end
