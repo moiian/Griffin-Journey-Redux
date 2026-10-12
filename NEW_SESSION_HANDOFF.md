@@ -8,7 +8,7 @@
 
 - Beta：Beta/GriffinFlightBeta.lua，0.1.35，保持不改。用户驾驶、Hip座位分离、头部镜头已反复实测；保护等细节以Beta源码/项目AGENTS.md为准，不用本摘要覆盖。
 - 旧实验：根GriffinMountExperiment.lua，0.3.23-stage3-target-ab，保留原样作为参考。不是新工具的运行依赖。
-- 干净工具：CleanAnimationLab/GriffinAnimationLab.lua及_GriffinAnimationLab四个模块，0.1.1。原隔离首次位移失败；本版新增落地前后只读记录，实机待验收；没有加入代码飞行、乘客或镜头。
+- 干净工具：CleanAnimationLab/GriffinAnimationLab.lua及_GriffinAnimationLab五个模块，0.1.2。已部署实际基础层读数与原生方法前后只读定位，实机待验收；首次位移未修复，没有加入代码飞行、乘客或镜头。
 - 游戏：P:\games\steamapps\common\Dragons Dogma 2；部署在reframework/autorun；日志在reframework/data。
 - 本地仓库：D:\_Project\Griffin MOD\Repository；远端https://github.com/moiian/Griffin-Journey-Redux；实验分支experiment/oxcart-preset-ui。仅源码/测试/历史说明入Git，设置、日志、转储、备份不入Git。用户授权本地独立改动提交并推送，实测通过才打verified里程碑。
 - 转储：游戏根il2cpp_dump.json，约1.1GB，按类型定向读取。旧牛车仅参考，禁止重走牛车生成/跳时失败路线。
@@ -52,3 +52,13 @@
 0.1.1只补证据：新增state_probe.lua，记录仍默认关闭；勾选状态与坐标记录后在隔离关闭时也连续采样，包含原生动作、着地／飞行、SecFall、LandingProcessor、飞控移动向量、实体／上下文／碰撞体。启停和Reset前后另存快照，轮号区分隔离会话，切动画不换轮号。最高20Hz、3000条，满额不结束动画。普通帧两秒保存，记录数据不入Git。字段独立记错；内部非零向量不等于已找到实际位移写入者。
 
 Lua54五文件语法、原生命周期与新增状态记录／错误隔离／归属／暂停队列／上限／恢复失败重试模拟通过。本版没有强制落地、清速度或锁Transform；首次位移未修复，原生读数和性能待实机，不打verified标签。按CleanAnimationLab/README.md做一次对照即可，失败落地过程也有用。Beta0.1.35、旧阶段三0.3.23、配置和其他MOD不改。
+
+## 2026-10-13 CleanAnimationLab 0.1.2：方法前后只读定位，已部署待实测
+
+用户允许继续定位。新增默认关闭call_trace.lua及独立勾选开关，需绑定与状态记录同时启用；只匹配从精确返回角色取得并核对归属的ActionManager、AdjustTerrain、CharacterPosRotAdjuster、PosRotContextRollbacker对象。观察update／updateSubPosition／writeToTransform／updateAndRollbackIfNeeded共五入口，全部放行原调用和返回值。原隔离不改，没有位置／落地／速度写入。
+
+state_probe增加基础层实际Bank／MotionID／Frame／Enabled，缺字段独立错误；日志clip仅是请求。方法前后数字快照含三类坐标、动作、FSM/root与实际基础层；线程Hook存储独立配对、前后顺序号区分嵌套。每入口20Hz／最多1000采样对；变化对保存、稳定每秒保存一次；满额只停该入口采样，动画继续。Hook无写盘，普通帧两秒保存；关闭、暂停、过期队列、实例／模块变化与Reset拒读／丢弃。
+
+Lua54六文件语法、既有生命周期及新增精确正反例／原返回保持／数值历史／嵌套配对／字段失败／限频心跳与容量／暂停及旧队列／部分模块失败／恢复回归通过。源码与游戏对应文件内容比较一致；备份在CleanAnimationLab_backups/0.1.1_时间目录。实机命中／性能／首次位移根因仍待验收，不打verified标签。测试见CleanAnimationLab/README.md及TEST_012_CALL_TRACE.md；本轮需勾选新的方法跟踪，先原生2秒、首次隔离3—4秒、关闭最多10秒，若自然落地再隔离与切片各3秒，关闭隔离2秒后关跟踪、关记录。未落地也保存；不反复开关。
+
+仓库仅同步本版六Lua、README、TEST_012_CALL_TRACE、版本／交接说明和精确白名单；本地日志分析／用户测试证据、转储、设置、备份和测试运行时不入库。Beta0.1.35、旧阶段三0.3.23及其他MOD不改。

@@ -4,6 +4,42 @@ local function vector(v)
     assert(v,"坐标不可用")
     return {x=v.x,y=v.y,z=v.z}
 end
+local function reader(row)
+    row.errors={}
+    return function(key,fn)
+        local ok,value=pcall(fn)
+        if ok and value~=nil then row[key]=value
+        else row.errors[key]=ok and "unavailable" or tostring(value) end
+    end
+end
+function M.base_layer(ch)
+    local layer=assert(ch:call("get_Motion()"):call("getLayer(System.UInt32)",0),"没有基础层")
+    local row={}
+    local read=reader(row)
+    read("enabled",function() return layer:call("get_Enabled()") end)
+    read("bank",function() return layer:call("get_MotionBankID()") end)
+    read("id",function() return layer:call("get_MotionID()") end)
+    read("frame",function() return layer:call("get_Frame()") end)
+    return row
+end
+-- Small numeric snapshot for native-call boundaries; never retain native refs in rows.
+function M.boundary(instance,isolation,phase)
+    local ch=instance.chara
+    local d=isolation.active
+    local row={time=os.clock(),phase=phase,character=tostring(ch:get_address()),
+        mode=d and (d.recovering and "recovering" or "isolated") or "native",
+        interval=d and d.serial or isolation.serial or 0,requested_clip=d and d.clip}
+    local read=reader(row)
+    read("position",function() return vector(ch:call("get_Transform()"):call("get_UniversalPosition()")) end)
+    read("scene_position",function() return vector(ch:call("get_Transform()"):call("get_Position()")) end)
+    read("context_universal",function() return vector(ch:get_field("<PosRotContext>k__BackingField"):call("get_Pos()")) end)
+    read("controller_scene",function() return vector(ch:get_field("<AdjustTerrain>k__BackingField").MainCharacterController:call("get_Position()")) end)
+    read("action",function() return ch:call("get_ActionManager()").CurrentAction.Name end)
+    read("fsm_enabled",function() return ch:call("get_ActionManager()").Fsm:call("get_Enabled()") end)
+    read("root_motion",function() return ch:call("get_Motion()"):call("get_RootMotion()") end)
+    read("base_layer",function() return M.base_layer(ch) end)
+    return row
+end
 function M.read(instance,isolation,phase)
     local d=isolation.active
     local row={time=os.clock(),phase=phase,mode=d and (d.recovering and "recovering" or "isolated") or "native",
@@ -31,6 +67,7 @@ function M.read(instance,isolation,phase)
     read("action",function() return ch:call("get_ActionManager()").CurrentAction.Name end)
     read("root_motion",function() return ch:call("get_Motion()"):call("get_RootMotion()") end)
     read("fsm_enabled",function() return ch:call("get_ActionManager()").Fsm:call("get_Enabled()") end)
+    read("base_layer",function() return M.base_layer(ch) end)
     read("landing",function()
         local l=assert(ch:get_field("<LandingProcessor>k__BackingField"))
         return {object_ground=l:get_field("<IsObjectGround>k__BackingField"),

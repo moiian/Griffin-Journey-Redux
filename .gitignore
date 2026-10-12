@@ -17,3 +17,6 @@
 !/CleanAnimationLab/_GriffinAnimationLab/recorder.lua
 !/CleanAnimationLab/TEST_011_STATE_PROBE.md
 !/CleanAnimationLab/_GriffinAnimationLab/state_probe.lua
+
+!/CleanAnimationLab/_GriffinAnimationLab/call_trace.lua
+!/CleanAnimationLab/TEST_012_CALL_TRACE.md

@@ -1,10 +1,12 @@
 local Isolation=require("_GriffinAnimationLab.isolation")
 local Recorder=require("_GriffinAnimationLab.recorder")
+local CallTrace=require("_GriffinAnimationLab.call_trace")
 local M={}
 function M.new()
-    local self={bound=false,enabled=false,flap=false,record=false,revision=0,alive=true,
+    local self={bound=false,enabled=false,flap=false,record=false,trace_calls=false,revision=0,alive=true,
         status="全部关闭。先用Beta生成狮鹫并结束驾驶；停止旧工具的隔离播放。",
         isolation=Isolation.new(),recorder=Recorder.new()}
+    self.call_trace=CallTrace.new(self.recorder)
     function self:changed()
         self.revision=self.revision+1
     end
@@ -36,6 +38,7 @@ function M.new()
             self.status="等待NickCore与run_once。";return
         end
         self.recorder.enabled=self.record
+        self.call_trace:tick(self)
         if core.properties.isPaused then return end
         if self.isolation.active and self.applied==self.revision then
             local b=rawget(_G,"GriffinFlightBetaBridge")
@@ -66,7 +69,7 @@ function M.new()
         self.recorder:tick(self)
     end
     function self:draw()
-        if not imgui.tree_node("狮鹫动画实验室 0.1.1") then return end
+        if not imgui.tree_node("狮鹫动画实验室 0.1.2") then return end
         imgui.text("无点击冷却；切换动画保持隔离。关闭隔离才恢复原生控制。")
         local changed,value=imgui.checkbox("绑定Beta当前狮鹫",self.bound)
         if changed then self.bound=value;if not value then self.enabled=false end;self:changed() end
@@ -79,18 +82,28 @@ function M.new()
             self.record=value;self.recorder.enabled=value
             if value then self.recorder:event("开始记录") else self.recorder:flush() end
         end
+        changed,value=imgui.checkbox("记录原生方法前后坐标（需开启状态记录）",self.trace_calls)
+        if changed then
+            self.trace_calls=value
+            if not value then self.call_trace:shutdown() end
+            self.recorder:event(value and "开启方法跟踪" or "关闭方法跟踪")
+        end
         imgui.text(self.status)
         imgui.text("隔离调用数："..self.isolation.blocked)
         imgui.text("记录："..self.recorder.status)
+        imgui.text("方法跟踪："..self.call_trace.status.."；保存调用对："..#self.recorder.data.call_trace.pairs.." / 5000")
         imgui.text("状态样本："..#self.recorder.data.samples.." / 3000（满额后动画继续）")
         local row=self.recorder.latest
         if row then
             imgui.text("着地："..tostring(row.ground).."；飞行："..tostring(row.flight).."；动作："..tostring(row.action))
+            local base=row.base_layer
+            if base then imgui.text("基础层读数：Bank "..tostring(base.bank).." / Motion "..tostring(base.id)) end
         end
         imgui.tree_pop()
     end
     function self:shutdown()
         self.recorder:event("Reset恢复前",self,"before_reset")
+        self.call_trace:shutdown()
         self.alive=false;self:changed()
         local ok,err=pcall(function() self.isolation:stop() end)
         if not ok then log.error("GriffinAnimationLab restore: "..tostring(err)) end
