@@ -1,7 +1,7 @@
 -- Griffin Mount Experiment: stage 3 player-as-target flight control experiment.
 -- Requires the installed aaaNickCore.lua and _NickCore/EnemySpawner.lua.
 -- Keeps an explicit spawn return or user-confirmed instance; never selects by Character ID.
-local VERSION = "0.3.19-stage3-blend-probe"
+local VERSION = "0.3.20-stage3-flight-clips"
 local state = "Idle"
 local detail = "Ready for one ordinary Griffin request per script session."
 local shared = nil
@@ -910,10 +910,16 @@ function animation_test.valid(d)
     return d and animation_test.instance()==d.instance and d.instance.go:get_Valid()
         and d.instance.chara:get_Valid() and d.instance.chara:call("get_Motion()")==d.motion
 end
-function animation_test.capture()
+function animation_test.capture(body_clip)
     if animation_test.active then animation_test.status="先停止隔离播放。";return end
     run_once(function()
         local ok,err=pcall(function()
+            if body_clip then
+                assert(body_clip==5100 or body_clip==5101,"不支持的已验证动画")
+                local b=beta_bridge()
+                assert(not (b and b.is_driving and b.is_driving()) and not pilot,"请先结束驾驶，再单独播放已验证动画")
+                assert(not (move_isolation and move_isolation.active),"请先关闭位移隔离实验")
+            end
             local r=animation_test.instance()
             assert(r and r.go:get_Valid() and r.chara:get_Valid(),"当前狮鹫无效")
             assert(not dependency().properties.isPaused,"请恢复游戏")
@@ -933,9 +939,19 @@ function animation_test.capture()
                 end
             end
             assert(#saved.layers>0,"未读到已加载动画，不会猜测编号")
+            if body_clip then
+                assert(motion:call("hasMotion(System.UInt32, System.UInt32)",0,body_clip),"当前实例未加载该动画，不会请求加载或猜测编号")
+                local found=false
+                for _,row in ipairs(saved.layers) do
+                    if row.index==0 then row.bank=0;row.id=body_clip;row.frame=0;found=true end
+                end
+                assert(found,"当前实例没有可用的基础动画层")
+                saved.body_clip=body_clip
+            end
             animation_test.saved=saved
             animation_test.status="已捕获 "..saved.node.."，动画层数 "..#saved.layers.."；结束驾驶后可隔离播放。"
-            log_event("direct_motion_capture",{node=saved.node,layers=saved.layers,character=tostring(r.chara:get_address())})
+            log_event("direct_motion_capture",{node=saved.node,layers=saved.layers,character=tostring(r.chara:get_address()),body_clip=saved.body_clip})
+            if body_clip then animation_test.play() end
         end)
         if not ok then animation_test.status="捕获失败："..tostring(err) end
     end)
@@ -998,7 +1014,7 @@ function animation_test.play()
             animation_test.install()
             assert(flush_flight_log(),"日志写入失败，未开始测试")
             animation_test.active=d;animation_test.blocked=0;animation_test.samples={};animation_test.next_sample=0
-            flight_log.direct_motion={node=s.node,layers=s.layers,samples=animation_test.samples,root_motion=none,flight_update_isolated=true}
+            flight_log.direct_motion={node=s.node,layers=s.layers,samples=animation_test.samples,root_motion=none,flight_update_isolated=true,body_clip=s.body_clip}
             d.fsm_touched=true;fsm:call("set_Enabled(System.Boolean)",false)
             d.motion_touched=true;s.motion:call("set_RootMotion(via.motion.RootPlayMode)",none)
             for _,row in ipairs(s.layers) do
@@ -1006,8 +1022,8 @@ function animation_test.play()
                 assert(layer and s.motion:call("hasMotion(System.UInt32, System.UInt32)",row.bank,row.id),"捕获动画已卸载")
                 layer:call("changeMotion(System.UInt32, System.UInt32, System.Single, System.Single, via.motion.InterpolationMode, via.motion.InterpolationCurve)",row.bank,row.id,0.0,12.0,1,1)
             end
-            animation_test.status="正在隔离重播 "..s.node.."；FSM关闭／根位移关闭／飞行控制器隔离。没有锁定Transform。"
-            log_event("direct_motion_start",{node=s.node,layers=s.layers})
+            animation_test.status="正在隔离重播 "..(s.body_clip and (s.body_clip==5100 and "滑翔 5100" or "挥翅 5101") or s.node).."；FSM关闭／根位移关闭／飞行控制器隔离。没有锁定Transform。"
+            log_event("direct_motion_start",{node=s.node,layers=s.layers,body_clip=s.body_clip})
         end)
         if not ok then
             animation_test.stop("启动失败")
@@ -1225,6 +1241,8 @@ function move_isolation.start()
         if move_isolation.active then return end
         local ok,err=pcall(function()
             assert(not animation_test.active,"请先停止完整动画隔离播放")
+            local b=beta_bridge()
+            assert(not (b and b.is_driving and b.is_driving()) and not pilot and not lure,"该位移实验已实测失败，禁止驾驶／玩家固定期间开启")
             local r=animation_test.instance()
             local c=assert(dependency(),"依赖未就绪")
             assert(not c.properties.isPaused and r and r.go:get_Valid() and r.chara:get_Valid(),"请在游戏中绑定有效狮鹫")
@@ -1269,9 +1287,10 @@ function move_isolation.tick()
         local b=beta_bridge()
         if b and b.is_driving then
             local driving=b.is_driving()
-            if d.was_driving and not driving then move_isolation.stop("Beta驾驶结束");return end
-            d.was_driving=driving
+            if driving then move_isolation.stop("开始Beta驾驶，停止失败的位移实验");return end
+            d.was_driving=false
         end
+        if pilot or lure then move_isolation.stop("开始实验工具驾驶／固定玩家");return end
         if c.properties.isPaused then return end
         if d.motion:call("get_RootMotion()")~=d.none then
             d.motion:call("set_RootMotion(via.motion.RootPlayMode)",d.none)
@@ -1935,10 +1954,17 @@ re.on_draw_ui(function()
         if ui_button("【本轮新增】2. 隔离重播捕获动画（先结束驾驶）") then animation_test.play() end
         if ui_button("【本轮新增】3. 停止隔离播放／恢复原生控制") then run_once(function() animation_test.stop("手动停止") end) end
         imgui.text(animation_test.status)
-        if not move_isolation.active and ui_button("【本轮新增】仅隔离原生位移（保留扑翼调度）") then move_isolation.start() end
-        if move_isolation.active and ui_button("【本轮新增】关闭位移隔离／恢复原生位移") then run_once(function() move_isolation.stop("手动关闭") end) end
-        imgui.text(move_isolation.status)
-        if move_isolation.active then imgui.text("位移拦截次数："..move_isolation.hits.."；本实验不接管朝向，不写实体坐标。") end
+        if ui_button("【本轮新增】无位移滑翔（已确认5100；先结束驾驶）") then animation_test.capture(5100) end
+        if ui_button("【本轮新增】无位移挥翅（已确认5101；先结束驾驶）") then animation_test.capture(5101) end
+        imgui.text("两按钮直接替换基础层资源；沿用完整隔离，其他已捕获附加层仍保留。")
+        if imgui.tree_node("DEBUG：已失败的位移入口实验（仅地面对照）") then
+            imgui.text("实测仍会移动，且驾驶中触发竖直朝向退出；已禁止驾驶／玩家固定时开启。")
+            if not move_isolation.active and ui_button("仅隔离原生位移（已失败，仅地面对照）") then move_isolation.start() end
+            if move_isolation.active and ui_button("关闭位移隔离／恢复原生位移") then run_once(function() move_isolation.stop("手动关闭") end) end
+            imgui.text(move_isolation.status)
+            imgui.text("位移拦截次数："..move_isolation.hits.."；拦截成功不代表位移被完全移除。")
+            imgui.tree_pop()
+        end
         if not motion_probe.active and ui_button("【本轮新增】开始20秒扑翼记录（只读）") then motion_probe.start() end
         if (motion_probe.active or motion_probe.dirty) and ui_button("【本轮新增】停止扑翼记录并保存") then motion_probe.stop("手动停止") end
         imgui.text(motion_probe.status)
