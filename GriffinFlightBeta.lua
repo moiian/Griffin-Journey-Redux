@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.41. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.42. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.41-beta"
+local VERSION = "0.1.42-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -214,8 +214,6 @@ do
     local ok,Route=pcall(require,"_GriffinRouteProbe.route")
     if ok then
         menu.route=Route.new({driver=function() return active end,
-            fall_conflict=function() return passengers.fall_experiment.reset or passengers.fall_experiment.ground or passengers.griffin_fall.reset end,
-            griffin_conflict=function() return passengers.griffin_fall.reset end,
             passenger_owned=function(d,a)
                 return a and a.owner==d.player and a.spawn==d.spawn and passengers.controlled(a.player)==a
                     and owned_player(a,false) and player_fsm(a.player)==a.fsm

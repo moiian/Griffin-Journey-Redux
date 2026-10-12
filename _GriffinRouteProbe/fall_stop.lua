@@ -7,10 +7,6 @@ function M.new(env,scope)
         passenger_states={},passenger_calls=0,passenger_attempts=0,passenger_errors=0,
         status="停止"..label.."自由落体：关闭"},M)
 end
-function M:conflict()
-    local check=self.scope=="griffin" and self.env.griffin_conflict or self.env.fall_conflict
-    return check and check() or false
-end
 function M:set_enabled(value,reason)
     if not value then
         self.enabled=false;self.driver=nil;self.character=nil;self.go=nil;self.passenger_states={}
@@ -18,7 +14,6 @@ function M:set_enabled(value,reason)
         return
     end
     local ok,err=pcall(function()
-        assert(not self:conflict(),"请关闭对应的旧跌落实验")
         local td=assert(sdk.find_type_definition("app.FreeFallController"),"缺少FreeFallController")
         local method=assert(td:get_method("stop()"),"缺少FreeFallController.stop")
         assert(not method:is_static() and method:get_num_params()==0
@@ -36,7 +31,6 @@ function M:release_driver()
 end
 function M:check_driver(d)
     assert(d and (not self.driver or d==self.driver) and self.env.driver()==d and self.env.owned(d),"精确玩家或驾驶归属变化")
-    assert(not self:conflict(),"旧跌落实验与防抖冲突")
 end
 function M:tick()
     if not self.enabled then return end
