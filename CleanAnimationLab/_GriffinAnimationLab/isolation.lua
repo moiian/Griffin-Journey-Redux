@@ -1,4 +1,4 @@
--- Exact-instance animation isolation. Optional preparation runs once before freezing.
+-- Exact-instance isolation; a refresh may briefly release controls without losing originals.
 local M = {}
 function M.new()
     local self = {blocked=0,serial=0}
@@ -16,7 +16,7 @@ function M.new()
         for _,method in ipairs(methods) do
             sdk.hook(method,function(args)
                 local d=self.active
-                if d and not d.recovering and not d.preparing and sdk.to_ptr(args[2])==d.flight_ptr then
+                if d and not d.recovering and not d.released and sdk.to_ptr(args[2])==d.flight_ptr then
                     self.blocked=self.blocked+1
                     return sdk.PreHookResult.SKIP_ORIGINAL
                 end
@@ -41,7 +41,19 @@ function M.new()
         end
         self.active=nil
     end
-    function self:play(instance,clip,before_freeze)
+    function self:release()
+        local d=assert(self.active,"没有隔离状态")
+        assert(not d.recovering and not d.released and self:valid(d),"隔离无法放行")
+        assert(d.instance.chara:call("get_ActionManager()").Fsm==d.fsm,"FSM归属变化")
+        -- Release the exact controls captured before the first isolation, retaining ownership.
+        d.released=true
+        d.motion:call("set_RootMotion(via.motion.RootPlayMode)",d.original_root)
+        d.motion_touched=false
+        d.fsm:call("set_Enabled(System.Boolean)",d.original_enabled)
+        d.fsm_touched=false
+        assert(d.motion:call("get_RootMotion()")==d.original_root and d.fsm:call("get_Enabled()")==d.original_enabled,"放行读回失败")
+    end
+    function self:play(instance,clip)
         assert(clip==5100 or clip==5101,"只测试已确认资源")
         local d=self.active
         if d then
@@ -61,7 +73,7 @@ function M.new()
             local enum=assert(sdk.find_type_definition("via.motion.RootPlayMode"),"缺少根位移枚举")
             local none=assert(enum:get_field("None"),"缺少None"):get_data(nil)
             d={instance=instance,motion=motion,fsm=fsm,flight_ptr=sdk.to_ptr(flight),
-                original_enabled=fsm:call("get_Enabled()"),original_root=motion:call("get_RootMotion()"),layers={}}
+                original_enabled=fsm:call("get_Enabled()"),original_root=motion:call("get_RootMotion()"),none=none,layers={}}
             assert(type(none)=="number" and type(d.original_root)=="number" and type(d.original_enabled)=="boolean","无法保存原状态")
             local count=motion:call("getLayerCount()")
             assert(count>0 and count<=16,"层数异常")
@@ -77,16 +89,6 @@ function M.new()
             self:install()
             self.serial=self.serial+1;d.serial=self.serial
             self.active=d;self.blocked=0
-            if before_freeze then
-                -- Save the original control values before native reset can touch them.
-                d.preparing=true;d.fsm_touched=true;d.motion_touched=true
-                before_freeze(d)
-                assert(self:valid(d) and manager.Fsm==d.fsm,"准备后组件变化")
-                assert(motion:call("hasMotion(System.UInt32, System.UInt32)",0,clip),"准备后动画资源不可用")
-                base=assert(motion:call("getLayer(System.UInt32)",0),"准备后基础层不可用")
-                assert(base:call("get_Enabled()"),"准备后基础层未启用")
-                d.preparing=nil
-            end
             d.fsm_touched=true;fsm:call("set_Enabled(System.Boolean)",false)
             d.motion_touched=true;motion:call("set_RootMotion(via.motion.RootPlayMode)",none)
             for _,row in ipairs(d.layers) do
@@ -94,6 +96,12 @@ function M.new()
                     motion:call("getLayer(System.UInt32)",row.index):call("changeMotion(System.UInt32, System.UInt32, System.Single, System.Single, via.motion.InterpolationMode, via.motion.InterpolationCurve)",row.bank,row.id,0.0,12.0,1,1)
                 end
             end
+        end
+        if d.released then
+            assert(instance.chara:call("get_ActionManager()").Fsm==d.fsm,"重新隔离前FSM变化")
+            d.fsm_touched=true;d.fsm:call("set_Enabled(System.Boolean)",false)
+            d.motion_touched=true;motion:call("set_RootMotion(via.motion.RootPlayMode)",d.none)
+            d.released=nil
         end
         base:call("changeMotion(System.UInt32, System.UInt32, System.Single, System.Single, via.motion.InterpolationMode, via.motion.InterpolationCurve)",0,clip,0.0,12.0,1,1)
         d.clip=clip

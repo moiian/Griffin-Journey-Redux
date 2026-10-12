@@ -21,5 +21,6 @@
 !/CleanAnimationLab/_GriffinAnimationLab/call_trace.lua
 !/CleanAnimationLab/TEST_012_CALL_TRACE.md
 
-!/CleanAnimationLab/_GriffinAnimationLab/task_reset.lua
+!/CleanAnimationLab/_GriffinAnimationLab/action_refresh.lua
 !/CleanAnimationLab/TEST_013_TASK_RESET.md
+!/CleanAnimationLab/TEST_014_ACTION_REFRESH.md
