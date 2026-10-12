@@ -1,7 +1,7 @@
 -- Griffin Mount Experiment: stage 3 player-as-target flight control experiment.
 -- Requires the installed aaaNickCore.lua and _NickCore/EnemySpawner.lua.
 -- Keeps an explicit spawn return or user-confirmed instance; never selects by Character ID.
-local VERSION = "0.3.22-stage3-pose-isolation"
+local VERSION = "0.3.23-stage3-target-ab"
 local state = "Idle"
 local detail = "Ready for one ordinary Griffin request per script session."
 local shared = nil
@@ -1864,6 +1864,54 @@ function code_flight.install_pose_hooks()
     end
     code_flight.pose_hooks_ready=true
 end
+-- Reuse the Beta's verified ManualPlayer selection as a separate same-flight A/B test.
+function code_flight.target_context(d)
+    assert(animation_test.active==d.isolation and animation_test.valid(d.isolation),"狮鹫归属改变")
+    assert(player_lure_owned(d.player),"玩家归属改变")
+    local core=assert(dependency(),"依赖未就绪")
+    local ch=core.object.get_component(d.instance.go,"app.Ch253")
+    local tc=ch and ch:call("get_TargetController()")
+    assert(tc and tc:call("get_Owner()")==d.instance.go and tc:call("get_Chara()")==d.instance.chara,"目标控制器归属不匹配")
+    local ctrl=d.instance.chara:call("get_FlightCtrl()")
+    assert(ctrl and sdk.to_ptr(ctrl)==d.isolation.flight_ptr and ctrl:call("get_CachedCharacter()")==d.instance.chara,"飞控归属不匹配")
+    return tc,ctrl
+end
+function code_flight.target_snapshot(d)
+    local tc,ctrl=code_flight.target_context(d)
+    local target=tc:call("get_TargetCharacter()")
+    return {target_is_player=target==d.player.player,target_is_self=target==d.instance.chara,
+        target_character_present=target~=nil,target_type=tostring(tc:call("get_TargetType()")),
+        character_target_scene=vector_values(tc:call("get_TargetPosition()")),
+        flight_target_scene=vector_values(ctrl:call("get_TargetPosition()")),
+        player_scene=vector_values(d.player.transform:call("get_Position()"))}
+end
+function code_flight.retarget()
+    local expected=code_flight.active
+    if not expected then code_flight.target_status="请先开始代码飞行。";return end
+    run_once(function()
+        if code_flight.active~=expected then return end
+        local ok,err=pcall(function()
+            local tc=code_flight.target_context(expected)
+            local td=sdk.find_type_definition("app.TargetController.TargetTypeEnum")
+            local field=td and td:get_field("ManualPlayer")
+            local value=field and field:get_data()
+            assert(type(value)=="number" and value==value,"ManualPlayer枚举不可用")
+            local type_def=sdk.find_type_definition("app.TargetController")
+            assert(type_def and type_def:get_method("setTarget(app.TargetController.TargetTypeEnum)"),"缺少已验证的目标选择接口")
+            assert(tc:call("get_ManualPlayerTarget()"),"ManualPlayer目标不可用")
+            local before=code_flight.target_snapshot(expected)
+            log_event("code_flight_manual_player_before",before)
+            assert(flush_flight_log(),"日志保存失败，未切换目标")
+            tc:call("setTarget(app.TargetController.TargetTypeEnum)",value)
+            expected.retargets=(expected.retargets or 0)+1
+            local after=code_flight.target_snapshot(expected)
+            log_event("code_flight_manual_player_after",after)
+            code_flight.target_status=after.target_is_player and "已切换目标为当前玩家；观察是否仍回飞。" or "选择接口已返回，但目标角色仍不是玩家；日志已记录。"
+            expected.target_probe_error=nil
+        end)
+        if not ok then code_flight.target_status="目标对照未完成："..tostring(err);log_event("code_flight_manual_player_error",tostring(err)) end
+    end)
+end
 function code_flight.snapshot(d)
     local a=d.actor
     return {position=vector_values(a.transform:call("get_UniversalPosition()")),
@@ -1954,6 +2002,7 @@ function code_flight.start()
             assert(fall_hook_installed,"玩家防坠落接口不可用")
             code_flight.install_pose_hooks()
             code_flight.active=d;code_flight.paused=false;code_flight.input=0;code_flight.turn_once=0
+            code_flight.target_status="本轮尚未切换目标；出现回飞时可点重新锁定玩家作对照。"
             code_flight.samples={};flight_log.code_flight={samples=code_flight.samples,interval=0.2}
             d.fsm_touched=true;fsm:call("set_Enabled(System.Boolean)",false)
             camera_suspended=false
@@ -2014,6 +2063,11 @@ function code_flight.tick()
                 before_write=pre,after_write=code_flight.snapshot(d),
                 root_mode=d.isolation.motion:call("get_RootMotion()"),
                 pose_blocked={before_collider=d.pose_blocked.before_collider,after_collider=d.pose_blocked.after_collider,root_apply=d.pose_blocked.root_apply}}
+            if not d.target_probe_error then
+                local target_ok,target=pcall(code_flight.target_snapshot,d)
+                if target_ok then row.target=target else d.target_probe_error=tostring(target) end
+            end
+            row.target_error=d.target_probe_error;row.retargets=d.retargets or 0
             code_flight.samples[#code_flight.samples+1]=row;d.render_sample=row
         end
         if now-last_flush>=2 then flush_flight_log() end
@@ -2167,6 +2221,8 @@ re.on_draw_ui(function()
             changed,value=imgui.slider_float("玩家随行前后距离（负值在后方）",code_flight.follow,-30,30);if changed then code_flight.follow=value end
             changed,value=imgui.slider_float("玩家随行高度（米）",code_flight.follow_height,0,20);if changed then code_flight.follow_height=value end
         end
+        if code_flight.active and ui_button("【本轮新增】让狮鹫听话：重新锁定当前玩家（一次对照）") then code_flight.retarget() end
+        if code_flight.target_status then imgui.text(code_flight.target_status) end
         imgui.text(code_flight.status)
         if code_flight.active then
             local h=code_flight.active.pose_blocked
