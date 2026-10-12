@@ -157,3 +157,15 @@ Lua54编译与新增资源按钮/未加载拒绝/驾驶禁用、旧隔离、只�
 只改Stage3，Beta仍0.1.35；无设置迁移，NickCore/OJR/LMD不改。代码移动不设60秒上限；采样每0.2秒、各最多3000条，达到上限停止新增样本而代码飞行继续。会话Flight JSON包含code_flight.samples（预期/实际Universal位置、碰撞体场景位置、玩家位置、转向/速度/dt），沿用会话日志自动保存，无需额外录制按钮；不同坐标空间不可直接作距离差。
 
 Lua54编译、新增代码飞行3组测试、原动画隔离/已加载资源2组、既有阶段三驾驶16组及原只读扑翼/失败位移隔离回归通过。模拟覆盖实体同步、帧率/卡顿、左右转和Quaternion、暂停、当前释放、精确坠落拦截、失效与恢复重试；模拟不能证明原生调用安全、真实性能或抽动已消除。原生效果待本轮用户验收。
+
+# 阶段三0.3.22：代码飞行残余位姿隔离
+
+0.3.21实测失控：转向后模型反向/翻转，远处回跳。会话153736Z最后一轮331个code_flight样本写入后位置误差最大约0.000004米，但原direct_motion回调读取的Transform明显离开预定路线，与时间最近代码样本差最大约158.90米；还存在非零旋转X/Z。这证明根Transform亦被其他更新改写，不能只归因于骨架模型分离。两采样回调非同一时刻，未据此量化实际模型偏移或确证唯一根因。证据摘要保留本地outputs/STAGE3_0321_POSE_OVERRIDE_EVIDENCE.json。
+
+核对本地转储后，仅在代码飞行模式追加三个精确入口拦截：FlightControl.eventBeforeColliderAdjust(via.GameObject)、eventAfterColliderAdjust(via.GameObject, via.motion.ExpressionUpdate)、Character.onRootApply(via.vec3, via.Quaternion)。前两按保留的FlightControl指针、第三按狮鹫Character指针判断；其他狮鹫/玩家/NPC通过。旧无位移动画单独播放不启用这三条，结束代码飞行自动停止。Hook只比指针和累加数字，不读骨骼、不写盘。未泛化拦截整个Character.update或全部碰撞/物理更新。
+
+操作不变：结束Beta/旧驾驶 → 无位移滑翔5100 → 开始代码飞行＋玩家随行。先直飞，再连续左右转多次，重点看反向/翻转/远处回跳是否消失。无需开启原生冲刺。菜单新增三条位姿拦截计数；不用点击额外录制。
+
+日志code_flight.samples增加before_write、after_write、render三个阶段的Transform/位置上下文/碰撞体坐标、RootMotion当前值和三条命中计数。渲染阶段仅读取，不补写Transform、不写盘；若仍漂移可区分哪一阶段被覆盖。采样仍5Hz/各3000条上限，运行无时限。渲染读数失败仅记错误，不停飞。
+
+Lua54编译、新增位姿隔离4组、既有动画隔离/资源2组、扑翼只读1组、失败位移隔离1组、阶段三驾驶16组通过。含精确对象范围、停止/失效恢复、重复安装防护、三阶段数据和渲染不写位置；离线模拟不能证明原生修复生效或性能安全。只改阶段三到0.3.22，Beta仍0.1.35，用户配置/NickCore/OJR/LMD不改；旧0.3.21备份stage3_0321。请实测验收，不预先认定已修复。

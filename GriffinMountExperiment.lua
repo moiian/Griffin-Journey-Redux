@@ -1,7 +1,7 @@
 -- Griffin Mount Experiment: stage 3 player-as-target flight control experiment.
 -- Requires the installed aaaNickCore.lua and _NickCore/EnemySpawner.lua.
 -- Keeps an explicit spawn return or user-confirmed instance; never selects by Character ID.
-local VERSION = "0.3.21-stage3-code-flight"
+local VERSION = "0.3.22-stage3-pose-isolation"
 local state = "Idle"
 local detail = "Ready for one ordinary Griffin request per script session."
 local shared = nil
@@ -1834,6 +1834,54 @@ end
 -- Minimal authored horizontal flight. Exact retained instance; no native navigation requests.
 code_flight={speed=8,turn_rate=60,height=8,follow=12,follow_height=5,paused=false,input=0,turn_once=0,
     status="先播放无位移滑翔5100，再开始代码飞行。左摇杆左右转；暂停前进仍跟随。"}
+-- Flight callbacks after behavior and Character root application can still publish native poses.
+-- Resolve all signatures first; hook bodies only compare retained pointers and increment counters.
+function code_flight.install_pose_hooks()
+    if code_flight.pose_hooks_ready then return end
+    local entries={
+        {type="app.FlightControl",method="eventBeforeColliderAdjust(via.GameObject)",key="before_collider",owner="flight"},
+        {type="app.FlightControl",method="eventAfterColliderAdjust(via.GameObject, via.motion.ExpressionUpdate)",key="after_collider",owner="flight"},
+        {type="app.Character",method="onRootApply(via.vec3, via.Quaternion)",key="root_apply",owner="character"}}
+    for _,entry in ipairs(entries) do
+        local td=sdk.find_type_definition(entry.type)
+        entry.method_ref=assert(td and td:get_method(entry.method),"缺少位姿隔离接口："..entry.method)
+    end
+    assert(sdk.PreHookResult and sdk.PreHookResult.SKIP_ORIGINAL,"没有Hook跳过接口")
+    code_flight.pose_hooks=code_flight.pose_hooks or {}
+    for _,entry in ipairs(entries) do
+        if not code_flight.pose_hooks[entry.key] then
+            sdk.hook(entry.method_ref,function(args)
+                local d=code_flight.active or code_flight.recovery
+                if not control_alive or not d or animation_test.active~=d.isolation or d.isolation.recovering then return end
+                local expected=entry.owner=="flight" and d.isolation.flight_ptr or d.character_ptr
+                if sdk.to_ptr(args[2])==expected then
+                    d.pose_blocked[entry.key]=d.pose_blocked[entry.key]+1
+                    return sdk.PreHookResult.SKIP_ORIGINAL
+                end
+            end,function(ret) return ret end)
+            code_flight.pose_hooks[entry.key]=true
+        end
+    end
+    code_flight.pose_hooks_ready=true
+end
+function code_flight.snapshot(d)
+    local a=d.actor
+    return {position=vector_values(a.transform:call("get_UniversalPosition()")),
+        rotation=rotation_values(a.transform:call("get_Rotation()")),
+        context_position=vector_values(a.context:call("get_Pos()")),
+        context_rotation=rotation_values(a.context:call("get_Rot()")),
+        controller_scene=vector_values(a.controller:call("get_Position()"))}
+end
+function code_flight.render()
+    local d=code_flight.active
+    if not d or not d.render_sample then return end
+    local row=d.render_sample;d.render_sample=nil
+    local ok,value=pcall(function()
+        if not control_alive or animation_test.active~=d.isolation or not animation_test.valid(d.isolation) then return nil end
+        return code_flight.snapshot(d)
+    end)
+    if ok then row.render=value else row.render_error=tostring(value) end -- no file IO or pose writes in rendering
+end
 function code_flight.actor(ch)
     local terrain=assert(ch:get_field("<AdjustTerrain>k__BackingField"),"没有AdjustTerrain")
     local a={player=ch,player_go=ch:call("get_GameObject()"),transform=ch:call("get_Transform()"),
@@ -1870,7 +1918,7 @@ function code_flight.stop(reason)
     code_flight.recovery=nil
     animation_test.stop("代码飞行结束："..reason)
     code_flight.status="代码飞行已结束，玩家在当前位置释放："..reason
-    log_event("code_flight_stop",{reason=reason,frames=d.frames,release="current_position"})
+    log_event("code_flight_stop",{reason=reason,frames=d.frames,release="current_position",pose_blocked=d.pose_blocked})
     return true
 end
 function code_flight.start()
@@ -1899,17 +1947,19 @@ function code_flight.start()
             local fx,fz=2*(q.x*q.z+q.w*q.y),1-2*(q.x*q.x+q.y*q.y)
             assert(fx*fx+fz*fz>0.04,"狮鹫初始朝向过于竖直；请用水平姿态重新测试")
             local d={isolation=isolation,instance=isolation.instance,actor=actor,player=player,fsm=fsm,original_fsm=enabled,
+                character_ptr=sdk.to_ptr(isolation.instance.chara),pose_blocked={before_collider=0,after_collider=0,root_apply=0},
                 position=p,base_height=p.y,yaw=math.atan(fx,fz),last_time=game_time(),frames=0,next_sample=0}
             assert(flush_flight_log(),"日志保存失败，未开始移动")
             install_fall_hook()
             assert(fall_hook_installed,"玩家防坠落接口不可用")
+            code_flight.install_pose_hooks()
             code_flight.active=d;code_flight.paused=false;code_flight.input=0;code_flight.turn_once=0
             code_flight.samples={};flight_log.code_flight={samples=code_flight.samples,interval=0.2}
             d.fsm_touched=true;fsm:call("set_Enabled(System.Boolean)",false)
             camera_suspended=false
             code_flight.status="代码水平飞行已开启；玩家前上方随行。左摇杆左右转，右摇杆观察。"
             log_event("code_flight_start",{speed=code_flight.speed,height=code_flight.height,follow=code_flight.follow,
-                character=tostring(d.instance.chara:get_address()),root_motion_disabled=true})
+                character=tostring(d.instance.chara:get_address()),root_motion_disabled=true,pose_callbacks_isolated=true})
         end)
         if not ok then code_flight.stop("启动失败");code_flight.status="代码飞行未开始或已恢复："..tostring(err) end
     end)
@@ -1941,6 +1991,9 @@ function code_flight.tick()
         local dt=math.min(elapsed,0.1) -- drop stalls, never catch up by teleporting a long distance
         d.yaw=(d.yaw+math.rad(code_flight.turn_rate)*code_flight.input*dt+math.rad(code_flight.turn_once)+math.pi)%(2*math.pi)-math.pi
         code_flight.turn_once=0
+        local pre
+        local sampling=now>=d.next_sample and #code_flight.samples<3000
+        if sampling then pre=code_flight.snapshot(d) end
         local fx,fz=math.sin(d.yaw),math.cos(d.yaw)
         local distance=code_flight.paused and 0 or code_flight.speed*dt
         d.position={x=d.position.x+fx*distance,y=d.base_height+code_flight.height,z=d.position.z+fz*distance}
@@ -1952,12 +2005,16 @@ function code_flight.tick()
         d.player.moved=true
         code_flight.pose(d.player,point,q,true)
         d.frames=d.frames+1
-        if now>=d.next_sample and #code_flight.samples<3000 then
+        if sampling then
             d.next_sample=now+0.2
-            code_flight.samples[#code_flight.samples+1]={time=now,dt=dt,paused=code_flight.paused,speed=code_flight.speed,yaw=d.yaw,
+            local row={time=now,dt=dt,paused=code_flight.paused,speed=code_flight.speed,yaw=d.yaw,
                 expected={x=d.position.x,y=d.position.y,z=d.position.z},actual=vector_values(d.actor.transform:call("get_UniversalPosition()")),
                 controller_scene=vector_values(d.actor.controller:call("get_Position()")),
-                player=vector_values(d.player.transform:call("get_UniversalPosition()")),turn=code_flight.input}
+                player=vector_values(d.player.transform:call("get_UniversalPosition()")),turn=code_flight.input,
+                before_write=pre,after_write=code_flight.snapshot(d),
+                root_mode=d.isolation.motion:call("get_RootMotion()"),
+                pose_blocked={before_collider=d.pose_blocked.before_collider,after_collider=d.pose_blocked.after_collider,root_apply=d.pose_blocked.root_apply}}
+            code_flight.samples[#code_flight.samples+1]=row;d.render_sample=row
         end
         if now-last_flush>=2 then flush_flight_log() end
     end)
@@ -1966,7 +2023,7 @@ end
 
 
 if type(re.on_application_entry)=="function" and type(re.on_pre_application_entry)=="function" then
-    re.on_application_entry("PrepareRendering",function() update_lure_camera();motion_probe.render() end)
+    re.on_application_entry("PrepareRendering",function() code_flight.render();update_lure_camera();motion_probe.render() end)
     re.on_application_entry("UpdateBehavior",code_flight.tick)
     re.on_application_entry("UpdateHID",function()
         code_flight.read_input()
@@ -2111,6 +2168,10 @@ re.on_draw_ui(function()
             changed,value=imgui.slider_float("玩家随行高度（米）",code_flight.follow_height,0,20);if changed then code_flight.follow_height=value end
         end
         imgui.text(code_flight.status)
+        if code_flight.active then
+            local h=code_flight.active.pose_blocked
+            imgui.text(string.format("【本轮】位姿拦截：碰撞前 %d／碰撞后 %d／角色根应用 %d",h.before_collider,h.after_collider,h.root_apply))
+        end
         imgui.text("保持水平，无惯性／避障；暂停仍固定玩家，结束则恢复FSM并在当前位置释放。")
         if code_flight.input_error then imgui.text("摇杆暂不可用，可用左右转按钮："..code_flight.input_error) end
         if imgui.tree_node("代码飞行观察镜头（距离／FOV）") then
