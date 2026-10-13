@@ -2,7 +2,7 @@
 
 Fly a friendly Griffin with configurable controls, a head-following camera, and separate seats for the player, pawns, and accompanying NPCs.
 
-Version: **0.2.8**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
+Version: **0.2.9**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
 
 ## Install or upgrade
 
@@ -25,6 +25,8 @@ Open **Griffin Journey Redux → 一般设置**, spawn a Griffin, and start driv
 | Retarget the player | H | Rebindable |
 
 Gear 0 holds position. At low speed, left-stick forward/back moves along the Griffin's facing, and left/right turns it with a slight delay. There is no lateral movement. Forward, backward, vertical-climb and turning speeds are independent and can all be set to zero in Flight Settings. Hold RB (E) to climb vertically; LB (Q) retains landing.
+
+Low-speed acceleration, released-input deceleration and reverse braking have separate adjustable time constants in Flight Settings (defaults 0.2/0.6/0.6 seconds, range 0–3). Forward/backward movement and vertical climb share acceleration/deceleration. Larger values give more inertia; zero makes the selected stage immediate. Reverse input brakes through zero before accelerating backward, with no input lock.
 
 The low-speed camera follows only while the Griffin is turning; it stops correcting when body rotation stops, even if some camera lag remains. Both gears share the same right-stick blending, takeover threshold, hysteresis and 0.8-second recovery delay. Adjust **1档镜头跟随速度（度／秒）** and **2档镜头跟随速度（度／秒）** independently in Camera Settings. Low-speed speed zero disables its automatic yaw. Camera pitch remains manually controlled.
 

@@ -178,3 +178,10 @@ All 22 Lua54 files and existing/new offline regressions pass. Differential outpu
 Replace per-frame head-target writes with action-triggered checks and a 0.5-second fallback, writing only changed bindings. Temporary native target/controller/main transitions retry without permanently disabling head follow; explicit off remains authoritative. Manual-camera hooks safely snapshot missing/nested context, and disabled render diagnostics skip native camera sampling. Existing driving and shared yaw policies are preserved.
 
 All 22 Lua54 files and existing/new offline regressions pass, including bounded healthy reads/zero redundant writes, exact binding recovery, manual off, partial failures and a reproduced old nil-context callback. Native terrain clipping/shake remains unverified and is not claimed fixed. See HEAD_CAMERA_028_GUARD.md.
+
+
+## Griffin Journey Redux 0.2.9: adjustable low-speed inertia (2026-10-13)
+
+Split low-speed translation into independent acceleration, released/reduced-input deceleration and reverse-braking time constants. Defaults are 0.2/0.6/0.6 seconds; each accepts 0–3 seconds and saves automatically. Horizontal movement and vertical climb share acceleration/deceleration. Opposing input brakes through zero before accelerating in the new direction, without locking input. Analytic integration splits at the zero crossing; body-turn smoothing and LT hard stop remain unchanged.
+
+All 22 Lua54 files and existing/new offline regressions pass, including settings/defaults/zero/bounds/save/reload, horizontal and vertical response, opposing-input crossing, live input changes, rotated 30/120Hz agreement, LT/recenter and unchanged 2,000-frame sprint-camera output. Native handling remains to be checked in game. See CONTROLS_029_INERTIA.md.

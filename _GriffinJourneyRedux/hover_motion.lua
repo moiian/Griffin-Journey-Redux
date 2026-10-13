@@ -51,9 +51,27 @@ local function write_pose(d,m)
     m.dirty=false
 end
 local function damp(value,target,dt,tau)
+    if dt<=0 then return value,0 end
+    if tau<=0 then return target,target*dt end
     local a=math.exp(-dt/tau)
     -- Integrate the exponential response analytically; input is held for this step.
     return target+(value-target)*a,target*dt+(value-target)*tau*(1-a)
+end
+-- Opposing input brakes to the exact zero crossing, then accelerates away.
+-- Split the integral at that crossing to keep the result independent of frame rate.
+local function velocity_step(value,target,dt)
+    local acceleration=settings.hover_accel_tau
+    local deceleration=settings.hover_decel_tau
+    if value*target<0 then
+        local braking=settings.hover_reverse_tau
+        local crossing=braking*math.log(1+math.abs(value/target))
+        if dt<=crossing then return damp(value,target,dt,braking) end
+        local _,distance=damp(value,target,crossing,braking)
+        local speed,remainder=damp(0,target,dt-crossing,acceleration)
+        return speed,distance+remainder
+    end
+    local tau=math.abs(target)<math.abs(value) and deceleration or acceleration
+    return damp(value,target,dt,tau)
 end
 function hover_motion:tick(d,ch,tr,fx,fz,flying,ground,action)
     if not eligible(d) or not flying or ground then self:release(d);return end
@@ -89,9 +107,9 @@ function hover_motion:tick(d,ch,tr,fx,fz,flying,ground,action)
     local target_x=forward_x*longitudinal
     local target_z=forward_z*longitudinal
     local dx,dy,dz
-    m.vx,dx=damp(m.vx,target_x,dt,0.2)
-    m.vy,dy=damp(m.vy,climb and settings.hover_climb_speed or 0,dt,0.2)
-    m.vz,dz=damp(m.vz,target_z,dt,0.2)
+    m.vx,dx=velocity_step(m.vx,target_x,dt)
+    m.vy,dy=velocity_step(m.vy,climb and settings.hover_climb_speed or 0,dt)
+    m.vz,dz=velocity_step(m.vz,target_z,dt)
     m.position.x=m.position.x+dx;m.position.y=m.position.y+dy;m.position.z=m.position.z+dz
     if x==0 and y==0 and not climb and math.abs(m.vx)+math.abs(m.vy)+math.abs(m.vz)<0.01 and math.abs(m.turn)<0.001 then
         m.vx=0;m.vy=0;m.vz=0;m.turn=0;d.gear=0
