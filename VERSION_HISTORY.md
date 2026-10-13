@@ -574,3 +574,10 @@ All 22 Lua54 files and existing/new offline regressions pass, including both-gea
 Wait for valid airborne flags through the native takeoff animation's grounded tail, then explicitly enable gear 1 code controls. Previously a late Flight/Ground update could disable controls permanently until LT. Adopt an already-active exact hover without requesting it again; other airborne nodes receive one hover request. Held input release and manual/external cancellation remain.
 
 The actual 0.3.2 module reproduces the disabled-control failure offline; 0.3.3 passes the same case, including forward/back/up/down without LT. All 22 Lua54 modules and prior controls/inertia/phase/camera/lifecycle regressions pass. In-game acceptance remains pending. See TAKEOFF_033_HANDOFF.md.
+
+
+## Griffin Journey Redux 0.3.4: earlier hover handoff and continuous held input (2026-10-14)
+
+Request gear 1 hover as soon as valid airborne flags arrive, without waiting for the native takeoff action to end. Remove the automatic takeoff input-release gate: held forward/back, turning and A/Y continue into slow control without a new press. Holding takeoff A now continues code ascent. LT retains its own neutral gate and inertia.
+
+All 22 Lua54 files and previous/new offline regressions pass, including native-takeoff-still-active handoff, each held translation axis, pause/resume and preserved LT behavior. Native control timing remains to be checked. See TAKEOFF_034_HELD_INPUT.md.

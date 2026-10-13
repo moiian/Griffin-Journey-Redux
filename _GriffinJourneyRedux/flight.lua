@@ -183,12 +183,12 @@ function tick_driver()
         end
         if d.mode=="taking_off" then
             if action_name=="Ch253TakeoffBackJump" then d.saw_takeoff=true end
-            if d.auto_hover and flying and not ground and action_name~="Ch253TakeoffBackJump" and not d.intent then
-                -- Native animation can finish before its Flight/Ground flags settle.
-                -- Adopt a completed hover and explicitly hand control to code movement.
+            if d.auto_hover and flying and not ground and not d.intent then
+                -- Once airborne, request hover without waiting for the takeoff action to end.
+                -- Held input flows straight into slow movement; LT has its own release gate.
                 d.mode="hover";d.gear=1;d.controls_active=true;d.auto_hover=false
                 d.control_node=action_name=="Ch253HoverWaitHoHomingHeight" and action_name or nil
-                d.hover_wait_center=true
+                d.hover_wait_center=nil
             elseif not d.auto_hover and ground and not flying and d.saw_takeoff and action_name~="Ch253TakeoffBackJump" then
                 d.mode="ground";d.controls_active=false
             end
