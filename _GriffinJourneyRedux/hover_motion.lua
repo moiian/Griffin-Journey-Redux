@@ -59,8 +59,8 @@ end
 -- Opposing input brakes to the exact zero crossing, then accelerates away.
 -- Split the integral at that crossing to keep the result independent of frame rate.
 local function velocity_step(value,target,dt,vertical)
-    local acceleration=vertical and (target>=0 and settings.hover_up_tau or settings.hover_down_tau) or settings.hover_accel_tau
-    local deceleration=vertical and (value>=0 and settings.hover_up_tau or settings.hover_down_tau) or settings.hover_decel_tau
+    local acceleration=vertical and (target>=0 and settings.hover_up_accel_tau or settings.hover_down_accel_tau) or settings.hover_accel_tau
+    local deceleration=vertical and (value>=0 and settings.hover_up_decel_tau or settings.hover_down_decel_tau) or settings.hover_decel_tau
     if value*target<0 then
         local braking=vertical and deceleration or settings.hover_reverse_tau
         local crossing=braking*math.log(1+math.abs(value/target))

@@ -553,3 +553,10 @@ All 22 Lua54 files and existing/new offline regressions pass, including settings
 Use gear 1 for all hover/code movement and gear 2 for native sprint; remove gear 0. Ground-only takeoff finishes in gear 1. Gear 1 defaults are A up, Y down and RS native landing. RB dive / LB climb immediately enter gear 2; sprint guidance continues without repeated requests. LT preserves existing low-speed inertia and suppresses held input until neutral. Stick release never restarts the hover action.
 
 Add independent up/down speeds and vertical time constants (default 0.6 seconds each, range 0–3), retain separate horizontal acceleration/coast/reverse-braking settings, and enable player spherical navigation in gear 1. Former default bindings migrate once; custom/None bindings are retained. All 22 Lua54 modules and existing/new offline controls, settings, protection, camera and lifecycle regressions pass, including analytic LT/vertical response, code down versus native landing, shoulder transitions, sphere response and 30/120Hz consistency. Native handling remains for in-game acceptance. See CONTROLS_030_TWO_GEARS.md.
+
+
+## Griffin Journey Redux 0.3.1: independent vertical startup and stopping (2026-10-14)
+
+Replace the two shared vertical response constants with separate up-start/up-stop/down-start/down-stop controls, defaulting to 0.6/0.2/0.2/0.6 seconds (0–3, zero immediate). Vertical reversal and LT use outgoing stopping response; reversal then uses incoming startup response. Migrate old up/down values to up startup/down stopping, preserving new explicit values and zero. Other controls and horizontal/camera behavior are retained.
+
+All 22 Lua54 modules and existing/new offline regressions pass, including migration/save/reload, independent asymmetric velocity/distance, both reversals, LT, bounds/zero and prior two-gear behavior. In-game feel remains to be checked. See VERTICAL_031_INERTIA.md.
