@@ -150,3 +150,10 @@ RT selects gear 2 sprint directly; LT brakes directly to gear 0 stationary hover
 The former native low-speed directional actions are removed from normal controls. Previous sprint guidance, takeoff, landing, seats, camera and protection remain. Code movement uses only the retained spawned Griffin, releases on sprint/landing/external action/stop/Reset, and preserves current-location recovery. AI research is paused; the optional component experiment remains off by default. No native AI fix is claimed.
 
 All 22 Lua54 files and offline gameplay, precise protection, settings, Debug-absent/default-no-diagnostics, movement/input/lifecycle/synchronization regressions pass. In-game native stability and handling remain unverified. See CONTROLS_024_HOVER.md. Development remains on the existing experiment branch; main is unchanged.
+
+
+## Griffin Journey Redux 0.2.5: directional hover controls (2026-10-13)
+
+Correct low-speed strafe direction; horizontal left stick now controls both strafe and eased facing. Right stick returns to native camera control. Separate forward, strafe, backward, vertical-climb and turn speeds all accept zero, with compatible migration from the old shared speed. Hold RB for code-driven vertical ascent, without the former hover action request. LB landing and gear 2 sprint guidance remain unchanged. Settings, precise ownership, pause/exit/recovery and default-no-diagnostics behavior are preserved.
+
+All 22 Lua54 files and existing/new offline regressions pass, including zero settings/save/reload, input polarity, keyboard compatibility, right-stick camera restoration and continuous RB ascent. Native direction and handling still require an in-game check. See CONTROLS_025_HOVER.md. AI research remains paused.

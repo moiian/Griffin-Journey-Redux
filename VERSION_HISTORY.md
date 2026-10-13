@@ -511,3 +511,10 @@ Preserve pushed baseline tag baseline-beta-v0.1.46-jitter-fixed. Replace the Bet
 RT selects gear 2 sprint; LT brakes directly to gear 0 hover. Left-stick input from hover selects gear 1 body-relative horizontal movement, using the same hover action with eased Transform movement; horizontal right stick controls eased facing. Centering returns to stationary hover. The former native low-speed directional actions are removed; prior sprint guidance, takeoff, landing, seats and protection remain. Slow speed and turn rate are adjustable. AI research is paused.
 
 Lua54 compilation and existing gameplay/protection/camera/settings/default-no-diagnostics and Debug-absent checks pass, with new actual-module movement, input, pause, native-update synchronization, scope and recovery checks. Native in-game stability and handling remain unverified. See CONTROLS_024_HOVER.md.
+
+
+## Griffin Journey Redux 0.2.5: directional hover controls (2026-10-13)
+
+Correct low-speed strafe direction; horizontal left stick now controls both strafe and eased facing. Right stick returns to native camera control. Separate forward, strafe, backward, vertical-climb and turn speeds all accept zero, with compatible migration from the old shared speed. Hold RB for code-driven vertical ascent, without the former hover action request. LB landing and gear 2 sprint guidance remain unchanged. Settings, precise ownership, pause/exit/recovery and default-no-diagnostics behavior are preserved.
+
+All 22 Lua54 files and existing/new offline regressions pass, including zero settings/save/reload, input polarity, keyboard compatibility, right-stick camera restoration and continuous RB ascent. Native direction and handling still require an in-game check. See CONTROLS_025_HOVER.md. AI research remains paused.

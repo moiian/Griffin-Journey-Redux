@@ -7,7 +7,7 @@ controls.rows={
     {"stop","结束驾驶","X","None"},{"delete","删除狮鹫","None","None"},
     {"listen","让狮鹫听话","H","None"},{"a","起飞","Space","RDown"},
     {"rt","冲刺／2档","LShift","RTrigBottom"},{"lt","刹停／悬浮","LControl","LTrigBottom"},
-    {"rb","爬升／悬停","E","RTrigTop"},{"lb","俯冲／降落","Q","LTrigTop"},
+    {"rb","爬升","E","RTrigTop"},{"lb","俯冲／降落","Q","LTrigTop"},
     {"left","向左","A","None"},{"right","向右","D","None"},
     {"up","向上／前","W","None"},{"down","向下／后","S","None"},
     {"preset_next","切换座位预设","None","None"},
@@ -115,16 +115,19 @@ function read_pad()
     local x,y=math.max(-1,math.min(1,axis.x)),math.max(-1,math.min(1,axis.y))
     local length=math.sqrt(x*x+y*y)
     if length<=0.2 then x,y=0,0 else local scale=math.min(1,(length-0.2)/0.8)/length;x,y=-x*scale,y*scale end
+    -- Slow-flight pad polarity follows the user's in-game direction check.
+    -- Keyboard movement retains ordinary A-left / D-right independently of sprint's mapping.
+    local hover_x=math.max(-1,math.min(1,x+(current.right and 1 or 0)-(current.left and 1 or 0)))
     x=math.max(-1,math.min(1,x+(current.left and 1 or 0)-(current.right and 1 or 0)))
     y=math.max(-1,math.min(1,y+(current.up and 1 or 0)-(current.down and 1 or 0)))
-    if suppressed then x,y=0,0 end
+    if suppressed then x,y,hover_x=0,0,0 end
     local rx,ry,right_error=0,0,nil
-    if pad then
+    if settings.camera_auto_yaw and pad then
         local ok,right=pcall(function() return pad:call("get_AxisR()") end)
         if ok and right and finite(right.x) and finite(right.y) then rx,ry=right.x,right.y else right_error="右摇杆读取失败" end
     end
     if suppressed then rx,ry,right_error=0,0,nil end
-    return {x=x,y=y,buttons=logical,rx=rx,ry=ry,right_error=right_error,edges=edges}
+    return {x=x,y=y,hover_x=hover_x,buttons=logical,rx=rx,ry=ry,right_error=right_error,edges=edges}
 end
 
 function held(bits, mask) return (bits & mask) == mask end

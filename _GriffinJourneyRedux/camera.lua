@@ -161,36 +161,11 @@ function install_yaw_hook()
         sdk.hook(method,function(args)
             local storage=thread.get_hook_storage()
             storage.griffin_yaw_controller=nil
-            storage.griffin_hover_camera=nil
-            local d=active
-            if alive and d and d.hover_motion and not menu.gameplay_paused() and math.abs(input.rx or 0)>0.2 then
-                local ok=pcall(function()
-                    if not owned_player(d,true) then return end
-                    local manager=sdk.get_managed_singleton("app.CameraManager")
-                    local main=manager and manager._MainCameraControllers and manager._MainCameraControllers[0]
-                    if not main or not main:get_Valid() or main:call("get_TargetCharacter()")~=d.player then return end
-                    local candidate=sdk.to_managed_object(args[2])
-                    if candidate~=main._CurrentCameraController then return end
-                    local angle=candidate:call("get_Angle()")
-                    if angle and finite(angle.y) then storage.griffin_hover_camera={driver=d,controller=candidate,yaw=angle.y,main=main} end
-                end)
-            end
             if alive and settings.camera_auto_yaw and active and follow_state then
                 local candidate=sdk.to_managed_object(args[2])
                 if candidate==follow_state.controller then storage.griffin_yaw_controller=candidate end
             end
         end,function(retval)
-            local hover=thread.get_hook_storage().griffin_hover_camera
-            if hover and active==hover.driver and active.hover_motion and not menu.gameplay_paused() then
-                local ok,err=pcall(function()
-                    assert(owned_player(active,true) and hover.main:get_Valid()
-                        and hover.main:call("get_TargetCharacter()")==active.player
-                        and hover.main._CurrentCameraController==hover.controller,"Hover camera binding changed")
-                    -- Horizontal right-stick input steers the body in hover; pitch remains native.
-                    hover.controller:call("setYaw(System.Single)",hover.yaw)
-                end)
-                if not ok then event("hover_camera_error",tostring(err)) end
-            end
             local candidate=thread.get_hook_storage().griffin_yaw_controller
             if candidate then tick_camera_yaw(candidate) end
             return retval

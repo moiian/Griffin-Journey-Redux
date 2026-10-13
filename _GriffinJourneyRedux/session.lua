@@ -1,9 +1,9 @@
 -- Griffin Journey Redux: session
 return function(ctx)
 local _ENV=ctx
--- Griffin Flight Beta 0.2.4. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.2.5. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-VERSION = "0.2.4"
+VERSION = "0.2.5"
 state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 _G.GriffinJourneyReduxState = state
@@ -27,7 +27,7 @@ passengers.griffin_fall={reset=false,status="狮鹫跌落实验：关闭"}
 passengers.protection={damage=true,relocation=true,lost_check=false,destroy=false,counts={}}
 masks = nil
 input = {x = 0, y = 0, buttons = 0}
-settings = {distance = 30, fov = 90, freeze_player = true, rider_anim="", rider_lookX=0, rider_lookZ=1, rider_tilt_follow=1, rider_pitch_offset=0, rider_anchor="head", rider_neck_joint="", rider_height=1.0, rider_forward=0, rider_side=0, navigation_radius=4.019, steering_yaw=50.276, steering_pitch=22.018, navigation_height=0.991, bumper_pitch=59, controls_revision=1, camera_auto_yaw=false, camera_yaw_speed=120, camera_manual_threshold=0.55, hover_speed=3, hover_turn_speed=75}
+settings = {distance = 30, fov = 90, freeze_player = true, rider_anim="", rider_lookX=0, rider_lookZ=1, rider_tilt_follow=1, rider_pitch_offset=0, rider_anchor="head", rider_neck_joint="", rider_height=1.0, rider_forward=0, rider_side=0, navigation_radius=4.019, steering_yaw=50.276, steering_pitch=22.018, navigation_height=0.991, bumper_pitch=59, controls_revision=1, camera_auto_yaw=false, camera_yaw_speed=120, camera_manual_threshold=0.55, hover_forward_speed=3, hover_strafe_speed=1.5, hover_backward_speed=1.5, hover_climb_speed=1.5, hover_turn_speed=75}
 loaded_settings=nil
 settings_path = "GriffinFlightBeta_Settings.json"
 skip_think_enabled, skip_think_expected = false, nil
@@ -79,8 +79,16 @@ if type(json.load_file) == "function" then
     local ok, saved = pcall(json.load_file, settings_path)
     if ok and type(saved) == "table" then
         loaded_settings=saved
-        if finite(saved.hover_speed) then settings.hover_speed=math.max(0.2,math.min(12,saved.hover_speed)) end
-        if finite(saved.hover_turn_speed) then settings.hover_turn_speed=math.max(10,math.min(180,saved.hover_turn_speed)) end
+        -- Migrate the former shared speed once; explicit per-direction zero values are valid.
+        if finite(saved.hover_speed) then
+            settings.hover_forward_speed=math.max(0,math.min(12,saved.hover_speed))
+            settings.hover_strafe_speed=settings.hover_forward_speed*0.5
+            settings.hover_backward_speed=settings.hover_forward_speed*0.5
+        end
+        for _,key in ipairs({"hover_forward_speed","hover_strafe_speed","hover_backward_speed","hover_climb_speed"}) do
+            if finite(saved[key]) then settings[key]=math.max(0,math.min(12,saved[key])) end
+        end
+        if finite(saved.hover_turn_speed) then settings.hover_turn_speed=math.max(0,math.min(180,saved.hover_turn_speed)) end
         settings.rider_anim=type(saved.rider_anim)=="string" and saved.rider_anim or ""
         if type(saved.camera_auto_yaw)=="boolean" then settings.camera_auto_yaw=saved.camera_auto_yaw end
         if finite(saved.camera_manual_threshold) then settings.camera_manual_threshold=math.max(0.25,math.min(0.95,saved.camera_manual_threshold)) end

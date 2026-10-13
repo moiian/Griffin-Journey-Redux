@@ -10,7 +10,7 @@ local function eligible(d)
 end
 function hover_motion:brake(d)
     local m=d.hover_motion
-    if m then m.vx=0;m.vz=0;m.turn=0;m.last_time=now() end
+    if m then m.vx=0;m.vy=0;m.vz=0;m.turn=0;m.last_time=now() end
     d.gear=0;d.hover_wait_center=true
 end
 local function binding(d,m)
@@ -67,34 +67,36 @@ function hover_motion:tick(d,ch,tr,fx,fz,flying,ground,action)
         assert(type(Quaternion.new)=="function","Quaternion constructor unavailable")
         m={character=ch,go=d.spawn.result.go,transform=tr,context=context,terrain=terrain,
             controller=controller,position=vector(tr:call("get_UniversalPosition()")),
-            yaw=math.atan(fx,fz),vx=0,vz=0,turn=0,last_time=now()}
+            yaw=math.atan(fx,fz),vx=0,vy=0,vz=0,turn=0,last_time=now()}
         d.hover_motion=m
     end
     binding(d,m)
     local t=now()
     local dt=math.max(0,math.min(0.1,t-m.last_time));m.last_time=t
-    local x,y=input.x,input.y
-    local rx=input.rx or 0
-    assert(not input.right_error and finite(rx),"Hover right-stick unavailable")
-    rx=math.abs(rx)<=0.2 and 0 or (rx>0 and 1 or -1)*math.min(1,(math.abs(rx)-0.2)/0.8)
+    local x,y=input.hover_x or input.x,input.y
+    local climb=held(input.buttons,masks.rb)
     if d.hover_wait_center then
-        if x==0 and y==0 and rx==0 then d.hover_wait_center=nil end
-        x,y,rx=0,0,0
+        if x==0 and y==0 and not climb then d.hover_wait_center=nil end
+        x,y,climb=0,0,false
     end
     local length=math.sqrt(x*x+y*y)
     if length>1 then x,y=x/length,y/length end
-    local turn,angle=damp(m.turn,rx*math.rad(settings.hover_turn_speed),dt,0.2)
+    -- The old right-stick raw sign was reversed in-game. Use the corrected
+    -- left-stick slow-flight axis: right-positive drives both strafe and yaw.
+    local turn,angle=damp(m.turn,x*math.rad(settings.hover_turn_speed),dt,0.2)
     m.turn=turn;m.yaw=wrap_yaw(m.yaw+angle)
     local forward_x,forward_z=math.sin(m.yaw),math.cos(m.yaw)
-    -- HID x is left-positive in the existing navigation mapping.
-    local target_x=(forward_x*y-forward_z*x)*settings.hover_speed
-    local target_z=(forward_z*y+forward_x*x)*settings.hover_speed
-    local dx,dz
+    local longitudinal=y*(y>=0 and settings.hover_forward_speed or settings.hover_backward_speed)
+    local lateral=x*settings.hover_strafe_speed
+    local target_x=forward_x*longitudinal+forward_z*lateral
+    local target_z=forward_z*longitudinal-forward_x*lateral
+    local dx,dy,dz
     m.vx,dx=damp(m.vx,target_x,dt,0.2)
+    m.vy,dy=damp(m.vy,climb and settings.hover_climb_speed or 0,dt,0.2)
     m.vz,dz=damp(m.vz,target_z,dt,0.2)
-    m.position.x=m.position.x+dx;m.position.z=m.position.z+dz
-    if x==0 and y==0 and rx==0 and math.abs(m.vx)+math.abs(m.vz)<0.01 and math.abs(m.turn)<0.001 then
-        m.vx=0;m.vz=0;m.turn=0;d.gear=0
+    m.position.x=m.position.x+dx;m.position.y=m.position.y+dy;m.position.z=m.position.z+dz
+    if x==0 and y==0 and not climb and math.abs(m.vx)+math.abs(m.vy)+math.abs(m.vz)<0.01 and math.abs(m.turn)<0.001 then
+        m.vx=0;m.vy=0;m.vz=0;m.turn=0;d.gear=0
     else d.gear=1 end
     write_pose(d,m)
     d.heading={x=forward_x,z=forward_z};d.body_pitch=0

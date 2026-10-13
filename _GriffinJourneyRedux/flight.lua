@@ -54,7 +54,7 @@ function start_driver()
             input = read_pad()
             d.previous_buttons = input.buttons -- holding A/RT on enable is not a fresh press
             active = d
-            install_yaw_hook()
+            if settings.camera_auto_yaw then install_yaw_hook() end
             if settings.head_camera~=false then change_camera_mode("griffin") end
             install_fall_hook()
             passengers.install_protection()
@@ -70,7 +70,7 @@ function start_driver()
                 d.controls_active=true; d.control_node="Ch253HoverWaitHoHomingHeight"
                 set_intent(d, "Ch253HoverWaitHoHomingHeight", "hover")
             end
-            status = "驾驶中：A 起飞；RT 2档冲刺，LT 刹停；左摇杆慢移，右摇杆转向。"
+            status = "驾驶中：A 起飞；RT 2档冲刺，LT 刹停；左摇杆慢移与转向，右摇杆控制镜头。"
             event("driver_started", {freeze_player = d.freeze_requested,anchor_mode=d.anchor_mode,navigation_radius=settings.navigation_radius,steering_yaw=settings.steering_yaw,steering_pitch=settings.steering_pitch})
         end)
         if not ok then
@@ -180,8 +180,6 @@ function tick_driver()
             else event("takeoff_ignored","A仅允许地面起飞") end
         elseif d.gear<=1 and held(pressed,masks.lb) then
             resume(0);hover_motion:release(d);d.manual_hold="landing";d.wait_center=true
-        elseif d.gear<=1 and held(pressed,masks.rb) then
-            resume(0);hover_motion:brake(d)
         end
         if d.mode=="taking_off" then
             if action_name=="Ch253TakeoffBackJump" then d.saw_takeoff=true end
