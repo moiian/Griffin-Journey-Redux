@@ -164,3 +164,10 @@ All 22 Lua54 files and existing/new offline regressions pass, including zero set
 Left-stick forward/back moves along the Griffin's facing; left/right turns without strafing. The low-speed camera continuously follows horizontal body heading, including idle catch-up after releasing the stick, with an independent adjustable speed (0–360 degrees/s, default 120). Existing body-turn and movement settings remain compatible; obsolete strafe data is ignored. Sprint guidance and its camera settings remain unchanged.
 
 All 22 Lua54 files and existing/new offline gameplay, protection, camera, settings and lifecycle checks pass. Exact camera ownership, native-unit calibration, shortest-arc rate bounds, pause/release and camera-failure isolation are covered. Native visual behavior and handling remain unverified. See CONTROLS_026_CAMERA.md.
+
+
+## Griffin Journey Redux 0.2.7: shared camera-follow policy (2026-10-13)
+
+Low-speed camera following now runs only while body yaw is turning, and stops without idle catch-up when rotation settles. Both gears share right-stick blending, takeover threshold, hysteresis, recovery delay, native-unit calibration and shortest-arc easing. Speed settings remain separate; gear 2's trigger and behavior are preserved. Low-speed right-stick takeover also works with the sprint-follow toggle off.
+
+All 22 Lua54 files and existing/new offline regressions pass. Differential output comparison against saved 0.2.6 source preserves sprint-camera behavior across 2,000 simulated frames. Native handling still requires in-game acceptance. See CONTROLS_027_SHARED_CAMERA.md.

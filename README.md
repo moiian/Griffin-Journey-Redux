@@ -2,7 +2,7 @@
 
 Fly a friendly Griffin with configurable controls, a head-following camera, and separate seats for the player, pawns, and accompanying NPCs.
 
-Version: **0.2.6**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
+Version: **0.2.7**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
 
 ## Install or upgrade
 
@@ -26,7 +26,7 @@ Open **Griffin Journey Redux → 一般设置**, spawn a Griffin, and start driv
 
 Gear 0 holds position. At low speed, left-stick forward/back moves along the Griffin's facing, and left/right turns it with a slight delay. There is no lateral movement. Forward, backward, vertical-climb and turning speeds are independent and can all be set to zero in Flight Settings. Hold RB (E) to climb vertically; LB (Q) retains landing.
 
-The low-speed camera continuously turns toward the Griffin's horizontal facing, including while turning in place and while returning to an idle hover. Adjust **1档镜头跟随速度（度／秒）** in Camera Settings (default 120 degrees/s; zero stops automatic low-speed yaw). Camera pitch remains manually controlled. Low-speed following does not use the sprint camera's stick-input gate or right-stick offset/delay.
+The low-speed camera follows only while the Griffin is turning; it stops correcting when body rotation stops, even if some camera lag remains. Both gears share the same right-stick blending, takeover threshold, hysteresis and 0.8-second recovery delay. Adjust **1档镜头跟随速度（度／秒）** and **2档镜头跟随速度（度／秒）** independently in Camera Settings. Low-speed speed zero disables its automatic yaw. Camera pitch remains manually controlled.
 
 RT goes directly to gear 2, preserving the previous sprint guidance and separate sprint-camera settings. LT brakes directly to stationary hover; if movement/climb input is held, release it before moving again. Controls can be changed in the menu.
 
@@ -52,7 +52,7 @@ The player package omits the developer folder. The developer package includes it
 
 Lua54 compilation and offline gameplay, scope, lifecycle, settings, default-no-diagnostics, and Debug-absent regressions pass. The user confirmed normal operation of the refactored 0.2.0 build. The action-time retargeting experiment has been reverted; the autonomous target issue remains unresolved.
 
-AI target research is paused. This control update reduces ordinary movement action changes and does not claim to fix autonomous targets. The 0.2.6 control scheme passes offline checks; native movement stability and feel still require an in-game check.
+AI target research is paused. This control update reduces ordinary movement action changes and does not claim to fix autonomous targets. The 0.2.7 control scheme passes offline checks; native movement stability and feel still require an in-game check.
 
 Author: **aelinore**.
 

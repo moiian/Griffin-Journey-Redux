@@ -122,7 +122,9 @@ function read_pad()
     y=math.max(-1,math.min(1,y+(current.up and 1 or 0)-(current.down and 1 or 0)))
     if suppressed then x,y,hover_x=0,0,0 end
     local rx,ry,right_error=0,0,nil
-    if settings.camera_auto_yaw and pad then
+    local hover_camera_input=active and active.controls_active and not active.external_control
+        and active.gear<=1 and active.hover_motion and settings.hover_camera_yaw_speed>0
+    if (settings.camera_auto_yaw or hover_camera_input) and pad then
         local ok,right=pcall(function() return pad:call("get_AxisR()") end)
         if ok and right and finite(right.x) and finite(right.y) then rx,ry=right.x,right.y else right_error="右摇杆读取失败" end
     end

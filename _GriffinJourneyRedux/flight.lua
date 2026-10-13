@@ -70,7 +70,7 @@ function start_driver()
                 d.controls_active=true; d.control_node="Ch253HoverWaitHoHomingHeight"
                 set_intent(d, "Ch253HoverWaitHoHomingHeight", "hover")
             end
-            status = "驾驶中：A 起飞；RT 2档冲刺，LT 刹停；左摇杆前后移动、左右转向；1档镜头持续跟随面向。"
+            status = "驾驶中：A 起飞；RT 2档冲刺，LT 刹停；左摇杆前后移动、左右转向；1档镜头仅转向时跟随，右摇杆可打断。"
             event("driver_started", {freeze_player = d.freeze_requested,anchor_mode=d.anchor_mode,navigation_radius=settings.navigation_radius,steering_yaw=settings.steering_yaw,steering_pitch=settings.steering_pitch})
         end)
         if not ok then

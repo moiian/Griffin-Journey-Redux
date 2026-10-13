@@ -46,6 +46,7 @@ re.on_draw_ui(function()
             if value and install_yaw_hook() then settings.head_camera=true;change_camera_mode("griffin") end
             controls.save()
         end
+        imgui.text("1档仅转向时跟随；两档共用右摇杆接管阈值与恢复延迟")
         menu.slider("hover_camera_yaw_speed","1档镜头跟随速度（度／秒）",0,360)
         if active and active.hover_camera_error then imgui.text("1档镜头跟随暂不可用") end
         menu.slider("camera_yaw_speed","2档镜头跟随速度（度／秒）",15,360)
