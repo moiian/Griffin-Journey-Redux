@@ -25,6 +25,9 @@ re.on_draw_ui(function()
         changed,value=menu.toggle("狮鹫防抖",settings.griffin_anti_jitter)
         if changed then settings.griffin_anti_jitter=value;anti_jitter.griffin_stop:set_enabled(value);controls.save() end
         if settings.griffin_anti_jitter and not anti_jitter.griffin_stop.enabled then imgui.text(anti_jitter.griffin_stop.status) end
+        imgui.text("RT：2档冲刺；LT：0档刹停；左摇杆：1档身体方向慢移；右摇杆：水平转向")
+        menu.slider("hover_speed","1档慢移速度（米／秒）",0.2,12)
+        menu.slider("hover_turn_speed","1档转向速度（度／秒）",10,180)
         menu.slider("steering_yaw","左右转向灵敏度（最大角度）",1,85)
         menu.slider("steering_pitch","摇杆上下微调（最大角度）",1,80)
         menu.slider("bumper_pitch","RB／LB 升降角度（最高59°）",1,59)
@@ -35,7 +38,7 @@ re.on_draw_ui(function()
     if imgui.tree_node("镜头设置") then
         local changed,value=menu.toggle("镜头跟随狮鹫头部",settings.head_camera)
         if changed then settings.head_camera=value;change_camera_mode(value and "griffin" or "original");controls.save() end
-        changed,value=menu.toggle("3档转向时跟随镜头###BetaCameraYaw",settings.camera_auto_yaw)
+        changed,value=menu.toggle("2档转向时跟随镜头###BetaCameraYaw",settings.camera_auto_yaw)
         if changed then
             settings.camera_auto_yaw=value;yaw_state=nil
             if value and install_yaw_hook() then settings.head_camera=true;change_camera_mode("griffin") end

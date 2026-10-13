@@ -2,7 +2,7 @@
 
 Fly a friendly Griffin with configurable controls, a head-following camera, and separate seats for the player, pawns, and accompanying NPCs.
 
-Version: **0.2.3**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
+Version: **0.2.4**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
 
 ## Install or upgrade
 
@@ -16,19 +16,22 @@ Open **Griffin Journey Redux → 一般设置**, spawn a Griffin, and start driv
 | --- | --- | --- |
 | Start / stop driving | F / X | Rebindable |
 | Take off from the ground | Space | A |
-| Sprint / gear 3 | Left Shift | RT |
-| Decrease gear | Left Ctrl | LT |
-| Steer | WASD | Left stick |
-| Gear-dependent climb / descend / hover / land | E / Q | RB / LB |
+| Sprint / gear 2 | Left Shift | RT |
+| Stop / gear 0 hover | Left Ctrl | LT |
+| Slow movement / sprint steering | WASD | Left stick |
+| Slow-flight facing | — | Right stick horizontal |
+| Sprint climb / descend; hover / land at low speed | E / Q | RB / LB |
 | Retarget the player | H | Rebindable |
 
-Gear 1 provides small movements and hover when centered. Gear 2 provides directional hover movement. Gear 3 uses fast target-directed flight. Controls can be changed in the menu.
+Gear 0 holds position. From hover, push the left stick to move slowly in any horizontal direction relative to the Griffin's facing; this is gear 1. Release the stick to ease back to a stationary hover. The horizontal right stick turns the Griffin with a slight delay; its vertical camera input remains available. Slow movement and turning share the same hover animation.
+
+RT goes directly to gear 2, preserving the previous sprint guidance. LT brakes directly to stationary hover; if a stick is held, center it before moving again. Slow-flight speed and turning speed are adjustable in Flight Settings. Controls can be changed in the menu.
 
 ## Seats and camera
 
 Edit the player, individual pawns, and accompanying NPCs independently. Presets support cloning, renaming, switching, and confirmed deletion. Seat positions, facing, body tilt, action names, camera distance, and FOV are saved automatically. Ordinary bystanders are not seated.
 
-The camera can follow the Griffin's head. Optional gear 3 turning follows horizontally, with manual right-stick override. Pausing retains seat display; Photo Mode allows seat adjustments.
+The camera can follow the Griffin's head. Optional gear 2 turning follows horizontally, with manual right-stick override. Pausing retains seat display; Photo Mode allows seat adjustments.
 
 Steep, vertical and inverted body attitudes no longer automatically end driving or release seats. At exactly vertical attitudes, navigation retains the last valid horizontal heading.
 
@@ -46,7 +49,7 @@ The player package omits the developer folder. The developer package includes it
 
 Lua54 compilation and offline gameplay, scope, lifecycle, settings, default-no-diagnostics, and Debug-absent regressions pass. The user confirmed normal operation of the refactored 0.2.0 build. The action-time retargeting experiment has been reverted; the autonomous target issue remains unresolved.
 
-The user still observes autonomous Griffin decision targets being used when a new action is requested, despite think skipping. This remains unresolved.
+AI target research is paused. This control update reduces ordinary movement action changes and does not claim to fix autonomous targets. The 0.2.4 control scheme passes offline checks; native movement stability and feel still require an in-game check.
 
 Author: **aelinore**.
 

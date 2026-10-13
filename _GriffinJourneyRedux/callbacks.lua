@@ -90,6 +90,7 @@ re.on_pre_application_entry("UpdateBehavior",function()
     if debug_tools then debug_tools:capture("behavior_before_native") end
 end)
 re.on_application_entry("UpdateBehavior",function()
+    hover_motion:after_behavior()
     if debug_tools then debug_tools:capture("behavior_native_after") end
 end)
 menu.player_visual_pre=function()
@@ -223,6 +224,7 @@ function bridge.request_action(node, allow_cross, phase)
     if active then
         -- Replacing the intent cancels already queued requests. External actions also
         -- cancel automatic takeoff-to-hover; only a new controller press replaces them.
+        hover_motion:release(active)
         active.mode = "external"
         active.external_control = true
         active.control_node = nil

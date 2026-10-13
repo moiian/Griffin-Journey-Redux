@@ -6,7 +6,7 @@ controls.rows={
     {"spawn","召唤狮鹫","None","None"},{"start","开始驾驶","F","None"},
     {"stop","结束驾驶","X","None"},{"delete","删除狮鹫","None","None"},
     {"listen","让狮鹫听话","H","None"},{"a","起飞","Space","RDown"},
-    {"rt","冲刺／3档","LShift","RTrigBottom"},{"lt","减速／降档","LControl","LTrigBottom"},
+    {"rt","冲刺／2档","LShift","RTrigBottom"},{"lt","刹停／悬浮","LControl","LTrigBottom"},
     {"rb","爬升／悬停","E","RTrigTop"},{"lb","俯冲／降落","Q","LTrigTop"},
     {"left","向左","A","None"},{"right","向右","D","None"},
     {"up","向上／前","W","None"},{"down","向下／后","S","None"},
@@ -119,10 +119,11 @@ function read_pad()
     y=math.max(-1,math.min(1,y+(current.up and 1 or 0)-(current.down and 1 or 0)))
     if suppressed then x,y=0,0 end
     local rx,ry,right_error=0,0,nil
-    if settings.camera_auto_yaw and pad then
+    if pad then
         local ok,right=pcall(function() return pad:call("get_AxisR()") end)
         if ok and right and finite(right.x) and finite(right.y) then rx,ry=right.x,right.y else right_error="右摇杆读取失败" end
     end
+    if suppressed then rx,ry,right_error=0,0,nil end
     return {x=x,y=y,buttons=logical,rx=rx,ry=ry,right_error=right_error,edges=edges}
 end
 

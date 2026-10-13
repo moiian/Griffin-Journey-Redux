@@ -1,0 +1,13 @@
+# Hover and sprint controls — 0.2.4
+
+The former low-speed native directional actions are removed from normal driving. Gear 0 and gear 1 use `Ch253HoverWaitHoHomingHeight`; gear 2 keeps the former gear 3 `Ch253WrapAroundStartLoop` and spherical target guidance.
+
+RT selects sprint directly. LT selects stationary hover directly, clears movement/turn velocity, and requires held sticks to center before slow movement resumes. At low speed, left-stick input moves relative to body heading; horizontal right-stick input turns the body. Centering both sticks eases to a true zero-speed gear 0. RB retains hover and LB retains landing at low speed; sprint shoulder guidance and ground-only takeoff remain.
+
+`hover_motion.lua` scopes Transform, Universal position, position/rotation context and collision-controller synchronization to the retained spawned Griffin. It starts only after the hover action is current, without freezing AI/FSM or replacing animation playback. The target is advanced once per behavior update, then reapplied after native behavior without integrating twice. Positions are stored in Universal coordinates. Defaults are 3 m/s and 75 degrees/s, with a 0.2-second exponential response; diagonal input is normalized. New speed settings load/save independently of diagnostics.
+
+Pause/photo mode do not integrate or write poses. Sprint, landing, external actions, stop and Reset release code movement. Reference replacement rejects stale writes. A partially applied pose is repaired at the current physical location; failures retain recovery references and block another drive until repaired. Horizontal right-stick camera yaw is suppressed only while that stick steers a bound low-speed Griffin, on the exact driving player's camera controller; camera pitch and sprint camera behavior remain native.
+
+Validation: all 22 Lua files compile under Lua54. Existing gameplay, seats, camera, tilt, precise anti-jitter, component-experiment lifecycle, default-zero-diagnostics and Debug-absent package regressions pass. New actual-module checks cover body-relative cardinal/diagonal/360 movement, 30/120 Hz response agreement, delayed yaw, input capture, LT brake/recenter, repeated post-native synchronization, pause, sprint/landing/external release, reference replacement, partial-write recovery, stop and Reset. These are offline simulations, not native in-game or visual acceptance.
+
+In-game check: end driving, Reset scripts, verify v0.2.4, take off, then test hover → left-stick slow movement → release → right-stick facing → RT sprint → LT brake. Check pause/resume and stop at the current location. Leave the optional decision-component experiment off for normal driving.

@@ -45,7 +45,7 @@ function start_driver()
                 transform = player:call("get_Transform()"), context = player:get_field("<PosRotContext>k__BackingField"),
                 terrain = terrain, controller = terrain and terrain.MainCharacterController,
                 fall = player:get_field("<FallInfo>k__BackingField"), fsm = player_fsm(player),
-                passengers={},fall_reset_pending=true,anchor_mode=anchor_mode, gear=1, controls_active=false, mode = "ground", last_request = -math.huge, started = now(), pending = false}
+                passengers={},fall_reset_pending=true,anchor_mode=anchor_mode, gear=0, controls_active=false, mode = "ground", last_request = -math.huge, started = now(), pending = false}
             assert(d.transform and d.context and d.controller and d.fall and d.fsm, "Player interfaces unavailable")
             local ft = d.fsm:get_type_definition()
             assert(ft:get_method("get_Enabled()") and ft:get_method("set_Enabled(System.Boolean)"), "FSM Enabled interface unavailable")
@@ -54,7 +54,7 @@ function start_driver()
             input = read_pad()
             d.previous_buttons = input.buttons -- holding A/RT on enable is not a fresh press
             active = d
-            if settings.camera_auto_yaw then install_yaw_hook() end
+            install_yaw_hook()
             if settings.head_camera~=false then change_camera_mode("griffin") end
             install_fall_hook()
             passengers.install_protection()
@@ -70,7 +70,7 @@ function start_driver()
                 d.controls_active=true; d.control_node="Ch253HoverWaitHoHomingHeight"
                 set_intent(d, "Ch253HoverWaitHoHomingHeight", "hover")
             end
-            status = "驾驶中：A 仅起飞；RT 3档，LT 逐档减速；RB／LB 分档操作。"
+            status = "驾驶中：A 起飞；RT 2档冲刺，LT 刹停；左摇杆慢移，右摇杆转向。"
             event("driver_started", {freeze_player = d.freeze_requested,anchor_mode=d.anchor_mode,navigation_radius=settings.navigation_radius,steering_yaw=settings.steering_yaw,steering_pitch=settings.steering_pitch})
         end)
         if not ok then
@@ -93,13 +93,13 @@ function navigation_anchor(d,ch,tr,fx,fz)
         radius=settings.navigation_radius,height=settings.navigation_height} end
     local radius=settings.navigation_radius
     local nav_x,nav_y=input.x,input.y
-    if d.controls_active and not d.external_control and (d.gear==2 or d.manual_hold) then nav_x,nav_y=0,0 end
+    if d.controls_active and not d.external_control and (d.gear<=1 or d.manual_hold) then nav_x,nav_y=0,0 end
     local yaw=math.max(-1,math.min(1,nav_x))*settings.steering_yaw*math.pi/180
     local height=math.max(-radius*0.9,math.min(radius*0.9,settings.navigation_height))
     local neutral_pitch=math.asin(height/radius)
     local limit=85*math.pi/180
     local pitch=math.max(-limit,math.min(limit,neutral_pitch+math.max(-1,math.min(1,nav_y))*settings.steering_pitch*math.pi/180))
-    if d.controls_active and not d.external_control and d.gear==3 and masks then
+    if d.controls_active and not d.external_control and d.gear==2 and masks then
         local rb,lb=held(input.buttons,masks.rb),held(input.buttons,masks.lb)
         if rb ~= lb then pitch=(rb and 1 or -1)*settings.bumper_pitch*math.pi/180 end
     end
@@ -128,10 +128,12 @@ function tick_driver()
     if menu.gameplay_paused() then
         if not d.menu_paused then event("driver_menu_paused",true) end
         d.menu_paused=true;d.previous_buttons=input.buttons
+        if d.hover_motion then d.hover_motion.last_time=now() end
         return -- preserve player position, FSM, bones, camera and pending intent
     end
     if d.menu_paused then
         d.menu_paused=nil;d.previous_buttons=input.buttons
+        if d.hover_motion then d.hover_motion.last_time=now() end
         event("driver_menu_resumed",true)
     end
     if now()<d.started then stop_driver("游戏时间上下文变化");return end
@@ -158,54 +160,50 @@ function tick_driver()
         d.previous_buttons = input.buttons
         local moving=input.x~=0 or input.y~=0
         local function resume(gear)
+            local keep_hover=gear==0 and not d.external_control and d.control_node=="Ch253HoverWaitHoHomingHeight"
             d.gear=gear; d.controls_active=true; d.external_control=false
-            d.manual_hold=nil; d.control_node=nil; d.auto_hover=false
-            d.intent=nil; d.mode="control"
+            d.manual_hold=nil; d.control_node=keep_hover and "Ch253HoverWaitHoHomingHeight" or nil; d.auto_hover=false
+            if not keep_hover then d.intent=nil end
+            d.mode=keep_hover and "hover" or "control"
+            d.hover_wait_center=nil
+            if gear==2 then hover_motion:release(d) end
             event("gear_selected",gear)
         end
         if held(pressed,masks.rt) then
-            resume(3)
+            resume(2)
         elseif held(pressed,masks.lt) then
-            resume(math.max(1,d.gear-1))
+            resume(0);hover_motion:brake(d)
         elseif held(pressed,masks.a) then
-            -- This native node can also land. Never request it in flight or twice mid-takeoff.
             if ground and not flying and d.mode~="taking_off" and action_name~="Ch253TakeoffBackJump" then
-                resume(1); d.mode="taking_off"
-                set_intent(d,"Ch253TakeoffBackJump","taking_off"); d.intent.auto_hover=true
+                resume(0);hover_motion:release(d);d.mode="taking_off"
+                set_intent(d,"Ch253TakeoffBackJump","taking_off");d.intent.auto_hover=true
             else event("takeoff_ignored","A仅允许地面起飞") end
-        elseif d.gear<=2 and (held(pressed,masks.rb) or held(pressed,masks.lb)) then
-            resume(d.gear)
-            d.manual_hold=held(pressed,masks.lb) and "landing" or (d.gear==2 and "climb" or "hover")
-            d.wait_center=true
+        elseif d.gear<=1 and held(pressed,masks.lb) then
+            resume(0);hover_motion:release(d);d.manual_hold="landing";d.wait_center=true
+        elseif d.gear<=1 and held(pressed,masks.rb) then
+            resume(0);hover_motion:brake(d)
         end
         if d.mode=="taking_off" then
             if action_name=="Ch253TakeoffBackJump" then d.saw_takeoff=true end
             if d.auto_hover and flying and action_name~="Ch253TakeoffBackJump" and not d.intent then
-                d.mode="hover"; d.manual_hold="hover"; d.wait_center=true; d.control_node=nil
+                d.mode="hover";d.gear=0;d.control_node=nil;d.hover_wait_center=true
             elseif ground and not flying and d.saw_takeoff and action_name~="Ch253TakeoffBackJump" then
-                d.mode="ground"; d.controls_active=false
+                d.mode="ground";d.controls_active=false
             end
         end
-        if d.manual_hold then
+        if d.manual_hold=="landing" then
             if not moving then d.wait_center=false
-            elseif not d.wait_center then d.manual_hold=nil; d.control_node=nil end
+            elseif not d.wait_center then d.manual_hold=nil;d.control_node=nil end
         end
         if d.controls_active and not d.external_control and d.mode~="taking_off" then
             local node,mode
             if d.manual_hold=="landing" then node,mode="Ch253HoverToLanding","landing"
-            elseif d.manual_hold=="climb" then node,mode="HoverBackwardTargetHeight","climb"
-            elseif d.manual_hold=="hover" then node,mode="Ch253HoverWaitHoHomingHeight","hover"
-            elseif d.gear==3 then node,mode="Ch253WrapAroundStartLoop","dash"
-            elseif d.gear==2 then
-                node,mode="Ch253HoverWaitHoHomingHeight","hover"
-                if moving and math.abs(input.x)>math.abs(input.y) then
-                    node=input.x<0 and "HoverLateralRTargetHeight" or "HoverLateralLTargetHeight"
-                elseif input.y<0 then node,mode="HoverBackward","reverse"
-                elseif input.y>0 then node,mode="HoverForward","forward" end
-            elseif moving then node,mode="Ch253AirHoverMoveToTarget","fine"
+            elseif d.gear==2 then node,mode="Ch253WrapAroundStartLoop","dash"
             else node,mode="Ch253HoverWaitHoHomingHeight","hover" end
-            if node~=d.control_node then d.control_node=node; set_intent(d,node,mode) end
+            if node~=d.control_node then d.control_node=node;set_intent(d,node,mode) end
         end
+        hover_motion:tick(d,ch,tr,fx,fz,flying,ground,action_name)
+        if d.hover_motion then fx,fz=d.heading.x,d.heading.z end
         local target,neutral,sphere=navigation_anchor(d,ch,tr,fx,fz)
         write_anchor(d,target,neutral)
         dispatch(d)

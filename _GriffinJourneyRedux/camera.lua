@@ -74,8 +74,8 @@ end
 function tick_camera_yaw(controller)
     local d,s=active,follow_state
     if not alive or not settings.camera_auto_yaw then return end
-    if not d or not s or camera_mode~="griffin" or d.gear~=3 or not d.controls_active or d.external_control then
-        yaw_state=nil; yaw_status="自动跟随待机：仅3档头部镜头生效";return
+    if not d or not s or camera_mode~="griffin" or d.gear~=2 or not d.controls_active or d.external_control then
+        yaw_state=nil; yaw_status="自动跟随待机：仅2档头部镜头生效";return
     end
     if controller~=s.controller then return end
     local ok,err=pcall(function()
@@ -143,7 +143,7 @@ function tick_camera_yaw(controller)
         local output=current+step
         if dt>0 and math.abs(step)>0.00001 then controller:call("setYaw(System.Single)",output*y.scale) end
         y.previous_yaw=output
-        yaw_status="3档转向跟随；右摇杆小幅叠加、大幅接管"
+        yaw_status="2档转向跟随；右摇杆小幅叠加、大幅接管"
         if d.trace then d.trace.camera_yaw={manual=false,steering=true,current=angle.y,requested=output*y.scale,target=desired*y.scale,
             right_magnitude=magnitude,threshold=threshold,weight=weight,
             manual_yaw=y.manual_yaw,speed=settings.camera_yaw_speed,scale=y.scale,dt=dt} end
@@ -161,11 +161,36 @@ function install_yaw_hook()
         sdk.hook(method,function(args)
             local storage=thread.get_hook_storage()
             storage.griffin_yaw_controller=nil
+            storage.griffin_hover_camera=nil
+            local d=active
+            if alive and d and d.hover_motion and not menu.gameplay_paused() and math.abs(input.rx or 0)>0.2 then
+                local ok=pcall(function()
+                    if not owned_player(d,true) then return end
+                    local manager=sdk.get_managed_singleton("app.CameraManager")
+                    local main=manager and manager._MainCameraControllers and manager._MainCameraControllers[0]
+                    if not main or not main:get_Valid() or main:call("get_TargetCharacter()")~=d.player then return end
+                    local candidate=sdk.to_managed_object(args[2])
+                    if candidate~=main._CurrentCameraController then return end
+                    local angle=candidate:call("get_Angle()")
+                    if angle and finite(angle.y) then storage.griffin_hover_camera={driver=d,controller=candidate,yaw=angle.y,main=main} end
+                end)
+            end
             if alive and settings.camera_auto_yaw and active and follow_state then
                 local candidate=sdk.to_managed_object(args[2])
                 if candidate==follow_state.controller then storage.griffin_yaw_controller=candidate end
             end
         end,function(retval)
+            local hover=thread.get_hook_storage().griffin_hover_camera
+            if hover and active==hover.driver and active.hover_motion and not menu.gameplay_paused() then
+                local ok,err=pcall(function()
+                    assert(owned_player(active,true) and hover.main:get_Valid()
+                        and hover.main:call("get_TargetCharacter()")==active.player
+                        and hover.main._CurrentCameraController==hover.controller,"Hover camera binding changed")
+                    -- Horizontal right-stick input steers the body in hover; pitch remains native.
+                    hover.controller:call("setYaw(System.Single)",hover.yaw)
+                end)
+                if not ok then event("hover_camera_error",tostring(err)) end
+            end
             local candidate=thread.get_hook_storage().griffin_yaw_controller
             if candidate then tick_camera_yaw(candidate) end
             return retval

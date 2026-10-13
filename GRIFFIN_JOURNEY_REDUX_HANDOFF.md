@@ -142,3 +142,11 @@ _GriffinJourneyReduxDebug/          可选开发模块，玩家包可完全省�
 21个Lua54编译及既有玩法、防抖、玩家包无Debug、默认零诊断输出和决策组件生命周期回归通过。新增实际驾驶与双随从／同行NPC模拟覆盖原阈值两侧、正负90度、倒置和侧滚，确认驾驶／座位保持、坐标有限及异常旋转恢复。已部署，原生画面效果待验收，不打verified标签。手柄输入角度、座位视觉俯仰参数及Settings保持。
 
 方向6仍为默认关闭的会话实验，正常驾驶保持关闭；本版没有新增AI修复或扩大组件禁用。方向5保持撤回，隔离动画路线保持放弃。
+
+## Griffin Journey Redux 0.2.4: hover and sprint controls (2026-10-13)
+
+RT selects gear 2 sprint directly; LT brakes directly to gear 0 stationary hover. From hover, the left stick enters gear 1 body-relative horizontal movement; centering eases back to stationary hover. The horizontal right stick turns the Griffin with a slight delay. Slow movement and turning share the same hover action. Default slow speed is 3 m/s and turn speed is 75 degrees/s; both are adjustable.
+
+The former native low-speed directional actions are removed from normal controls. Previous sprint guidance, takeoff, landing, seats, camera and protection remain. Code movement uses only the retained spawned Griffin, releases on sprint/landing/external action/stop/Reset, and preserves current-location recovery. AI research is paused; the optional component experiment remains off by default. No native AI fix is claimed.
+
+All 22 Lua54 files and offline gameplay, precise protection, settings, Debug-absent/default-no-diagnostics, movement/input/lifecycle/synchronization regressions pass. In-game native stability and handling remain unverified. See CONTROLS_024_HOVER.md. Development remains on the existing experiment branch; main is unchanged.

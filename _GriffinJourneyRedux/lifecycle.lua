@@ -15,6 +15,8 @@ stop_driver = function(reason)
     if not d then return ai_ok end
     d.intent = nil -- queued native action callbacks must see that driving has ended
     local errors = passengers.restore_all and passengers.restore_all(d) or {}
+    local hover_ok,hover_err=pcall(hover_motion.release,hover_motion,d)
+    if not hover_ok then errors[#errors+1]="慢速位置恢复 "..tostring(hover_err) end
     if not ai_ok then errors[#errors+1]="决策组件恢复 "..tostring(ai_err) end
     local bone_ok,bone_err=pcall(restore_bone,d)
     if not bone_ok then errors[#errors+1]="骨骼恢复 "..tostring(bone_err) end
