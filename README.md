@@ -2,7 +2,7 @@
 
 Fly a friendly Griffin with configurable controls, a head-following camera, and separate seats for the player, pawns, and accompanying NPCs.
 
-Version: **0.2.5**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
+Version: **0.2.6**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
 
 ## Install or upgrade
 
@@ -19,16 +19,16 @@ Open **Griffin Journey Redux → 一般设置**, spawn a Griffin, and start driv
 | Sprint / gear 2 | Left Shift | RT |
 | Stop / gear 0 hover | Left Ctrl | LT |
 | Slow movement / sprint steering | WASD | Left stick |
-| Slow-flight facing | A / D | Left stick horizontal |
+| Low-speed facing (no strafe) | A / D | Left stick horizontal |
 | Camera | Mouse | Right stick |
 | Climb / sprint descend; low-speed landing | E / Q | RB / LB |
 | Retarget the player | H | Rebindable |
 
-Gear 0 holds position. From hover, push the left stick to move slowly in any horizontal direction relative to the Griffin's facing; this is gear 1. Left/right input both strafes and turns the Griffin with a slight delay. Release to ease back to stationary hover. The right stick controls the camera normally.
+Gear 0 holds position. At low speed, left-stick forward/back moves along the Griffin's facing, and left/right turns it with a slight delay. There is no lateral movement. Forward, backward, vertical-climb and turning speeds are independent and can all be set to zero in Flight Settings. Hold RB (E) to climb vertically; LB (Q) retains landing.
 
-Forward, strafe, backward, vertical climb and turning speeds are independent and can all be set to zero in Flight Settings. Defaults are 3 m/s forward, 1.5 m/s strafe/backward/climb and 75 degrees/s turning; existing shared-speed settings migrate to forward speed. Hold RB (E) in low-speed hover to climb vertically without requesting a new action. LB (Q) retains landing.
+The low-speed camera continuously turns toward the Griffin's horizontal facing, including while turning in place and while returning to an idle hover. Adjust **1档镜头跟随速度（度／秒）** in Camera Settings (default 120 degrees/s; zero stops automatic low-speed yaw). Camera pitch remains manually controlled. Low-speed following does not use the sprint camera's stick-input gate or right-stick offset/delay.
 
-RT goes directly to gear 2, preserving the previous sprint guidance. LT brakes directly to stationary hover; if movement/climb input is held, release it before moving again. Controls can be changed in the menu.
+RT goes directly to gear 2, preserving the previous sprint guidance and separate sprint-camera settings. LT brakes directly to stationary hover; if movement/climb input is held, release it before moving again. Controls can be changed in the menu.
 
 ## Seats and camera
 
@@ -52,7 +52,7 @@ The player package omits the developer folder. The developer package includes it
 
 Lua54 compilation and offline gameplay, scope, lifecycle, settings, default-no-diagnostics, and Debug-absent regressions pass. The user confirmed normal operation of the refactored 0.2.0 build. The action-time retargeting experiment has been reverted; the autonomous target issue remains unresolved.
 
-AI target research is paused. This control update reduces ordinary movement action changes and does not claim to fix autonomous targets. The 0.2.5 control scheme passes offline checks; native movement stability and feel still require an in-game check.
+AI target research is paused. This control update reduces ordinary movement action changes and does not claim to fix autonomous targets. The 0.2.6 control scheme passes offline checks; native movement stability and feel still require an in-game check.
 
 Author: **aelinore**.
 

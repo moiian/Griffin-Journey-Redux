@@ -54,7 +54,7 @@ function start_driver()
             input = read_pad()
             d.previous_buttons = input.buttons -- holding A/RT on enable is not a fresh press
             active = d
-            if settings.camera_auto_yaw then install_yaw_hook() end
+            install_yaw_hook()
             if settings.head_camera~=false then change_camera_mode("griffin") end
             install_fall_hook()
             passengers.install_protection()
@@ -70,7 +70,7 @@ function start_driver()
                 d.controls_active=true; d.control_node="Ch253HoverWaitHoHomingHeight"
                 set_intent(d, "Ch253HoverWaitHoHomingHeight", "hover")
             end
-            status = "驾驶中：A 起飞；RT 2档冲刺，LT 刹停；左摇杆慢移与转向，右摇杆控制镜头。"
+            status = "驾驶中：A 起飞；RT 2档冲刺，LT 刹停；左摇杆前后移动、左右转向；1档镜头持续跟随面向。"
             event("driver_started", {freeze_player = d.freeze_requested,anchor_mode=d.anchor_mode,navigation_radius=settings.navigation_radius,steering_yaw=settings.steering_yaw,steering_pitch=settings.steering_pitch})
         end)
         if not ok then
@@ -127,7 +127,7 @@ function tick_driver()
     if not c then stop_driver("游戏上下文不可用");return end
     if menu.gameplay_paused() then
         if not d.menu_paused then event("driver_menu_paused",true) end
-        d.menu_paused=true;d.previous_buttons=input.buttons
+        d.menu_paused=true;d.previous_buttons=input.buttons;hover_yaw_state=nil
         if d.hover_motion then d.hover_motion.last_time=now() end
         return -- preserve player position, FSM, bones, camera and pending intent
     end

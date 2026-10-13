@@ -3,6 +3,7 @@ return function(ctx)
 local _ENV=ctx
 function restore_follow()
     yaw_state=nil -- angle writes leave no persistent lock; native/manual control resumes
+    hover_yaw_state=nil
     local s=follow_state
     if not s then return true end
     local ok,err=pcall(function()
@@ -65,6 +66,55 @@ end
 -- Native manual-camera update finishes input handling before rotation is built.
 -- Only the current driving player's exact controller is touched. No camera Transform writes.
 function wrap_yaw(a) return (a+math.pi)%(2*math.pi)-math.pi end
+local function hover_camera_active(d)
+    return alive and d and d.controls_active and not d.external_control and d.gear<=1
+        and d.hover_motion and settings.hover_camera_yaw_speed>0
+end
+function tick_hover_camera_yaw(controller)
+    local d=active
+    if not hover_camera_active(d) or menu.gameplay_paused() then hover_yaw_state=nil;return end
+    local ok,err=pcall(function()
+        assert(owned_player(d,true),"Hover camera player changed")
+        assert(d.hover_motion.character==validate_spawn(d.spawn),"Hover camera Griffin changed")
+        local manager=assert(sdk.get_managed_singleton("app.CameraManager"),"CameraManager unavailable")
+        local main=manager._MainCameraControllers and manager._MainCameraControllers[0]
+        assert(main and main:get_Valid() and main:call("get_TargetCharacter()")==d.player
+            and main._CurrentCameraController==controller,"Hover camera ownership changed")
+        local angle=vector(controller:call("get_Angle()"))
+        local t=now()
+        local y=hover_yaw_state
+        if not y or y.driver~=d or y.controller~=controller or y.main~=main then
+            local range=controller:call("get_YawRange()")
+            local degrees=controller:call("get_YawRangeDeg()")
+            assert(range and degrees and finite(range.x) and finite(range.y) and finite(degrees.x) and finite(degrees.y),"Hover camera range unavailable")
+            local span,deg_span=math.abs(range.y-range.x),math.abs(degrees.y-degrees.x)
+            assert(span>0.001 and deg_span>0.001,"Hover camera range invalid")
+            local scale=span/deg_span*180/math.pi
+            assert(math.abs(scale-1)<0.02 or math.abs(scale-180/math.pi)<0.1,"Hover camera units unknown")
+            -- Reuse sprint's verified native-angle offset against the actual view ray.
+            local pos,target=vector(main:call("get_Position()")),vector(main:call("get_TargetPosition()"))
+            local dx,dz=target.x-pos.x,target.z-pos.z
+            assert(dx*dx+dz*dz>0.01,"Hover camera horizontal direction unavailable")
+            y={driver=d,controller=controller,main=main,last_time=t,scale=scale,
+                offset=wrap_yaw(angle.y/scale-math.atan(dx,dz))}
+            hover_yaw_state=y
+        end
+        local dt=math.max(0,math.min(0.1,t-y.last_time));y.last_time=t
+        assert(d.heading and finite(d.heading.x) and finite(d.heading.z),"Hover Griffin heading unavailable")
+        local current=angle.y/y.scale
+        local desired=wrap_yaw(math.atan(d.heading.x,d.heading.z)+y.offset)
+        local error=wrap_yaw(desired-current)
+        local maximum=math.rad(settings.hover_camera_yaw_speed)*dt
+        local step=math.max(-maximum,math.min(maximum,error*(1-math.exp(-5*dt))))
+        if dt>0 and math.abs(step)>0.0000001 then controller:call("setYaw(System.Single)",(current+step)*y.scale) end
+        d.hover_camera_error=nil
+    end)
+    if not ok then
+        hover_yaw_state=nil
+        if d.hover_camera_error~=tostring(err) then event("hover_camera_follow_error",tostring(err)) end
+        d.hover_camera_error=tostring(err)
+    end
+end
 function yaw_failed(err)
     yaw_state=nil
     settings.camera_auto_yaw=false
@@ -161,11 +211,25 @@ function install_yaw_hook()
         sdk.hook(method,function(args)
             local storage=thread.get_hook_storage()
             storage.griffin_yaw_controller=nil
+            storage.griffin_hover_yaw_controller=nil
+            if not hover_camera_active(active) or menu.gameplay_paused() then hover_yaw_state=nil end
+            if hover_camera_active(active) and not menu.gameplay_paused() then
+                pcall(function()
+                    if not owned_player(active,true) then return end
+                    local manager=sdk.get_managed_singleton("app.CameraManager")
+                    local main=manager and manager._MainCameraControllers and manager._MainCameraControllers[0]
+                    if not main or not main:get_Valid() or main:call("get_TargetCharacter()")~=active.player then return end
+                    local candidate=sdk.to_managed_object(args[2])
+                    if candidate==main._CurrentCameraController then storage.griffin_hover_yaw_controller=candidate end
+                end)
+            end
             if alive and settings.camera_auto_yaw and active and follow_state then
                 local candidate=sdk.to_managed_object(args[2])
                 if candidate==follow_state.controller then storage.griffin_yaw_controller=candidate end
             end
         end,function(retval)
+            local hover=thread.get_hook_storage().griffin_hover_yaw_controller
+            if hover then tick_hover_camera_yaw(hover) end
             local candidate=thread.get_hook_storage().griffin_yaw_controller
             if candidate then tick_camera_yaw(candidate) end
             return retval

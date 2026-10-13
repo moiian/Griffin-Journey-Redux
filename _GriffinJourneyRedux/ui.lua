@@ -25,9 +25,8 @@ re.on_draw_ui(function()
         changed,value=menu.toggle("狮鹫防抖",settings.griffin_anti_jitter)
         if changed then settings.griffin_anti_jitter=value;anti_jitter.griffin_stop:set_enabled(value);controls.save() end
         if settings.griffin_anti_jitter and not anti_jitter.griffin_stop.enabled then imgui.text(anti_jitter.griffin_stop.status) end
-        imgui.text("RT：2档冲刺；LT：0档刹停；左摇杆：1档慢移与转向；右摇杆：镜头；RB：垂直爬升")
+        imgui.text("RT：2档冲刺；LT：0档刹停；左摇杆前后：1档移动；左右：转向；RB：垂直爬升")
         menu.slider("hover_forward_speed","1档前进速度（米／秒）",0,12)
-        menu.slider("hover_strafe_speed","1档左右移动速度（米／秒）",0,12)
         menu.slider("hover_backward_speed","1档后退速度（米／秒）",0,12)
         menu.slider("hover_climb_speed","1档垂直爬升速度（米／秒）",0,12)
         menu.slider("hover_turn_speed","1档左摇杆转向速度（度／秒）",0,180)
@@ -47,7 +46,9 @@ re.on_draw_ui(function()
             if value and install_yaw_hook() then settings.head_camera=true;change_camera_mode("griffin") end
             controls.save()
         end
-        menu.slider("camera_yaw_speed","镜头跟随速度（度／秒）",15,360)
+        menu.slider("hover_camera_yaw_speed","1档镜头跟随速度（度／秒）",0,360)
+        if active and active.hover_camera_error then imgui.text("1档镜头跟随暂不可用") end
+        menu.slider("camera_yaw_speed","2档镜头跟随速度（度／秒）",15,360)
         menu.slider("camera_manual_threshold","右摇杆接管阈值",0.25,0.95)
         imgui.tree_pop()
     end

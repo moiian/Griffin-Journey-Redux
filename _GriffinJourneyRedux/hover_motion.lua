@@ -24,6 +24,7 @@ local function binding(d,m)
     return ch
 end
 function hover_motion:release(d)
+    hover_yaw_state=nil
     local m=d and d.hover_motion
     if not m then return end
     if m.dirty and m.character:get_Valid() and m.go:get_Valid() then
@@ -79,17 +80,14 @@ function hover_motion:tick(d,ch,tr,fx,fz,flying,ground,action)
         if x==0 and y==0 and not climb then d.hover_wait_center=nil end
         x,y,climb=0,0,false
     end
-    local length=math.sqrt(x*x+y*y)
-    if length>1 then x,y=x/length,y/length end
     -- The old right-stick raw sign was reversed in-game. Use the corrected
-    -- left-stick slow-flight axis: right-positive drives both strafe and yaw.
+    -- left-stick slow-flight axis for yaw only; x adds no lateral velocity.
     local turn,angle=damp(m.turn,x*math.rad(settings.hover_turn_speed),dt,0.2)
     m.turn=turn;m.yaw=wrap_yaw(m.yaw+angle)
     local forward_x,forward_z=math.sin(m.yaw),math.cos(m.yaw)
     local longitudinal=y*(y>=0 and settings.hover_forward_speed or settings.hover_backward_speed)
-    local lateral=x*settings.hover_strafe_speed
-    local target_x=forward_x*longitudinal+forward_z*lateral
-    local target_z=forward_z*longitudinal-forward_x*lateral
+    local target_x=forward_x*longitudinal
+    local target_z=forward_z*longitudinal
     local dx,dy,dz
     m.vx,dx=damp(m.vx,target_x,dt,0.2)
     m.vy,dy=damp(m.vy,climb and settings.hover_climb_speed or 0,dt,0.2)

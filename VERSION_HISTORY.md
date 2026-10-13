@@ -518,3 +518,10 @@ Lua54 compilation and existing gameplay/protection/camera/settings/default-no-di
 Correct low-speed strafe direction; horizontal left stick now controls both strafe and eased facing. Right stick returns to native camera control. Separate forward, strafe, backward, vertical-climb and turn speeds all accept zero, with compatible migration from the old shared speed. Hold RB for code-driven vertical ascent, without the former hover action request. LB landing and gear 2 sprint guidance remain unchanged. Settings, precise ownership, pause/exit/recovery and default-no-diagnostics behavior are preserved.
 
 All 22 Lua54 files and existing/new offline regressions pass, including zero settings/save/reload, input polarity, keyboard compatibility, right-stick camera restoration and continuous RB ascent. Native direction and handling still require an in-game check. See CONTROLS_025_HOVER.md. AI research remains paused.
+
+
+## Griffin Journey Redux 0.2.6: longitudinal steering and continuous low-speed camera (2026-10-13)
+
+Left-stick forward/back moves along the Griffin's facing; left/right turns without strafing. The low-speed camera continuously follows horizontal body heading, including idle catch-up after releasing the stick, with an independent adjustable speed (0–360 degrees/s, default 120). Existing body-turn and movement settings remain compatible; obsolete strafe data is ignored. Sprint guidance and its camera settings remain unchanged.
+
+All 22 Lua54 files and existing/new offline gameplay, protection, camera, settings and lifecycle checks pass. Exact camera ownership, native-unit calibration, shortest-arc rate bounds, pause/release and camera-failure isolation are covered. Native visual behavior and handling remain unverified. See CONTROLS_026_CAMERA.md.

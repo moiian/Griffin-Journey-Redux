@@ -1,0 +1,11 @@
+# Longitudinal movement and low-speed camera follow — 0.2.6
+
+Low-speed left-stick forward/back now controls longitudinal movement only. Left/right controls eased body yaw only, with the corrected input polarity retained from 0.2.5; no lateral velocity is added. Fore/aft movement follows the current body heading while turning. The strafe-speed control and saved runtime field are removed; old saved strafe data is ignored. Existing forward/back/climb/body-turn values remain compatible.
+
+Low-speed camera yaw continuously follows the Griffin heading, including turn-only input and idle hover after the stick centers. The independent `hover_camera_yaw_speed` setting defaults to 120 degrees/s and accepts 0–360. It is active independently of the gear 2 camera-follow toggle and works with either the head-position camera or the original position target. It uses the existing exact-player camera controller and native yaw-range calibration; corrections follow the shortest arc with bounded easing. Pitch/roll are not changed. It does not accumulate a right-stick heading offset or wait for a manual-input delay; horizontal camera movement is continuously corrected toward Griffin facing.
+
+Pause, landing, sprint, external action takeover, stop and Reset suspend/release low-speed yaw. Camera ownership/controller changes reject stale writes. Camera failures are isolated from driving and can recover when the interface becomes usable. Previous sprint guidance and sprint-camera behavior remain unchanged.
+
+All 22 Lua54 files compile; existing gameplay, seats, protection, settings, steep-attitude, Debug-absent and default-no-diagnostics regressions pass. Actual-module checks cover turn-only zero translation, forward/back movement, combined turning, camera catch-up at idle, rate bounds/zero/save/reload, shortest arc, radians/degrees, pitch preservation, head-camera independence, exact controller/target filtering, pause/resume, sprint/landing/external/stop release and camera setter failure isolation. Native in-game visual behavior and feel remain unverified.
+
+End driving, Reset scripts and verify v0.2.6. Test left/right at rest, forward while turning, then release the stick and check that the camera continues catching up. Adjust body-turn speed in Flight Settings and the separate low-speed camera speed in Camera Settings.
