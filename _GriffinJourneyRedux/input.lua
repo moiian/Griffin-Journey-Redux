@@ -146,6 +146,8 @@ function dispatch(d)
             assert(manager and manager:call("get_GameObject()") == d.spawn.result.go, "ActionManager mismatch")
             event("action_request", {node = intent.node, mode = intent.mode})
             d.last_request = now()
+            -- Retarget at the actual commit, after pause/stale/ownership checks.
+            select_player_target(d.spawn)
             manager:call("requestActionCore(app.ActionManager.Priority, System.String, System.UInt32)", 10, intent.node, 0)
             d.mode = intent.mode
             d.intent = nil

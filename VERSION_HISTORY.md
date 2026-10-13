@@ -468,3 +468,12 @@ A/B及自动刷新保留非驾驶前置，开始前拒绝、已运行时归属�
 ## Griffin Journey Redux 0.2.0 — clean gameplay and optional Debug (2026-10-13)
 
 Preserve pushed baseline tag baseline-beta-v0.1.46-jitter-fixed. Replace the Beta autorun entry with GriffinJourneyRedux.lua and independent gameplay modules. Optional Debug retains experiments 1/2/3 and protection controls; remove stable-navigation-anchor and detailed-skeleton-recording implementations plus duplicate legacy recorders. Diagnostics default off, settings continue saving. Native free-fall anti-jitter is gameplay and defaults on for player/seated NPCs; Griffin remains optional/off. Menu uses the default theme. Lua54 and gameplay, exact-scope, lifecycle, no-diagnostics and Debug-absent regressions pass; 0.2.0 in-game visual acceptance remains pending. No AI-target fix is claimed. See CLEAN_020_TESTING.md and GRIFFIN_JOURNEY_REDUX_HANDOFF.md.
+
+
+## Griffin Journey Redux 0.2.1：动作提交前重选玩家目标（2026-10-13）
+
+复用现有ManualPlayer/setTarget接口，在每次当前狮鹫动作真正提交前重选玩家目标，并紧接requestActionCore；两者处于同一行为队列回调。覆盖手动分档／运动指令、回中及起飞完成的自动悬停、驾驶中外部动作接管，以及非驾驶单次动作桥接。只对精确返回实例／当前玩家执行，每个实际请求一次，不逐帧刷目标、不加短动作或AI冻结，不改变0.35秒请求间隔和动作节点。乘客动作不参与此目标重选。
+
+暂停／已结束驾驶／替换意图／过期会话／删除／归属变化均在原生目标写入前拒绝；非驾驶桥接也检查暂停。目标选择失败不继续发送动作，走原错误处理。Settings、防抖、座位、镜头及默认诊断关闭保持。20个Lua54编译，完整玩法、防抖、玩家包无Debug与默认零诊断输出回归，以及新目标／动作顺序、每请求一次、冷却／暂停／过期／替换／退出／归属和目标失败检查通过；已部署，原生AI效果待实测，不打verified。
+
+0.2.0已获用户基本运行确认。使用0.2.1正常切换运动动作及自动悬停即可，重点观察悬停后的下一动作是否仍短暂失去玩家方向控制；不要求探针或额外开关。说明见AI_021_TARGET_RESELECT.md。仅源码与通用说明入Git，用户观察／日志／设置／备份／本地测试不上传。
