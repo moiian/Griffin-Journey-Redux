@@ -1,6 +1,22 @@
 -- Griffin Journey Redux: flight
 return function(ctx)
 local _ENV=ctx
+-- Keep seats/control at any valid body tilt, including a vertical forward axis.
+local function horizontal_heading(d,qx,qy,qz,qw)
+    local fx,fz=2*(qx*qz+qw*qy),1-2*(qx*qx+qy*qy)
+    local length=math.sqrt(fx*fx+fz*fz)
+    if length>0.000001 then return fx/length,fz/length,length end
+    local h=d.heading
+    if h and finite(h.x) and finite(h.z) then
+        local previous=math.sqrt(h.x*h.x+h.z*h.z)
+        if previous>0.000001 then return h.x/previous,h.z/previous,length end
+    end
+    -- On the first vertical frame, infer horizontal forward from body right.
+    local rx,rz=1-2*(qy*qy+qz*qz),2*(qx*qz-qw*qy)
+    local right=math.sqrt(rx*rx+rz*rz)
+    if right>0.000001 then return -rz/right,rx/right,length end
+    return 0,1,length
+end
 function start_driver()
     local experiment = rawget(_G, "GriffinMountExperimentControl")
     if experiment and experiment.is_driving() then status = "请先结束实验工具的玩家固定。"; return end
@@ -130,10 +146,7 @@ function tick_driver()
         local norm = math.sqrt(q.x*q.x + q.y*q.y + q.z*q.z + q.w*q.w)
         assert(norm > 0.0001, "Invalid Griffin rotation length")
         local qx,qy,qz,qw = q.x/norm,q.y/norm,q.z/norm,q.w/norm
-        local fx,fz = 2*(qx*qz + qw*qy), 1-2*(qx*qx+qy*qy)
-        local length = math.sqrt(fx*fx+fz*fz)
-        assert(length > 0.2, "Griffin is too vertical")
-        fx,fz = fx/length,fz/length
+        local fx,fz,length=horizontal_heading(d,qx,qy,qz,qw)
         d.heading={x=fx,z=fz}
         d.body_pitch=math.atan(2*(qy*qz-qw*qx),length)*180/math.pi
         local flying, ground = ch:call("get_IsFlight()"), ch:call("get_IsGround()")

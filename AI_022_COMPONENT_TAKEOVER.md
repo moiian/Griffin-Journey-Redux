@@ -11,3 +11,8 @@ The local native dump confirms AIDecisionMaker derives from via.Behavior and pro
 After reloading to 0.2.2, enable the option and use normal movement, hover and movement again. Check the component status and whether the next action still first turns/moves toward an autonomous target. No recorder is required. If native flight stops responding, turn the option off to restore the captured value.
 
 All 21 Lua54 files compile. Full gameplay, anti-jitter, developer/player packages and default no-diagnostic-output checks pass. Added checks cover positive/negative ownership, original true/false, changed-only enforcement, prearm/pause/off/exit/Reset, changed references, signature/readback failures, partial mutation rollback, saved recovery retry and actual UI/flight integration. Native flight compatibility and AI effectiveness remain unverified.
+
+
+## Status in 0.2.3
+
+This is an archived optional experiment, not an adopted AI fix. Keep the option off for normal driving. Version 0.2.3 removes tilt-triggered driving/seat release independently and does not extend AI component disabling.

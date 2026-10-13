@@ -2,7 +2,7 @@
 
 Fly a friendly Griffin with configurable controls, a head-following camera, and separate seats for the player, pawns, and accompanying NPCs.
 
-Version: **0.2.2**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
+Version: **0.2.3**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
 
 ## Install or upgrade
 
@@ -30,6 +30,8 @@ Edit the player, individual pawns, and accompanying NPCs independently. Presets 
 
 The camera can follow the Griffin's head. Optional gear 3 turning follows horizontally, with manual right-stick override. Pausing retains seat display; Photo Mode allows seat adjustments.
 
+Steep, vertical and inverted body attitudes no longer automatically end driving or release seats. At exactly vertical attitudes, navigation retains the last valid horizontal heading.
+
 Stopping driving restores the original camera and actor states at their current physical locations.
 
 ## Anti-jitter and diagnostics
@@ -51,4 +53,4 @@ Author: **aelinore**.
 
 ## Optional decision takeover (0.2.2)
 
-Flight Settings includes **方向6：禁用狮鹫决策组件（实验）**, off by default and not saved. It disables only the current driven Griffin's AIDecisionMaker and restores its original Enabled value when disabled or driving ends. Native actions/navigation stay enabled. No recorder is required. See [AI_022_COMPONENT_TAKEOVER.md](AI_022_COMPONENT_TAKEOVER.md). Native AI effectiveness remains unverified.
+Flight Settings includes **方向6：禁用狮鹫决策组件（实验）**, off by default and not saved. It disables only the current driven Griffin's AIDecisionMaker and restores its original Enabled value when disabled or driving ends. Native actions/navigation stay enabled. No recorder is required. See [AI_022_COMPONENT_TAKEOVER.md](AI_022_COMPONENT_TAKEOVER.md). It remains an optional experiment and is not an adopted AI fix. Leave it off for normal driving.
