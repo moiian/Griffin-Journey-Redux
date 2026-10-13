@@ -567,3 +567,10 @@ All 22 Lua54 modules and existing/new offline regressions pass, including migrat
 RS native landing now works from both gears. Grounded ordinary hover/sprint/landing requests are suppressed and queued native submissions recheck phase. DEBUG adds a checked-by-default, session-only prohibition on ordinary cross-phase actions; disabling it permits stage testing, while player packages without Debug keep the guard on. External tools retain their explicit allow_cross contract.
 
 All 22 Lua54 files and existing/new offline regressions pass, including both-gear/held landing, grounded hover cancellation, airborne rearm, Debug toggle/reset, queued invalidation and canceled-takeoff recovery. Gear 2 inertia remains unchanged; native behavior still needs in-game acceptance. See PHASE_032_LANDING.md.
+
+
+## Griffin Journey Redux 0.3.3: restore automatic gear 1 control after takeoff (2026-10-14)
+
+Wait for valid airborne flags through the native takeoff animation's grounded tail, then explicitly enable gear 1 code controls. Previously a late Flight/Ground update could disable controls permanently until LT. Adopt an already-active exact hover without requesting it again; other airborne nodes receive one hover request. Held input release and manual/external cancellation remain.
+
+The actual 0.3.2 module reproduces the disabled-control failure offline; 0.3.3 passes the same case, including forward/back/up/down without LT. All 22 Lua54 modules and prior controls/inertia/phase/camera/lifecycle regressions pass. In-game acceptance remains pending. See TAKEOFF_033_HANDOFF.md.

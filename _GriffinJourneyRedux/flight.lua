@@ -183,9 +183,13 @@ function tick_driver()
         end
         if d.mode=="taking_off" then
             if action_name=="Ch253TakeoffBackJump" then d.saw_takeoff=true end
-            if d.auto_hover and flying and action_name~="Ch253TakeoffBackJump" and not d.intent then
-                d.mode="hover";d.gear=1;d.control_node=nil;d.hover_wait_center=true
-            elseif ground and not flying and d.saw_takeoff and action_name~="Ch253TakeoffBackJump" then
+            if d.auto_hover and flying and not ground and action_name~="Ch253TakeoffBackJump" and not d.intent then
+                -- Native animation can finish before its Flight/Ground flags settle.
+                -- Adopt a completed hover and explicitly hand control to code movement.
+                d.mode="hover";d.gear=1;d.controls_active=true;d.auto_hover=false
+                d.control_node=action_name=="Ch253HoverWaitHoHomingHeight" and action_name or nil
+                d.hover_wait_center=true
+            elseif not d.auto_hover and ground and not flying and d.saw_takeoff and action_name~="Ch253TakeoffBackJump" then
                 d.mode="ground";d.controls_active=false
             end
         end
