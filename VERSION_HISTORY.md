@@ -463,3 +463,8 @@ A/B及自动刷新保留非驾驶前置，开始前拒绝、已运行时归属�
 普通日志及两种原路线探针改为驾驶且游戏未暂停时不做自动JSON序列化／写盘；三秒探针到时只停止采样，状态提示暂停游戏或结束驾驶保存。暂停自动保存普通脏日志一次，无新数据不反复保存；失败保留重试，Reset先释放驾驶再保存。其他模组及用户主动保存Settings不在自动日志控制范围内，不修改原有历史文件。
 
 普通日志保留最近600样本／400事件并记录淘汰计数，长时间不停航保持最新记录且不尝试旋转写盘。旧60秒探针队列提升至1800帧以缓存完整录制及异常窗，暂停后仍120帧分卷；三秒探针边界／容量及防抖／旧实验组合／导航／座位／FSM均保持。七Lua54、既有完整Beta与新增长时间驾驶零自动输出／满缓存滚动／三秒结束不突发保存／暂停保存一次／旧探针超240帧缓存及分卷／失败重试检查通过，实际画面改善待用户验收。见BETA_0146_DEFERRED_LOG_OUTPUT.md。仅源码及通用说明进入实验分支，原始记录、内部数值分析、本地测试和Settings不上传，其他会话不改。
+
+
+## Griffin Journey Redux 0.2.0 — clean gameplay and optional Debug (2026-10-13)
+
+Preserve pushed baseline tag baseline-beta-v0.1.46-jitter-fixed. Replace the Beta autorun entry with GriffinJourneyRedux.lua and independent gameplay modules. Optional Debug retains experiments 1/2/3 and protection controls; remove stable-navigation-anchor and detailed-skeleton-recording implementations plus duplicate legacy recorders. Diagnostics default off, settings continue saving. Native free-fall anti-jitter is gameplay and defaults on for player/seated NPCs; Griffin remains optional/off. Menu uses the default theme. Lua54 and gameplay, exact-scope, lifecycle, no-diagnostics and Debug-absent regressions pass; 0.2.0 in-game visual acceptance remains pending. No AI-target fix is claimed. See CLEAN_020_TESTING.md and GRIFFIN_JOURNEY_REDUX_HANDOFF.md.

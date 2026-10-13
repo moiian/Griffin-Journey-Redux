@@ -1,3 +1,9 @@
+# Current clean-build validation
+
+See [CLEAN_020_TESTING.md](CLEAN_020_TESTING.md) for Griffin Journey Redux 0.2.0. The sections below describe historical builds and are not the current default settings or logging policy.
+
+---
+
 # Beta0.1.35：狮鹫跌落对照
 
 1. 结束旧驾驶、Reset scripts，确认版本0.1.35-beta。恢复原玩家/乘客保护组合及飞行参数；本轮只改变新增实验3。

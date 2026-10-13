@@ -1,3 +1,9 @@
+# Current Griffin Journey Redux handoff (2026-10-13)
+
+The current gameplay build is Griffin Journey Redux 0.2.0. Read [GRIFFIN_JOURNEY_REDUX_HANDOFF.md](GRIFFIN_JOURNEY_REDUX_HANDOFF.md) first. The following older notes are historical; separate CleanAnimationLab details are retained as reference and were not changed by this refactor.
+
+---
+
 # 新会话交接：Griffin Journey Redux（2026-10-13）
 
 ## 可直接贴给新会话

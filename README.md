@@ -1,188 +1,49 @@
-# 狮鹫旅程 Redux — Beta 0.1.46
+# Griffin Journey Redux
 
-依赖已安装的NickCore EnemySpawner和run_once，直接调用其生成接口。只控制接口返回的狮鹫实例，不按Character ID接管其他狮鹫。
+Fly a friendly Griffin with configurable controls, a head-following camera, and separate seats for the player, pawns, and accompanying NPCs.
 
-## 开始使用
+Version: **0.2.0**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
 
-Reset scripts后展开“狮鹫旅程 Redux → 一般设置”，一键生成狮鹫，再开始驾驶。生成自动开启队伍友方、跳过狮鹫思考、防坠落和玩家FSM冻结选项；开始驾驶时实际冻结玩家及已携带乘客FSM。失控时可点“让狮鹫听话”重新指定玩家目标。
+## Install or upgrade
 
-结束驾驶时恢复镜头、Hip显示、朝向和原FSM，玩家与乘客保持当前真实实体位置，不返回起点。删除只处理本Beta生成的实例。完整同步与仅Hip头顶互斥，默认仅Hip头顶。
+Copy `reframework/autorun` from the package into the game folder. When upgrading from the Beta, remove the old `reframework/autorun/GriffinFlightBeta.lua` entry before loading the new script. Keep `reframework/data/GriffinFlightBeta_Settings.json`: existing controls and seat presets are reused.
 
-## 默认操作
+Open **Griffin Journey Redux → 一般设置**, spawn a Griffin, and start driving. End driving before resetting scripts. Only the Griffin spawned by this mod is controlled.
 
-| 动作 | 手柄 | 键盘 |
+## Controls
+
+| Action | Keyboard | Controller |
 | --- | --- | --- |
-| 开始／结束驾驶 | 可自定义 | F／X |
-| 地面起飞 | A | Space |
-| 冲刺／3档 | RT | 左Shift |
-| 逐档减速3→2→1 | LT | 左Ctrl |
-| 升降／悬停／降落 | RB／LB | E／Q |
-| 转向或移动 | 左摇杆 | WASD |
-| 应急指定玩家目标 | 可自定义 | H |
+| Start / stop driving | F / X | Rebindable |
+| Take off from the ground | Space | A |
+| Sprint / gear 3 | Left Shift | RT |
+| Decrease gear | Left Ctrl | LT |
+| Steer | WASD | Left stick |
+| Gear-dependent climb / descend / hover / land | E / Q | RB / LB |
+| Retarget the player | H | Rebindable |
 
-- 3档：目标导向飞行；摇杆微调导航方向，RB/LB大幅爬升/俯冲，角度上限59°。
-- 2档：回中原地悬停Ch253HoverWaitHoHomingHeight；前推HoverForward、后推HoverBackward；左右沿用目标高度左右移动。RB请求HoverBackwardTargetHeight爬升，LB请求悬停转降落。RB/LB保持到摇杆回中后重新拨动，或切换档位；相同持续输入不重复请求动作。
-- 1档：摇杆有输入时缓慢向导航目标移动；回中进入原地悬停。RB原地悬停，LB悬停转降落。
-- A只请求地面起飞，空中不请求其兼具降落效果的节点。其他动作默认允许跨阶段；阶段三工具可接管Beta当前实例，接管后自动驾驶动作暂停。
+Gear 1 provides small movements and hover when centered. Gear 2 provides directional hover movement. Gear 3 uses fast target-directed flight. Controls can be changed in the menu.
 
-## 菜单与预设
+## Seats and camera
 
-飞行设置使用头部球面导航：半径、回中高度、左右与上下角度可调。旧“玩家与狮鹫距离”“玩家相对高度”和球面关闭选项已移除，不能绕过半径限制。
+Edit the player, individual pawns, and accompanying NPCs independently. Presets support cloning, renaming, switching, and confirmed deletion. Seat positions, facing, body tilt, action names, camera distance, and FOV are saved automatically. Ordinary bystanders are not seated.
 
-镜头设置只有一个“镜头跟随狮鹫头部”开关；关闭恢复游戏原本跟随。重复的“恢复原镜头”选项已删除。可配置3档水平转向跟随、速度及右摇杆接管阈值；没有上下自动镜头跟随。距离和FOV位于当前座位预设的玩家参数内，随预设切换并自动保存。
+The camera can follow the Griffin's head. Optional gear 3 turning follows horizontally, with manual right-stick override. Pausing retains seat display; Photo Mode allows seat adjustments.
 
-座位预设修改即保存；支持克隆、改名、确认删除和热键轮询。玩家、各随从及正在同行的NPC分别设置头部/颈部锚点、XYZ偏移、Look At X/Z、身体倾斜和动作名称。普通路人不携带。动作只用名称请求，临时启用FSM后下一行为帧再次冻结；不含Motion ID或随机动作。
+Stopping driving restores the original camera and actor states at their current physical locations.
 
-预设[1]默认隐藏、排除轮询，只经DEBUG显示后手动调试。每名随从/同行NPC的Transform、位置上下文和碰撞体始终使用自己在[1]中的位置，Hip使用当前预设。选[1]时Hip也显示自己的实体预设位置。玩家Transform由球面导航控制，Hip使用当前玩家座位参数。已有正常座位、按键和精调参数保留。
+## Anti-jitter and diagnostics
 
-普通暂停菜单保持驾驶绑定和座位显示，暂停输入及物理更新；照片模式允许立即调整座位显示。REFramework菜单在游戏未暂停时可继续驾驶。退出驾驶后保护立即放行。
+Player and seated-NPC anti-jitter is enabled by default. Griffin anti-jitter is a separate option, disabled by default.
 
-## DEBUG与当前诊断
+Diagnostic recording is **off by default**. User settings still save normally. The optional developer folder `_GriffinJourneyReduxDebug` adds a DEBUG panel with three fall experiments, protection controls, runtime diagnostics, and a three-second position recorder. Logs are written only when recording was explicitly enabled and the game is paused or driving has ended. Stopping a three-second recording while flying retains its data in memory until that save boundary.
 
-保留实体预设[1]显示、驾驶角色伤害/坠落保护、乘客自动传送/丢失保护、玩家FSM与狮鹫思考开关。运行计数归入“运行诊断”。两个额外拦截开关“跳过随从丢失检查”“阻止乘客被生成器销毁”默认关闭，供对照测试；探针日志一直自动记录，开关控制的是拦截。
+The player package omits the developer folder. The developer package includes it, with unselected experiments and recording options disabled. Core driving, seats, camera, protection, and anti-jitter work without the developer folder.
 
-0.1.28实测仍有随从消失或短暂脱绑。日志显示原生PawnCharacterList短暂缺失，随后返回相同引用；这不能排除引擎卸载/刷新，也不能证明某个拦截已根治问题。0.1.29保留原座位名单处理，没有增加名单缺失等待期；新增释放原因/当时实例有效性/HP/接口/生成器销毁状态，以及applyDestroy和销毁通知的只读计数，继续追查入口。不会跳过销毁通知或析构回调。
+## Validation and current limitation
 
-0.1.30新增只读跌落探针：每0.5秒记录着地状态、SecFall、跌落/落地高度、最高/基准位置、实体/碰撞体/位置上下文坐标、物体着地与安全位置记录。各部分错误独立记录，不影响驾驶。SecFall含义与原生安全回收的关系需实测，不能只按字段名定性。
+Lua54 compilation and offline gameplay, scope, lifecycle, settings, default-no-diagnostics, and Debug-absent regressions pass. The refactored 0.2.0 build still needs an in-game loading and visual check.
 
-高频坠落/丢失/销毁请求按5秒窗口记录首次与末次时间、行为帧及同一行为帧峰值，关联首次/最近健康与跌落快照。InstanceInfo额外记录参数内Character是否与容器匹配角色一致、同容器匹配范围和Canceled/Deleted/Failed。没有原生调用栈，不把入口观察冒充已定位调用者。没有更改原保护范围或名单释放逻辑，0.1.30未新增逐帧跌落重置；0.1.31另有默认关闭的独立实验开关。
+The user still observes autonomous Griffin decision targets being used when a new action is requested, despite think skipping. This remains unresolved.
 
-驾驶中的普通事件合并至原有2秒定时写盘；日志分卷、结束及Reset仍保存。此举减少批量释放/重绑的重复全量写盘，不代表游戏卡顿已解决。
-
-## 文件与验证
-
-设置保存在游戏reframework/data/GriffinFlightBeta_Settings.json；日志为同目录GriffinFlightBeta_*.json，自动保存，无需手动录制。旧的无效配置项在脚本正常保存时不再写回；升级前设置已有本地备份。Git只备份脚本和版本/测试说明，不上传配置或日志。
-
-Lua54编译、原有驾驶/菜单/照片/座位/FSM恢复回归与只读跌落采样、参数归属对照、同帧重复计数、诊断错误隔离及批量写盘检查通过。原生新探针和随从稳定性仍待实机验证。
-
-
-## 0.1.31：两项独立跌落实验
-
-DEBUG新增高亮的“【实验1】持续重置跌落高度＋SecFall”和“【实验2】强制IsGround返回着地”。均默认关闭，只保持本次脚本会话状态，不写入设置；互不联动，建议分开测试。
-
-实验1仅在当前驾驶玩家或已绑定乘客的实体位置和碰撞体同步完成后，调用resetBaseHeight/resetFallHeight并写SecFall=0。解除驾驶、乘客离座或实例无效后不继续执行；单角色写入失败停用该角色实验并记录fall_reset_experiment_error，关闭再开启可重试。普通未启用流程继续仅在落座/换预设/释放时重置。
-
-Character.IsGround没有setter或对应布尔字段，实验2在其get_IsGround()原生查询完成后，仅对当前已落座角色返回true；不更改狮鹫或其他角色，不伪造碰撞接触，不重写安全位置，也不附带实验1。日志physics.ground记录查询结果，ground_original及ground_original_time记录该Hook最近的原始返回值和游戏时间，ground_override标识开关状态。原生代码若直接读取底层状态或内联判断可能不经过此查询，不能把读数true当成物理真实着地。
-
-日志同时记录continuous_fall_reset、fall_reset_count、fall_reset_failed与fall_experiment_mode事件。现有坠落/销毁保护范围和名单处理不变；是否减少回传、消失或刷新待实机对照。
-
-
-## 0.1.32：乘客与狮鹫逐帧探针
-
-DEBUG新增高亮“【新增】开始60秒逐帧探针（含狮鹫）”，需已开始驾驶；默认不运行。再次点击可停止并保存。60秒墙钟时间、3600个渲染回调帧或6个异常窗口任一上限达到即停止；结束驾驶和Reset也停止并排空记录。记录不会改变两项跌落实验或其他保护开关。
-
-逐帧读取仅当前驾驶玩家、已落座随从/同行NPC及返回实例对应的狮鹫。记录场景/Universal位置、位置上下文、碰撞体、Hip及脚本期望Hip；狮鹫记录其可用上下文/碰撞体、动作/档位/摇杆输入、飞行目标坐标，渲染末期额外记录当前跟随镜头的目标坐标。所有向量都是数值副本，不写角色、骨架或AI。
-
-采样阶段：行为锚定前/后、骨架原生更新后且座位重写前、座位重写后、渲染前座位修正前/后、渲染原生阶段后。每个渲染回调帧最多8条阶段记录，超出只计数。帧编号表示此脚本观察到的回调周期，不能当作引擎内部全部渲染提交；不采集完整原生调用栈、血条或renderer可见性。
-
-平时只保留最近6帧的内存环形缓存。位置上下文距离>20米、碰撞体距离>10米、座位修正后Hip差>0.75米、超过阈值的世界坐标跳变，或狮鹫速度差推算的加速度候选>250时，保留之前6帧和含触发帧在内的后续6帧；最多6个窗口。骨架正常恢复的中间阶段不按Hip差触发。狮鹫加速度用游戏时间差推算、仅在近似稳定间隔下判定，是抽动候选而非故障证明。
-
-阶段回调只读取并在内存排队；窗口汇总在普通on_frame进入既有日志，沿用定时/结束保存。输出事件frame_probe_started、frame_probe_window、frame_probe_summary，带停止原因、读错/丢弃阶段计数和探针os.clock累计耗时；该计时不是完整游戏帧耗时。即使没有异常窗口也保存总结。原生运行开销和视觉结果仍待实机。
-
-
-## 0.1.33：修正逐帧探针提前耗尽
-
-0.1.32实测中狮鹫持续上下文差异反复触发，约4秒耗尽6窗，不能覆盖俯冲后阶段。本版差异按角色/阶段只在出现或消失后再次出现时触发；加速度仅记录，不再触发。异常窗最多6个，另保留6次定时片段额度，启动后约5/15/25/35/45/55游戏秒保存片段，不因异常额度用尽停止。仍有60秒墙钟限制，渲染周期上限提高至18000，避免高刷新率下过早停止。暂停时游戏时间停止，不能保证定时片段数量。阶段记录上限及前后缓存不变，总计最多12窗；不改变飞行或保护逻辑。
-
-推荐前20秒爬升、中20秒俯冲、后20秒松开LB继续前飞。记录不会覆盖全部60秒逐帧数据，无异常片段不证明没有视觉抽动。只读原生运行及开销待实机验证。
-
-
-## 0.1.34：连续姿态与相机诊断
-
-沿用DEBUG的60秒逐帧探针按钮。除了原有阶段窗口，新增每个渲染末期回调的紧凑连续记录frame_probe_motion，不依赖大幅位移阈值。包含狮鹫Universal位置和身体四元数、头部位置及相对实体偏移、最多8个按名称匹配的Root/Hip/Spine/Chest/Wing骨骼位置和旋转、导航参数/输入/动作，以及主相机Transform的位置/旋转。骨骼名称在开始事件记录；缺失和读取失败分别记错，不停止驾驶。
-
-每120条在普通帧合并进入日志，停止/退出保存未满批次；渲染采样不写盘。上限7200条，60秒墙钟不变，高于120FPS可能提前达到连续记录条数上限，后续计motion_dropped；旧窗口仍继续到原上限。相机姿态是回调时所读Transform，不宣称是GPU最终画面或排除后续修改。仅诊断，不改变飞行、AI、座位、保护或设置。新增读取的原生效果/开销待实测。
-
-
-## 0.1.35：狮鹫独立跌落实验
-
-DEBUG新增默认关闭、不持久化的“【实验3】狮鹫持续重置跌落高度＋SecFall”。仅驾驶中对返回的狮鹫实例执行同类FallInfoHolder基准/高度重置与SecFall=0；暂停、结束或实例不符时停止，错误停用本实例，关开可重试。不联动乘客实验、不强制狮鹫IsGround、不改飞行动作或实体位置。
-
-狮鹫跌落/着地/飞行/安全位置读数每0.5秒自动保存于samples.data.griffin_fall，含重置前后快照；原版未纳入狮鹫跌落数据。无需开逐帧探针即可测试。详细骨骼姿态现默认关闭，原连续探针默认保留Transform与相机位置/旋转；详细选项下次启动探针生效。建议先复现抽动后只切换实验3做对照，效果待实机。
-
-## CleanAnimationLab 0.1.4：悬停指令刷新实验（2026-10-13）
-
-同步原生重置后立即冻结未解决首次隔离位移，本版撤下task_reset，新增默认关闭action_refresh，仍为七个Lua文件。按隔离→精确ActionManager请求HoverWait→恢复首次捕获的FSM/root并放行飞控→至少一次实际UpdateBehavior→观察HoverWait与已替换隔离资源的原生基础层→重新隔离的顺序执行。保留原始控制值和同一隔离轮；每轮一次、切片不重发。请求返回或动作名变化不能单独证明原生已进入。
-
-需状态记录，3秒有效行为时间未确认则退出并恢复、不自动重试；暂停、取消、Reset、旧队列、记录关闭、实例／模块／驾驶归属变化拒绝迟到冻结。放行阶段mode=refreshing，阶段快照含计数与行为序号；轮询不逐帧写事件。没有新增位置／碰撞体／速度／AI／着地写入，也不撤销已提交的新原生动作。Beta0.1.35、旧阶段三0.3.23和用户JSON保持。
-
-Lua54七文件语法、既有回归及新增异步时序、原生资源确认、延迟动作、切片、原值恢复、暂停／取消／Reset／超时／异常、精确实例／模块／驾驶／记录与原false FSM拒绝模拟通过。已部署，实机效果待验收，不打verified标签。测试见CleanAnimationLab/README.md与TEST_014_ACTION_REFRESH.md。仓库白名单替换模块并添加测试说明；日志、实测分析、设置、转储、备份和本地回归工具不入Git。
-
-## CleanAnimationLab 0.1.5：分帧请求与原生稳定观察（2026-10-13）
-
-修正0.1.4把隔离／请求／放行放在同一回调、随后读到瞬态HoverWait就复隔离的时序问题。action_refresh改为隔离后至少一次实际UpdateBehavior才请求，继续保持隔离两个行为更新后放行；不以持续HoverWait为必要条件。放行后实际基础层离开5100／5101，同一动作／资源及整个1厘米位置窗口稳定至少0.3秒／3次行为观察，才播放当前选择并复隔离。允许原生自然转为跌落／落地／Wait，无强制落地或位置／速度／AI写入。这个有限窗口不是旧任务清空证明，实机效果待验收。
-
-5秒有效行为时间未稳定退出，不自动重试；保留原暂停／取消／Reset／过期队列／记录／精确实例／组件／驾驶／原false FSM保护，原控制值和隔离轮保留。阶段记录增加stage、稳定时间与实际动作，UI改为复隔离计数，不再把首次瞬态动作称为成功确认。默认关闭、不写设置，Beta0.1.35和旧阶段三0.3.23不改。
-
-七Lua54及既有／新增分步顺序、瞬态悬停转落地、累计慢漂移／资源变化、无悬停也可稳定、切片、原值恢复、各阶段取消、暂停／Reset／异常／超时及实例归属回归通过。已部署待实机；TEST_015_REFRESH_SEQUENCE及README给出一次新实例测试，不重复原失败流程。不打verified标签；源码与通用说明按白名单同步，日志、实测分析、设置、转储、备份和本地回归不上传。
-
-## CleanAnimationLab 0.1.6：控制与基础层换片分步对照（2026-10-13）
-
-新增默认关闭isolation_ab模块及勾选开关。仅从原生空中HoverWait、原FSM=true且实际基础层非隔离资源开始：A捕获原值并冻结FSM／RootMotion及精确本实例FlightControl，所有层零changeMotion；用户显式进入B才在同一轮、同一控制快照下仅基础层播放5100一次。B不重播附加层、不重新冻结／放行、不请求原生动作。普通隔离的附加层重播及0.1.5刷新保留。A/B不与悬停刷新同时开始，需状态记录；选项变化只影响下一轮，本轮挥翅不换片，B不能退回A。
-
-记录增加A/B阶段与四个边界事件，周期及方法前后快照保留同轮关联。关记录、取消／解绑／Reset、过期队列、实例／组件／驾驶变化拒绝迟到B并按原值恢复，暂停挂起，恢复失败保留重试。没有增加位置／碰撞体／速度／AI／着地写入。Lua54八文件、既有状态／调用跟踪／0.1.5刷新及新增零重播／单次基础层／同轮同快照／开关／暂停／取消／归属／失败恢复回归通过。已部署，原生效果待验收，首次位移未确认修复，不打verified标签。
-
-本轮按CleanAnimationLab/TEST_016_ISOLATION_AB.md：隔离关闭时用已有单次按钮准备HoverWait并飞行true，开状态与方法记录；关闭刷新，勾选A/B再开启隔离。A观察约2秒，已跌落直接保存；否则同一隔离内进入B观察约2秒，关闭隔离后记录约2秒保存。不要在A/B间发动作或关闭隔离，不需要等落地后重试。八Lua及通用说明按精确白名单提交；日志、实测报告、设置、转储、备份和本地回归不上传。Beta0.1.35、旧阶段三0.3.23和其他MOD不改。
-
-
-## 原路线玩家抖动测试（Beta0.1.36）
-
-DEBUG新增两个默认关闭的勾选项：稳定导航锚点、记录玩家抖动与位置改写。先记录原头部锚点，再只启用根Transform固定偏移锚点作对照。详见BETA_0136_ORIGINAL_ROUTE_TEST.md；实机效果待确认。部署Beta入口时同时部署_GriffinRouteProbe目录下3个Lua模块。
-
-## CleanAnimationLab 0.1.7：精确动作更新隔离对照（2026-10-13）
-
-新增默认关闭action_gate模块及“隔离时暂停原生动作更新（仅A/B，下次开启生效）”。在既有A/B中只额外暂停精确当前ActionManager.update，从A捕获控制后持续到B；无动作请求或位置／碰撞体／速度／AI／着地写入。当前转储确认零参数、实例System.Void，启用再次核对签名。只作用于当前返回实例与原管理器／FSM／Motion，其他角色放行。普通隔离及悬停刷新拒绝混用，选项本轮内修改只影响下一次A。
-
-记录动作更新拦截次数、启用状态和错误，方法边界带本轮计数；被拦截调用的只读前后快照不代表原更新实际执行。暂停放行原动作更新并挂起步骤；取消／解绑／Reset、记录关闭、实例／组件／驾驶变化停止拦截，Hook异常放行并结束实验，恢复失败也先撤下拦截再保留原控制恢复状态。九Lua54及既有状态／调用跟踪／刷新／A/B和新增精确正反例、签名／原返回、开关／暂停／过期／归属／异常／恢复回归通过，源码／游戏／仓库Lua内容一致。已部署待实机，首次位移未确认修复，不打verified标签。
-
-本轮按CleanAnimationLab/TEST_017_ACTION_GATE.md做一轮：隔离关闭时准备原生HoverWait与飞行true，开状态／方法记录；关闭悬停刷新，同时勾选A/B和新增动作更新隔离。A约2秒检查实际动作与拦截次数；同一隔离内进入B约3秒，区分入口跳变与持续移动；关闭后记录约2秒保存。无需重复无拦截的旧对照。Beta0.1.35、旧阶段三0.3.23及用户JSON不改；仅九Lua及通用说明按精确白名单提交，日志／实测报告／设置／转储／备份／本地回归不上传。
-
-
-Beta0.1.37修正原路线目标字段读取并新增玩家动作／着地／FSM对照，只读诊断，尚未修复抽动。见BETA_0137_PROBE_FIX.md。
-
-
-## CleanAnimationLab 0.1.8：根应用与飞控碰撞回调只读定位（2026-10-13）
-
-新增默认关闭pose_trace，观察精确返回实例的FlightControl.updatePosition、碰撞调整前／后回调及Character.onRootApply四入口；启用核对实例方法、参数数量、System.Void和归属，全部放行原调用及返回值。复用可配置只读配对器，旧call_trace接口及数据保持独立。每入口20Hz／1000对、总4000，变化与稳定心跳保留、Hook内不写盘，暂停／取消／记录关闭／过期队列／实例或组件变化拒读或丢弃；部分入口失败独立报告。状态／事件另记用户当前隔离开关及修订号，区分关闭后的异步恢复窗口。
-
-控制流程保持0.1.7，没有新增动作请求、拦截或位置／速度／着地写入。十Lua54编译、原状态／调用／刷新／A/B／动作更新隔离与新四入口精确正反例、原返回、嵌套与数字历史、独立开关／数据、签名与部分失败、暂停／过期／Reset、限频／心跳／容量和阶段关联回归通过。已部署，原生命中及首次位移根因仍待实机，不打verified标签。
-
-按CleanAnimationLab/TEST_018_POSE_TRACE.md只做一次短记录：开状态、旧方法和新增位置入口跟踪；隔离关闭时准备原生HoverWait／飞行true；关闭刷新，勾选A/B及动作更新隔离，A约2秒、同一隔离内B约3秒，关闭后约2秒保存。画面继续位移也可定位，无需反复开关或等落地。当前Beta、原路线探针、旧阶段三及用户JSON保持；只同步十Lua及通用说明，日志／实测分析／设置／转储／备份／本地回归不上传。
-
-
-Beta0.1.38在原路线探针补充玩家原生自由落体与物理接触状态，只读且默认关闭。入口需配套四模块，见BETA_0138_NATIVE_FALL_PROBE.md；尚未修复抽动。
-
-
-Beta0.1.39新增默认关闭的精确当前玩家自由落体停止对照，需原路线探针、旧实验1／2／3关闭。入口配套五模块，见BETA_0139_PLAYER_FALL_STOP_TEST.md；原生效果待实测。
-
-
-## CleanAnimationLab 0.1.9：普通隔离允许Beta驾驶中使用（2026-10-13）
-
-移除普通隔离的Beta驾驶拒绝，以及持续校验中的驾驶自动解绑。绑定／开启／5100与5101切换／关闭均可在驾驶中执行；不主动结束或暂停Beta驾驶，不改变其导航、座位、镜头或动作请求。只作用当前精确返回实例，默认关闭、按本轮捕获值恢复FSM／RootMotion，无新位置／物理／AI写入。
-
-A/B及自动刷新保留非驾驶前置，开始前拒绝、已运行时归属改变按原恢复；普通隔离内更改下轮实验选项不追溯限制本轮。旧工具驾驶冲突、暂停／取消／Reset／精确实例／组件变化保护保持。本轮关闭分步对照、动作更新隔离和自动刷新，直接在Beta驾驶中使用普通开关；不要求状态记录或探针。十Lua54、新驾驶生命周期回归及既有刷新／A/B／动作隔离／位置跟踪回归通过；已部署，原生共存及无位移效果待实机，不打verified。当前Beta及路线探针、旧阶段三、用户配置不改，日志／实测观察／本地回归／备份不入Git。
-
-
-当前Beta0.1.40的“【原路线防抖】停止玩家原生自由落体”可独立使用，无需记录、无60秒限制。驾驶前或途中开关；退出停止调用并保留本次勾选，重进重新校验，Reset恢复关闭。仅当前驾驶玩家，默认关闭，不写用户设置。用法见BETA_0140_PLAYER_ANTIJITTER.md；前述0.1.39需保持探针的要求仅适用于历史版本。
-
-
-当前Beta0.1.41的玩家防抖开关已包含座位预设接管的全部随从与同伴NPC；另有默认关闭的独立狮鹫开关，仅作用当前驾驶返回实例。均不需要探针，无60秒限制；用法见BETA_0141_SEATED_NPC_GRIFFIN_ANTIJITTER.md。玩家方案已获实机确认，NPC／狮鹫扩展尚待正常使用确认。
-
-
-当前Beta0.1.42允许防抖与跌落实验组合：玩家／座位NPC可同时使用实验1／2，狮鹫可同时使用实验3。已移除强制互斥，开关仍独立，实例及调用异常保护保留。先前版本说明中的互斥要求不适用于本版，用法见BETA_0142_COMBINED_FALL_CONTROLS.md。
-
-
-Beta0.1.43在现有防抖开关中增加精确实例的自由落体启动拦截，覆盖stop()后同帧重新启动。菜单与探针显示阻止次数，退出／关闭后放行，旧实验组合继续可用。原生Hook与水平抖动效果待实机确认；见BETA_0143_FALL_START_GUARD.md。
-
-
-Beta0.1.44修复0.1.43防抖开关无法开启：多参数落体启动接口改用REFramework要求的逗号加空格签名。原防抖、旧实验组合及精确实例范围不变；见BETA_0144_FALL_SIGNATURE_FIX.md。
-
-
-## 0.1.45：三秒逐帧精细探针
-
-DEBUG新增三秒逐帧只读记录，录制期间暂缓本Beta自动日志写盘，结束后保存并恢复。保留当前导航、防抖和旧实验组合；捕捉实体、骨架与目标在各阶段的差异，用于追查规律性水平抽动。与60秒原路线探针分开使用，操作与边界见[BETA_0145_THREE_SECOND_PROBE.md](BETA_0145_THREE_SECOND_PROBE.md)。离线回归通过，实际游戏捕获待验证。
-
-
-## 0.1.46：驾驶期间停止自动日志写盘
-
-普通日志与两种原路线探针在驾驶中只缓存，实际游戏暂停或结束驾驶后保存，三秒到时不立即保存。此规则覆盖上述历史版本的两秒自动写盘说明。普通日志保留最近约五分钟样本与400条事件，淘汰计数写入文件；用户设置和已有文件不变。详细操作与验证见[BETA_0146_DEFERRED_LOG_OUTPUT.md](BETA_0146_DEFERRED_LOG_OUTPUT.md)。离线回归通过，实际画面改善待验证。
+Author: **aelinore**.

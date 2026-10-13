@@ -64,3 +64,31 @@
 !/BETA_0145_THREE_SECOND_PROBE.md
 
 !/BETA_0146_DEFERRED_LOG_OUTPUT.md
+
+# Griffin Journey Redux clean gameplay and optional developer modules
+!/GriffinJourneyRedux.lua
+!/GRIFFIN_JOURNEY_REDUX_HANDOFF.md
+!/CLEAN_020_TESTING.md
+!/_GriffinJourneyRedux/
+/_GriffinJourneyRedux/*
+!/_GriffinJourneyReduxDebug/
+/_GriffinJourneyReduxDebug/*
+!/_GriffinJourneyRedux/antijitter.lua
+!/_GriffinJourneyRedux/callbacks.lua
+!/_GriffinJourneyRedux/camera.lua
+!/_GriffinJourneyRedux/fall_stop.lua
+!/_GriffinJourneyRedux/flight.lua
+!/_GriffinJourneyRedux/griffin.lua
+!/_GriffinJourneyRedux/input.lua
+!/_GriffinJourneyRedux/lifecycle.lua
+!/_GriffinJourneyRedux/ownership.lua
+!/_GriffinJourneyRedux/passengers.lua
+!/_GriffinJourneyRedux/player.lua
+!/_GriffinJourneyRedux/presets.lua
+!/_GriffinJourneyRedux/protection.lua
+!/_GriffinJourneyRedux/seating.lua
+!/_GriffinJourneyRedux/session.lua
+!/_GriffinJourneyRedux/spawning.lua
+!/_GriffinJourneyRedux/ui.lua
+!/_GriffinJourneyReduxDebug/fine.lua
+!/_GriffinJourneyReduxDebug/tools.lua
