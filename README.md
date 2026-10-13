@@ -1,11 +1,8 @@
 # Griffin Journey Redux
 
-
-**Failure archive: 0.3.11 sprint speed experiments are shelved. This branch is a failed experiment backup, not a verified release. See [failure handoff](SPRINT_SPEED_EXPERIMENTS_SHELVED.md).**
-
 Fly a friendly Griffin with configurable controls, a head-following camera, and separate seats for the player, pawns, and accompanying NPCs.
 
-Version: **0.3.11**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
+Version: **0.3.12**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
 
 ## Install or upgrade
 
@@ -34,13 +31,13 @@ RT selects gear 2. RB dive / LB climb also immediately select gear 2 from gear 1
 
 Flight Settings has independent horizontal acceleration, released-input deceleration and reverse-braking constants (defaults 0.2/0.6/0.6 seconds), plus independent vertical up-start/up-stop/down-start/down-stop constants (defaults 0.6/0.2/0.2/0.6 seconds). Each phase is separately adjustable; vertical reversal uses outgoing stopping and incoming startup response. All constants allow 0–3 seconds: larger values give more inertia, zero makes that stage immediate. Reversal brakes through zero before accelerating in the new direction. Settings save automatically. Former default bindings migrate once; custom bindings and explicit None remain.
 
-Sprint-to-hover LT now inherits measured world velocity and coasts after native hover binds. Flight Settings displays sprint speed and provides **2档切悬停惯性时间常数（秒）** (default 0.8, range 0–3; zero disables coasting). Invalid or stale samples do not produce momentum. Optional Debug native-speed inspection is read-only; dive/climb speed modulation is pending native validation. See [sprint momentum](SPRINT_036_LT_MOMENTUM.md).
+Sprint-to-hover LT now inherits measured world velocity and coasts after native hover binds. Flight Settings displays sprint speed and provides **2档切悬停惯性时间常数（秒）** (default 0.8, range 0–3; zero disables coasting). Invalid or stale samples do not produce momentum. Dive/climb speed modulation is shelved; the failed experiments and native parameter inspection have been removed. See [sprint momentum](SPRINT_036_LT_MOMENTUM.md).
 
 The low-speed camera follows only while the Griffin is turning and stops correcting when rotation stops. Both gears share right-stick blending, takeover threshold, hysteresis and 0.8-second recovery delay, with separately adjustable follow speeds in Camera Settings. Camera pitch remains manually controlled. See [two-gear controls](CONTROLS_030_TWO_GEARS.md).
 
 Ordinary airborne actions, including hover, are not submitted on the ground. DEBUG includes **禁止跨阶段动作**, checked by default, to disable this guard for the current script session when testing. Reload restores the guard; external action tools retain their own explicit cross-phase option. See [phase guard and landing](PHASE_032_LANDING.md).
 
-DEBUG includes an opt-in **冲刺位移叠加对照（+6米／秒，自动结束）** experiment: original sprint for two seconds, +6 m/s code displacement for six seconds, then two seconds without the addition. Each step runs after LateUpdateBehavior, adds to the current native position and synchronizes Transform, position context and character controller without changing rotation or restarting sprint. The test shows measured A/B/recovery speeds and immediate coordinate errors; in-game pullback/jitter remains to be checked. Read-only checkpoints before joint/rendering and the next behavior update report signed motion after injection. See [late-phase overlay test](SPRINT_OVERLAY_0311_LATE.md). The previous read-only timing probe remains available separately.
+Sprint speed experiments are shelved. The clean version removes native speed inspection, multiplier/vector tests, timing probes and code-overlay controls/callbacks. Native sprint remains unchanged; measured-velocity LT coasting stays available. The failed experiment source is preserved on `archive/failed-sprint-speed-0.3.11`. See [failure handoff](SPRINT_SPEED_EXPERIMENTS_SHELVED.md).
 
 ## Seats and camera
 

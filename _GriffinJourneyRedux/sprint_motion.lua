@@ -1,7 +1,7 @@
 -- Read-only native displacement sampling; momentum writes begin only in bound hover.
 return function(ctx)
 local _ENV=ctx
-sprint_motion={inspect_native=false,native_status="原生速度检查：关闭"}
+sprint_motion={}
 local function length(v) return math.sqrt(v.x*v.x+v.y*v.y+v.z*v.z) end
 local function scoped(d)
     return alive and d and active==d and state.generation==generation
@@ -15,31 +15,6 @@ function sprint_motion:pause(d)
         d.sprint_sample=nil
         if d.sprint_handoff then d.sprint_handoff.time=now() end
     end
-end
-function sprint_motion:inspect(d,ch)
-    if not self.inspect_native or now()<(self.inspect_at or -math.huge) then return end
-    self.inspect_at=now()+0.25
-    local ok,result=pcall(function()
-        assert(validate_spawn(d.spawn)==ch,"Griffin changed")
-        local fc=assert(ch:call("get_FlightCtrl()"),"FlightControl unavailable")
-        assert(fc:call("get_CachedCharacter()")==ch,"FlightControl owner changed")
-        local values={}
-        for _,key in ipairs({"OldFlySpeedXZ","FlightAttitudeAddSpeed","FlightAttitudeAddSpeedStore"}) do
-            local value=fc:get_field(key)
-            values[#values+1]=key.."="..(finite(value) and string.format("%.3f",value) or "不可读")
-        end
-        local v=fc:get_field("FlightMoveVector")
-        if v and finite(v.x) and finite(v.y) and finite(v.z) then
-            values[#values+1]=string.format("FlightMoveVector=(%.3f, %.3f, %.3f)",v.x,v.y,v.z)
-        end
-        local parameter=fc:get_field("StatusParameter")
-        if parameter then
-            local rate=parameter:call("get_FlySpeedRate()")
-            values[#values+1]="FlySpeedRate="..(finite(rate) and string.format("%.3f",rate) or "不可读")
-        end
-        return table.concat(values,"；")
-    end)
-    self.native_status=ok and result or ("原生速度检查："..tostring(result))
 end
 function sprint_motion:sample(d,ch,tr,flying,ground,action)
     if not scoped(d) or menu.gameplay_paused() then self:pause(d);return end
@@ -75,7 +50,6 @@ function sprint_motion:sample(d,ch,tr,flying,ground,action)
         end
     end)
     if not ok then self:clear(d);d.sprint_speed=nil;d.sprint_status="速度读取暂不可用："..tostring(err) end
-    self:inspect(d,ch)
 end
 function sprint_motion:capture(d)
     local s=d.sprint_sample

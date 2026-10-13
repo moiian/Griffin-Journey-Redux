@@ -635,3 +635,10 @@ All 26 Lua54 modules and previous/new offline regressions pass, including zero e
 ## Sprint speed experiments: failed and shelved (2026-10-14)
 
 Neither the tested native speed entry nor either additive-position insertion point produced the intended speed response in game. Archive 0.3.11 as a failed experiment; do not resume automatically. Independent LT measured-velocity handoff remains retained. See SPRINT_SPEED_EXPERIMENTS_SHELVED.md.
+
+
+## Griffin Journey Redux 0.3.12: remove shelved sprint experiments (2026-10-14)
+
+Restore the clean runtime after archiving failed sprint-speed experiments on `archive/failed-sprint-speed-0.3.11`. Remove speed_test/timing/overlay modules, their UI switches, update/render/lifecycle callbacks, native speed-member inspection and obsolete active test instructions. Keep ordinary sprint behavior and measured-world-velocity LT handoff/coasting; preserve existing controls, camera, seats, phase guard and settings.
+
+All 23 Lua54 modules and relevant full offline regressions pass with/without optional Debug. Retained sprint sampling performs no retired FlightControl speed-field reads/writes; removed controls/modules/late callback are absent. LT transition/coasting, pause, rejected samples, lifecycle, 30/120Hz, zero/save and previous gameplay checks pass. Removal does not establish new in-game acceptance of the failed feature; that feature remains shelved. See SPRINT_SPEED_EXPERIMENTS_SHELVED.md.

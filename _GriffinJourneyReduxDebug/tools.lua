@@ -2,7 +2,7 @@
 return function(ctx)
 local _ENV=ctx
 Fine=require("_GriffinJourneyReduxDebug.fine")
-debug_tools={overlay=require("_GriffinJourneyReduxDebug.overlay")(ctx),timing=require("_GriffinJourneyReduxDebug.timing")(ctx),speed_test=require("_GriffinJourneyReduxDebug.speed_test")(ctx),enabled=false,status="调试记录：关闭",observers_installed=false}
+debug_tools={enabled=false,status="调试记录：关闭",observers_installed=false}
 journal={version=VERSION,events={},samples={}}
 journal_dirty=false
 part,last_flush,next_sample=1,-math.huge,0
@@ -22,8 +22,8 @@ function debug_tools:capture(stage)
         if not ok then self.fine:stop("读取异常");self.fine.status="三秒探针已停止："..tostring(err) end
     end
 end
-function debug_tools:tick() self.fine:tick();self.speed_test:tick();self.timing:tick();self.overlay:tick() end
-function debug_tools:stop() self.fine:stop("结束驾驶");self.speed_test:stop("结束驾驶");self.timing:stop("结束驾驶");self.overlay:stop("结束驾驶") end
+function debug_tools:tick() self.fine:tick() end
+function debug_tools:stop() self.fine:stop("结束驾驶") end
 function debug_tools:shutdown() self:stop();self.fine:shutdown();self:flush() end
 function debug_tools:set_enabled(value)
     if value then
@@ -466,12 +466,6 @@ function debug_tools:draw()
     changed,value=menu.toggle("开启调试记录（暂停／结束驾驶后写盘）",self.enabled)
     if changed then self:set_enabled(value) end
     imgui.text(self.status)
-    changed,value=menu.toggle("原生冲刺速度只读检查",sprint_motion.inspect_native)
-    if changed then sprint_motion.inspect_native=value;sprint_motion.inspect_at=nil end
-    if sprint_motion.inspect_native then imgui.text(sprint_motion.native_status) end
-    if self.speed_test.pending then imgui.text(self.speed_test.status) end
-    self.overlay:draw()
-    self.timing:draw()
     changed,value=menu.toggle("三秒逐帧精细记录（暂停后保存）",self.fine.running)
     if changed then if value then self.fine:start() else self.fine:stop("手动停止") end end
     imgui.text(self.fine.status)
