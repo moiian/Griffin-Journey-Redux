@@ -1,5 +1,8 @@
 # Griffin Journey Redux
 
+
+**Failure archive: 0.3.11 sprint speed experiments are shelved. This branch is a failed experiment backup, not a verified release. See [failure handoff](SPRINT_SPEED_EXPERIMENTS_SHELVED.md).**
+
 Fly a friendly Griffin with configurable controls, a head-following camera, and separate seats for the player, pawns, and accompanying NPCs.
 
 Version: **0.3.11**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.

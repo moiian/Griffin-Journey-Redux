@@ -269,3 +269,8 @@ All 26 Lua54 modules and prior/new offline regressions pass, including simulated
 Move the opt-in +6 m/s overlay's injection and speed sampling from post-UpdateBehavior to post-LateUpdateBehavior. Retain the same synchronization and A/B/recovery sequence. Add read-only signed-position checkpoints before joint/rendering and the next behavior update; no extra pose writes or absolute pinning. Immediate readback and reverse-motion counters alone do not establish persistent movement.
 
 All 26 Lua54 modules and previous/new offline regressions pass, including zero early injection, actual late-callback integration/LT inheritance and simulated same-frame rollback vs retained boost at checkpoints. Effective native speed addition and visual stability remain for game acceptance. Dive/climb modulation is not enabled. See SPRINT_OVERLAY_0311_LATE.md.
+
+
+## Sprint speed experiments: failed and shelved (2026-10-14)
+
+Neither the tested native speed entry nor either additive-position insertion point produced the intended speed response in game. Archive 0.3.11 as a failed experiment; do not resume automatically. Independent LT measured-velocity handoff remains retained. See SPRINT_SPEED_EXPERIMENTS_SHELVED.md.
