@@ -62,7 +62,7 @@ function test:start()
   local r={driver=d,character=ch,go=d.spawn.result.go,transform=tr,terrain=terrain,
    context=assert(ch:get_field("<PosRotContext>k__BackingField")),controller=assert(terrain.MainCharacterController),
    phase="A",started=now(),last_time=now(),position=vector(tr:call("get_UniversalPosition()")),
-   stats={},writes=0,readback=0,controller_error=0,added=0,reverse=0,checked=0}
+   stats={},writes=0,readback=0,controller_error=0,added=0,reverse=0,checked=0,checkpoints={}}
   assert(valid(r),"Driver unavailable");binding(r);native_sprint(r)
   self.result=nil;self.run=r;self.status="叠加对照 A：原速2秒 → +6米／秒6秒 → 恢复2秒；保持平飞。"
  end)
@@ -83,6 +83,19 @@ function test:tick()
  local r=self.run;if not r then return end
  local ok,current=pcall(valid,r)
  if not ok or not current then self:stop("驾驶／档位／暂停变化，已取消") end
+end
+function test:checkpoint(stage)
+ local r=self.run;if not r or r.phase~="B" or not r.last_after then return end
+ local ok,err=pcall(function()
+  if not valid(r) then return end
+  binding(r)
+  local p=vector(r.transform:call("get_UniversalPosition()"))
+  local signed=(p.x-r.last_after.x)*r.direction.x+(p.y-r.last_after.y)*r.direction.y+(p.z-r.last_after.z)*r.direction.z
+  local s=r.checkpoints[stage] or {n=0,min=math.huge,sum=0};r.checkpoints[stage]=s
+  if s.write==r.writes then return end -- At most one read result per injection at each checkpoint.
+  s.write=r.writes;s.n=s.n+1;s.min=math.min(s.min,signed);s.sum=s.sum+signed
+ end)
+ if not ok then self:stop("坐标阶段检查异常："..tostring(err)) end
 end
 function test:after_behavior()
  local r=self.run;if not r then return end
@@ -109,7 +122,7 @@ function test:after_behavior()
   end
   r.position=before;r.last_time=t
   if elapsed>=duration[r.phase] then
-   if r.phase=="A" then r.phase="B";r.started=t;self.status="叠加对照 B：当前原生位置上逐帧添加 +6米／秒，不锁定位置。"
+   if r.phase=="A" then r.phase="B";r.started=t;self.status="叠加对照 B：LateUpdateBehavior后添加 +6米／秒，不锁定位置。"
    elseif r.phase=="B" then r.phase="R";r.started=t;r.last_after=nil;self.status="叠加对照：停止额外位移，采样原速恢复。"
    else self:finish(r);return end
   end
@@ -140,6 +153,7 @@ function test:draw()
   if beta_button("停止冲刺叠加对照###BetaOverlayStop") then self:stop("手动停止") end
  elseif beta_button("冲刺位移叠加对照（+6米／秒，自动结束）###BetaOverlayStart") then self:start() end
  imgui.text(self.status)
+ imgui.text("写入阶段：LateUpdateBehavior结束后")
  local r=self.result
  if r then
   for _,v in ipairs({{"原速 A",r.baseline},{"叠加 +6",r.boosted},{"恢复原速",r.recovered}}) do
@@ -148,6 +162,11 @@ function test:draw()
   imgui.text(string.format("叠加次数 %d；累计代码位移 %.2fm",r.writes,r.added))
   imgui.text(string.format("即时Transform误差 %.4fm；碰撞体差 %.4fm",r.readback,r.controller_error))
   imgui.text(string.format("相邻帧反向位移 %d／%d（仅线索）",r.reverse,r.checked))
+  for _,stage in ipairs({"beforeJoint","beforeRender","nextBehavior"}) do
+   local s=r.checkpoints[stage]
+   if s and s.n>0 then imgui.text(string.format("Late → %s：最小 %.4fm，均值 %.4fm（%d次）",stage,s.min,s.sum/s.n,s.n))
+   else imgui.text("Late → "..stage.."：未采到") end
+  end
  end
 end
 return test

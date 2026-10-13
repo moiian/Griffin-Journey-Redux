@@ -262,3 +262,10 @@ All 25 Lua54 modules and prior/new offline regressions pass, including exact/unr
 Add a bounded Debug comparison of original sprint, six seconds of +6 m/s code displacement and original-speed recovery. Add each step to the current native position after UpdateBehavior and synchronize Transform, position context and controller without absolute locking, rotation changes or sprint restarts. Show actual A/B/recovery speed and immediate coordinate errors; partial setter failures participate in current-position recovery. Normal flight stays unchanged until the experiment is started.
 
 All 26 Lua54 modules and prior/new offline regressions pass, including simulated pullback rejection, 30/120Hz, no speed-magnitude feedback, default zero writes, cancellation/reload repair and actual callback integration with LT inheriting the corrected measured velocity. Native coexistence, pullback and visual quality remain for in-game acceptance. Dive/climb modulation is not enabled. See SPRINT_OVERLAY_0310.md.
+
+
+## Griffin Journey Redux 0.3.11: late-phase sprint overlay comparison (2026-10-14)
+
+Move the opt-in +6 m/s overlay's injection and speed sampling from post-UpdateBehavior to post-LateUpdateBehavior. Retain the same synchronization and A/B/recovery sequence. Add read-only signed-position checkpoints before joint/rendering and the next behavior update; no extra pose writes or absolute pinning. Immediate readback and reverse-motion counters alone do not establish persistent movement.
+
+All 26 Lua54 modules and previous/new offline regressions pass, including zero early injection, actual late-callback integration/LT inheritance and simulated same-frame rollback vs retained boost at checkpoints. Effective native speed addition and visual stability remain for game acceptance. Dive/climb modulation is not enabled. See SPRINT_OVERLAY_0311_LATE.md.

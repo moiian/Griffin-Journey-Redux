@@ -79,6 +79,7 @@ end)
 
 re.on_pre_application_entry("UpdateBehavior",function()
     if debug_tools then debug_tools:capture("behavior_before_anchor") end
+    if debug_tools then debug_tools.overlay:checkpoint("nextBehavior") end
     passengers.frame=passengers.frame+1
     if menu.apply_pending_preset then menu.apply_pending_preset() end
     passengers.refresh();tick_skip_think()
@@ -91,8 +92,10 @@ re.on_pre_application_entry("UpdateBehavior",function()
 end)
 re.on_application_entry("UpdateBehavior",function()
     hover_motion:after_behavior()
-    if debug_tools then debug_tools.overlay:after_behavior() end
     if debug_tools then debug_tools:capture("behavior_native_after") end
+end)
+re.on_application_entry("LateUpdateBehavior",function()
+    if debug_tools then debug_tools.overlay:after_behavior() end
 end)
 menu.player_visual_pre=function()
     local d=active
@@ -150,7 +153,7 @@ menu.visual_error=function(label,err)
     else stop_driver(label);failed(label,err) end
 end
 re.on_pre_application_entry("UpdateJointExpression",function()
-    if debug_tools then debug_tools:capture("joint_before_restore") end
+    if debug_tools then debug_tools.overlay:checkpoint("beforeJoint");debug_tools:capture("joint_before_restore") end
     passengers.pre();menu.player_visual_pre()
 end)
 re.on_application_entry("UpdateJointExpression",function()
@@ -161,7 +164,7 @@ re.on_application_entry("UpdateJointExpression",function()
     if debug_tools then debug_tools:capture("joint_seated_after") end
 end)
 re.on_pre_application_entry("PrepareRendering",function()
-    if debug_tools then debug_tools:capture("render_before_seat") end
+    if debug_tools then debug_tools.overlay:checkpoint("beforeRender");debug_tools:capture("render_before_seat") end
 
     if not menu.visual_allowed() then return end
     -- Menu transitions can replace the pose before NickCore reports pause. Keep
