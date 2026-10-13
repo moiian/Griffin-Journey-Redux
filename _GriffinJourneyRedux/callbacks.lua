@@ -231,13 +231,11 @@ function bridge.request_action(node, allow_cross, phase)
         run_once(function()
             if not alive or state.generation ~= generation or serial ~= external_serial or active
                 or r.delete_requested or state.spawns[#state.spawns] ~= r then return end
-            if not core() or menu.gameplay_paused() then return end
             local ok, err = pcall(function()
                 local ch = validate_spawn(r)
                 local manager = ch:call("get_ActionManager()")
                 assert(manager and manager:call("get_GameObject()") == r.result.go, "ActionManager mismatch")
                 event("action_request", {node=node, mode="external"})
-                select_player_target(r)
                 manager:call("requestActionCore(app.ActionManager.Priority, System.String, System.UInt32)", 10, node, 0)
                 event("action_returned", node)
             end)

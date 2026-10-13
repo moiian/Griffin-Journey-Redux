@@ -1,3 +1,7 @@
+# Archived experiment: reverted to 0.2.0
+
+Action-time target reselection is no longer deployed. The original 0.2.0 target selection at driving start and via the manual retarget button remains. The following records the withdrawn experiment.
+
 # Griffin Journey Redux 0.2.1: retarget before action requests
 
 Every committed Griffin action first selects the current player through the existing ManualPlayer/setTarget interface, then immediately submits the requested action in the same behavior callback. This includes manual flight commands, automatic hover, external driving commands, and non-driving single-action bridge requests. There is one target selection per actual action request; no continuous retarget loop or transition action is added.

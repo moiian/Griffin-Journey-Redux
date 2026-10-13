@@ -2,7 +2,7 @@
 
 Fly a friendly Griffin with configurable controls, a head-following camera, and separate seats for the player, pawns, and accompanying NPCs.
 
-Version: **0.2.1**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
+Version: **0.2.0**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
 
 ## Install or upgrade
 
@@ -42,13 +42,8 @@ The player package omits the developer folder. The developer package includes it
 
 ## Validation and current limitation
 
-The user confirmed normal operation of 0.2.0. Version 0.2.1 compiles and passes offline gameplay, target/action ordering, scope, lifecycle, settings, default-no-diagnostics and Debug-absent regressions. Native AI effectiveness remains to be checked.
+Lua54 compilation and offline gameplay, scope, lifecycle, settings, default-no-diagnostics, and Debug-absent regressions pass. The user confirmed normal operation of the refactored 0.2.0 build. The action-time retargeting experiment has been reverted; the autonomous target issue remains unresolved.
 
 The user still observes autonomous Griffin decision targets being used when a new action is requested, despite think skipping. This remains unresolved.
 
 Author: **aelinore**.
-
-
-## Retargeting on action changes (0.2.1)
-
-Every manual or automatic Griffin action request now reselects the player immediately before the action is submitted. This includes automatic hover. No extra setting or diagnostic recorder is required. See [AI_021_TARGET_RESELECT.md](AI_021_TARGET_RESELECT.md).
