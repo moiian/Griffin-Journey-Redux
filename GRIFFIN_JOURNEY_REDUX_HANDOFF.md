@@ -241,3 +241,10 @@ Optional Debug native-speed inspection is read-only and bounded. Metadata identi
 Add an opt-in Debug A/B test of the native FlySpeedRate getter: original horizontal speed, temporary 0.8 multiplier, then automatic restoration. Return changes are scoped to the exact driven controller/status/native thread; shared objects are not written. Abort on control/phase/pause/ownership/sample changes. Short result lines and separate speed readouts improve readability.
 
 All 24 Lua54 files and previous/new offline regressions pass, including per-call hook storage, exact/shared-object/thread negatives, nesting, nil/retirement/stop behavior, positive response and rejection of a hit without measured speed change. The native candidate remains unverified until game testing; the unified dive/climb model is not enabled. See NATIVE_SPEED_037_AB.md.
+
+
+## Griffin Journey Redux 0.3.8: native instance-vector comparison (2026-10-14)
+
+Replace the inconclusive speed-rate getter experiment with an opt-in, automatically restored 0.8 A/B test of the exact driven FlightControl's FlightMoveVector during updatePosition. The getter remains read-only diagnostic. Report update/late/position/getter call counts, vector values and context/interface errors. Shared status parameters are not modified. Pending restoration survives reset and participates in lifecycle recovery.
+
+All 24 Lua54 files and prior/new offline regressions pass, including nested calls, unrelated controllers, engine overwrites, nil/reset/cancellation cleanup, restoration failure/retry, measured response and rejection of writes without speed change. Native control is still unverified; dive/climb speed modulation is not enabled. See NATIVE_SPEED_038_VECTOR_AB.md.

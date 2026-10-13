@@ -471,13 +471,18 @@ function debug_tools:draw()
     if sprint_motion.inspect_native then imgui.text(sprint_motion.native_status) end
     if self.speed_test.run then
         if beta_button("停止速度倍率对照###BetaSpeedTestStop") then self.speed_test:stop("手动停止") end
-    elseif beta_button("原生速度倍率对照（0.8倍，自动恢复）###BetaSpeedTestStart") then self.speed_test:start() end
+    elseif beta_button("原生位移向量对照（0.8倍，自动恢复）###BetaSpeedTestStart") then self.speed_test:start() end
     imgui.text(self.speed_test.status)
     if self.speed_test.result then
         local result=self.speed_test.result
         imgui.text(string.format("原速 A：%.2f 米／秒",result.baseline))
         imgui.text(string.format("0.8倍 B：%.2f 米／秒",result.reduced))
         imgui.text(string.format("恢复原速：%.2f 米／秒",result.recovery))
+        imgui.text(string.format("本狮鹫调用：update %d；late %d；position %d",result.owned_entries["update()"] or 0,result.owned_entries["lateUpdate()"] or 0,result.owned_entries["updatePosition()"] or 0))
+        imgui.text(string.format("所有调用：update %d；late %d；position %d；getter %d（作用域内 %d）",result.entries["update()"] or 0,result.entries["lateUpdate()"] or 0,result.entries["updatePosition()"] or 0,result.getter_entries,result.scoped_getter))
+        if result.context_misses>0 then imgui.text("回调上下文缺失："..result.context_misses) end
+        if result.last_error then imgui.text("向量接口异常："..result.last_error) end
+        if result.last_vector then imgui.text(string.format("FlightMoveVector：%.3f，%.3f，%.3f",result.last_vector.x,result.last_vector.y,result.last_vector.z)) end
     end
     changed,value=menu.toggle("三秒逐帧精细记录（暂停后保存）",self.fine.running)
     if changed then if value then self.fine:start() else self.fine:stop("手动停止") end end

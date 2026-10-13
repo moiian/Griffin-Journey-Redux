@@ -2,7 +2,7 @@
 
 Fly a friendly Griffin with configurable controls, a head-following camera, and separate seats for the player, pawns, and accompanying NPCs.
 
-Version: **0.3.7**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
+Version: **0.3.8**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
 
 ## Install or upgrade
 
@@ -37,7 +37,7 @@ The low-speed camera follows only while the Griffin is turning and stops correct
 
 Ordinary airborne actions, including hover, are not submitted on the ground. DEBUG includes **禁止跨阶段动作**, checked by default, to disable this guard for the current script session when testing. Reload restores the guard; external action tools retain their own explicit cross-phase option. See [phase guard and landing](PHASE_032_LANDING.md).
 
-DEBUG includes an opt-in **原生速度倍率对照（0.8倍，自动恢复）** test of the native speed-rate entry point. It compares original, temporarily reduced and restored horizontal speed without changing shared parameter objects. It runs for about six seconds and restores automatically; native verification is required before enabling dive/climb speed modulation. See [native speed test](NATIVE_SPEED_037_AB.md).
+DEBUG includes an opt-in **原生位移向量对照（0.8倍，自动恢复）** test. It compares original, temporarily reduced and restored horizontal speed by scaling only the driven Griffin's instance vector during native position updates. Shared speed parameters remain unchanged. It runs for about six seconds, restores automatically and reports update/getter counts. Native verification is required before enabling dive/climb speed modulation. See [native vector test](NATIVE_SPEED_038_VECTOR_AB.md).
 
 ## Seats and camera
 
