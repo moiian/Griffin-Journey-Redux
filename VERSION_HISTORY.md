@@ -609,3 +609,10 @@ All 24 Lua54 files and previous/new offline regressions pass, including per-call
 Replace the inconclusive speed-rate getter experiment with an opt-in, automatically restored 0.8 A/B test of the exact driven FlightControl's FlightMoveVector during updatePosition. The getter remains read-only diagnostic. Report update/late/position/getter call counts, vector values and context/interface errors. Shared status parameters are not modified. Pending restoration survives reset and participates in lifecycle recovery.
 
 All 24 Lua54 files and prior/new offline regressions pass, including nested calls, unrelated controllers, engine overwrites, nil/reset/cancellation cleanup, restoration failure/retry, measured response and rejection of writes without speed change. Native control is still unverified; dive/climb speed modulation is not enabled. See NATIVE_SPEED_038_VECTOR_AB.md.
+
+
+## Griffin Journey Redux 0.3.9: read-only native movement timing (2026-10-14)
+
+Replace the inconclusive A/B menu entries with an opt-in three-second read-only timing probe. Record exact-controller positions, vectors and old speed before/after flight update and collider methods, native forward-distance returns, and adjacent-stage movement. Show missing optional methods and context/interface errors. No fields, return values, settings or files are modified. Earlier pending vector restoration remains supported.
+
+All 25 Lua54 modules and prior/new offline regressions pass, including exact/unrelated controllers, nesting, bounded sampling, unchanged returns, idle zero reads, zero writes, cancellation and optional-method failure. Native timing must be observed before choosing another speed modification point; dive/climb speed modulation is not enabled. See NATIVE_TIMING_039.md.
