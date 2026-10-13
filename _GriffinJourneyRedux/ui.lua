@@ -7,6 +7,14 @@ re.on_draw_ui(function()
     if menu.save_error then imgui.text(menu.save_error) end
     if imgui.tree_node("一般设置") then
         if beta_button("一键生成狮鹫###BetaSpawn") then spawn() end
+        if beta_button("召唤演出测试（第5秒生成狮鹫）###BetaSummonPerformance") then summon:request() end
+        if imgui.tree_node("召唤演出设置") then
+            menu.slider("summon_height","生成上方距离（米）",0,50)
+            menu.slider("summon_forward","生成前方距离（米）",0,50)
+            imgui.text("以第5秒玩家位置和水平朝向计算；生成后水平面朝玩家。")
+            imgui.tree_pop()
+        end
+        imgui.text(summon.status)
         if beta_button("开始驾驶###BetaStart") then start_driver() end
         if beta_button("结束驾驶###BetaStop") then menu.stop() end
         if beta_button("删除狮鹫###BetaDelete") then menu.delete() end

@@ -2,13 +2,15 @@
 
 Fly a friendly Griffin with configurable controls, a head-following camera, and separate seats for the player, pawns, and accompanying NPCs.
 
-Version: **0.3.12**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
+Version: **0.3.13**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
 
 ## Install or upgrade
 
 Copy `reframework/autorun` from the package into the game folder. When upgrading from the Beta, remove the old `reframework/autorun/GriffinFlightBeta.lua` entry before loading the new script. Keep `reframework/data/GriffinFlightBeta_Settings.json`: existing controls and seat presets are reused.
 
 Open **Griffin Journey Redux → 一般设置**, spawn a Griffin, and start driving. End driving before resetting scripts. Only the Griffin spawned by this mod is controlled.
+
+The manual **召唤演出测试（第5秒生成狮鹫）** button plays the native forgery-Ferrystone performance and requests a Griffin spawn at five seconds of unpaused gameplay. **召唤演出设置** controls the height and forward distance (defaults: 10 m above the player's position and 5 m forward). The Griffin faces the player horizontally once its returned instance is ready, and uses the same friendly and SkipThink initialization as the ordinary spawn button. Driving remains manual. The native performance can consume a forgery Ferrystone if one is carried.
 
 ## Controls
 

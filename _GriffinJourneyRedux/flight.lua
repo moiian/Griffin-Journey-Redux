@@ -19,6 +19,7 @@ local function horizontal_heading(d,qx,qy,qz,qw)
     return 0,1,length
 end
 function start_driver()
+    if summon and summon.current then status="请等待召唤演出结束。";return end
     local experiment = rawget(_G, "GriffinMountExperimentControl")
     if experiment and experiment.is_driving() then status = "请先结束实验工具的玩家固定。"; return end
     if active or state.recovery or queued then return end

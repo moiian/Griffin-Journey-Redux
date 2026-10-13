@@ -39,6 +39,10 @@ re.on_frame(function()
                     status = "狮鹫已生成并设为队伍友方，可以开始驾驶。"
                     event("spawn_ready", "Friend bound; spawn ThinkStop released when true")
                     set_skip_think(true)
+                    if r.summon_facing then
+                        local facing_ok,facing_err=pcall(apply_spawn_facing,r,ch)
+                        if not facing_ok then failed("狮鹫已生成，但初始朝向设置失败",facing_err) end
+                    end
                 end)
                 if not ok then failed("狮鹫初始化失败",err) end
             end)
@@ -90,6 +94,7 @@ re.on_pre_application_entry("UpdateBehavior",function()
     if debug_tools then debug_tools:capture("behavior_before_native") end
 end)
 re.on_application_entry("UpdateBehavior",function()
+    summon:tick()
     hover_motion:after_behavior()
     if debug_tools then debug_tools:capture("behavior_native_after") end
 end)
@@ -253,6 +258,7 @@ _G.GriffinFlightBetaBridge = bridge
 _G.GriffinJourneyReduxBridge = bridge
 
 re.on_script_reset(function()
+    summon:cancel("脚本重置")
     stop_driver("脚本重置")
     ai_takeover.enabled=false
     anti_jitter:shutdown()

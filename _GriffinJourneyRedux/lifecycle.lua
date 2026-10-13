@@ -2,6 +2,7 @@
 return function(ctx)
 local _ENV=ctx
 stop_driver = function(reason)
+    if summon then summon:cancel(reason) end
     anti_jitter:stop()
     if debug_tools then debug_tools:stop() end
     operation = nil

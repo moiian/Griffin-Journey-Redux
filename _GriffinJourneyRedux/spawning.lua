@@ -1,11 +1,12 @@
 -- Griffin Journey Redux: spawning
 return function(ctx)
 local _ENV=ctx
-function spawn()
-    if queued or #state.spawns > 0 or state.recovery then return end
+function spawn(options)
+    if summon and summon.current and (not options or options.session~=summon.current) then return false end
+    if queued or #state.spawns > 0 or state.recovery then return false end
     settings.freeze_player=true;block_player_fall=true
     passengers.protection.damage=true;passengers.protection.relocation=true
-    if not core() then status = "等待 NickCore 加载。"; return end
+    if not core() then status = "等待 NickCore 加载。"; return false end
     local token = {}
     operation = token
     queued = true
@@ -14,13 +15,16 @@ function spawn()
         operation = nil
         queued = false
         if not alive then return end
+        if options and (not summon or summon.current~=options.session) then return end
         local ok, err = pcall(function()
             local c = assert(core(), "等待 NickCore 加载")
             assert(c.properties.player and not menu.gameplay_paused(), "请进入游戏")
+            if options then assert(c.properties.player==options.owner,"Summon player changed") end
             install_hooks()
             local r = {owner = c.properties.player, party = capture_party(c,c.properties.player), friend = true}
+            if options then r.summon_facing=options.facing end
             -- NickCore returns a mutable instance-reference table; never search by Character ID.
-            r.result = c.enemySpawner.spawn_enemy("Griffin", nil, true)
+            r.result = c.enemySpawner.spawn_enemy("Griffin", options and options.position or nil, true)
             assert(type(r.result) == "table", "Spawn interface returned no reference table")
             state.spawns[#state.spawns+1] = r
             status = "正在生成狮鹫并设置友方……"
@@ -28,6 +32,7 @@ function spawn()
         end)
         if not ok then failed("生成失败", err) end
     end)
+    return true
 end
 delete_one = function(r)
     if r.destroy_queued then return end
