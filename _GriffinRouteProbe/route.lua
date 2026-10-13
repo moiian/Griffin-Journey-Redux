@@ -50,7 +50,7 @@ function Route:draw()
         if value and (self.fine.running or self.fine.pending) then self.probe.status="请等三秒探针保存完成"
         elseif value then self.probe:start() else self.probe:stop("手动停止") end
     end
-    changed,value=imgui.checkbox("【原路线探针】三秒逐帧精细记录（结束后写盘）",self.fine.running)
+    changed,value=imgui.checkbox("【原路线探针】三秒逐帧精细记录（暂停后保存）",self.fine.running)
     if changed then
         if value and (self.probe.running or self.probe.pending or #self.probe.queue>0) then self.fine.status="请先停止60秒探针并等保存完成"
         elseif value then self.fine:start() else self.fine:stop("手动停止") end

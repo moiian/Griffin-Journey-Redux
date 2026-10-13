@@ -131,7 +131,7 @@ function Probe:read(d,stage)
 end
 function Probe:enqueue(frame)
     if self.seen[frame.id] then return end
-    if #self.queue>=240 then self.current=nil;self:stop("保存队列已满");return end
+    if #self.queue>=1800 then self.current=nil;self:stop("保存队列已满");return end
     self.seen[frame.id]=true;self.queue[#self.queue+1]=frame;self.queued_frames=self.queued_frames+1
 end
 function Probe:capture(stage)
@@ -193,12 +193,16 @@ function Probe:tick(force)
     if not self.running and not self.pending and #self.queue==0 then return end
     if not force and self.retry_wall and self.env.wall()<self.retry_wall then return end
     if self.running and self.env.wall()>=self.deadline then self:stop("60秒到时") end
+    if not force and self.env.can_dump and not self.env.can_dump() then
+        if self.pending then self.status="玩家探针数据已保留；暂停游戏或结束驾驶后保存" end
+        return
+    end
     if not force and not self.pending and self.env.wall()-self.last_flush<2 then return end
     if #self.queue==0 and not self.pending then return end
     local count=math.min(#self.queue,120)
     local frames={};for i=1,count do frames[i]=self.queue[i] end
     local final=self.pending and count==#self.queue
-    local payload={version="0.1.45",session=self.session,part=self.part+1,instances=self.instances,frames=frames}
+    local payload={version="0.1.46",session=self.session,part=self.part+1,instances=self.instances,frames=frames}
     if final then payload.summary={reason=self.reason,observed_frames=self.frames,observed_stages=self.rows,
         saved_frames=self.saved_frames+count,anomaly_windows=self.windows,read_errors=self.read_errors,
         events=self.events,field_errors=self.errors,baseline_hz=20,pre_frames=5,post_frames_including_trigger=6} end

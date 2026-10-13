@@ -1,6 +1,6 @@
--- Griffin Flight Beta 0.1.45. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.1.46. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-local VERSION = "0.1.45-beta"
+local VERSION = "0.1.46-beta"
 local state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 state.spawns = state.spawns or {}
@@ -30,6 +30,7 @@ local settings_path = "GriffinFlightBeta_Settings.json"
 local log_id = os.date("!%Y%m%dT%H%M%SZ") .. "_" .. math.floor(os.clock() * 1000)
 local part, last_flush, next_sample = 1, -math.huge, 0
 local journal = {version = VERSION, events = {}, samples = {}}
+local journal_dirty=true
 local stop_driver, delete_one
 local skip_think_enabled, skip_think_expected = false, nil
 local skip_think_status = "跳过思考：默认开启，等待狮鹫就绪"
@@ -67,6 +68,9 @@ local function vector(v)
 end
 local function flush()
     if menu.route and menu.route:quiet() then return false end
+    -- JSON serialization and disk output block the game thread. Keep gameplay in memory.
+    if active and not menu.gameplay_paused() then return false end
+    if not journal_dirty then return true end
     local started=os.clock()
     local ok, result = pcall(json.dump_file, "GriffinFlightBeta_" .. log_id .. "_" .. part .. ".json", journal)
     menu.log_io=menu.log_io or {sequence=0,recent={}}
@@ -76,21 +80,26 @@ local function flush()
     if #io.recent>8 then table.remove(io.recent,1) end
     last_flush = now()
     if not ok or result == false then log.error("[GriffinFlightBeta] Log save failed") end
+    if ok and result~=false then journal_dirty=false end
     return ok and result ~= false
 end
 local function rotate()
     if #journal.events < 400 and #journal.samples < 600 then return end
+    if active and not menu.gameplay_paused() then return end
     if flush() then
         part = part + 1
         journal = {version = VERSION, events = {}, samples = {}}
+        journal_dirty=true
     end
 end
 local function event(name, detail, defer_flush)
     rotate()
-    if #journal.events < 450 then
-        journal.events[#journal.events + 1] = {name = name, detail = detail, time = now()}
+    if #journal.events>=400 then
+        table.remove(journal.events,1);journal.dropped_events=(journal.dropped_events or 0)+1
     end
-    -- Batch gameplay events into the regular flush; exits still flush after active is cleared.
+    journal.events[#journal.events + 1] = {name = name, detail = detail, time = now()}
+    journal_dirty=true
+    -- Bounded recent history while flying; pause/end/reset are the save boundaries.
     if not defer_flush and not active then flush() end
 end
 local function failed(label, err)
@@ -243,12 +252,14 @@ do
                     and result.chara:call("get_GameObject()")==result.go
             end,
             paused=menu.gameplay_paused,time=now,wall=os.time,clock=os.clock,behavior_frame=function() return passengers.frame end,
+            can_dump=function() return not active or menu.gameplay_paused() end,
             timing=function()
                 local c=core();local p=c and c.properties or {}
                 return {nick_delta=p.deltaTime,nick_frame=p.frame,log_sequence=menu.log_io and menu.log_io.sequence or 0}
             end,
             diagnostics=function()
                 return {normal_log_io=passengers.snapshot(menu.log_io),journal_samples=#journal.samples,journal_events=#journal.events,
+                    journal_dirty=journal_dirty,dropped_samples=journal.dropped_samples or 0,dropped_events=journal.dropped_events or 0,
                     anti_jitter=menu.route and menu.route.fall_stop:snapshot(),griffin_anti_jitter=menu.route and menu.route.griffin_stop:snapshot(),
                     fall_experiments=passengers.snapshot(passengers.fall_experiment)}
             end,
@@ -2311,7 +2322,11 @@ re.on_frame(function()
     if passengers.flash.running and os.time()>=passengers.flash.deadline then passengers.flash_stop("60秒到时") end
     passengers.flash_drain()
     local c = core()
-    if not c or menu.gameplay_paused() then return end
+    if not c then return end
+    if menu.gameplay_paused() then
+        if journal_dirty then flush() end
+        return
+    end
     passengers.probe_tick()
     if fall_hits~=fall_logged and now()-fall_log_at>=1 then
         fall_logged=fall_hits;fall_log_at=now();event("player_fall_request",{hits=fall_hits,blocked=fall_blocked})
@@ -2357,9 +2372,13 @@ re.on_frame(function()
             sphere.sampled_player_distance=math.sqrt((p.x-h.x)^2+(p.y-h.y)^2+(p.z-h.z)^2)
         end
         rotate()
-        if #journal.samples < 650 then journal.samples[#journal.samples+1] = {time=now(), data=passengers.snapshot(active.trace)} end
+        if #journal.samples>=600 then
+            table.remove(journal.samples,1);journal.dropped_samples=(journal.dropped_samples or 0)+1
+        end
+        journal.samples[#journal.samples+1] = {time=now(), data=passengers.snapshot(active.trace)}
+        journal_dirty=true
     end
-    if active and now()-last_flush >= 2 then flush() end
+    if not active and journal_dirty then flush() end
     if menu.route then menu.route:capture_fine("frame_after_beta_tick") end
 end)
 re.on_application_entry("UpdateHID",function()
@@ -2989,6 +3008,7 @@ re.on_draw_ui(function()
     end
     if imgui.tree_node("按键设置") then menu.bindings();imgui.tree_pop() end
     if imgui.tree_node("DEBUG") then
+        imgui.text("自动日志：驾驶期间只缓存；暂停游戏或结束驾驶后保存")
         if menu.route then menu.route:draw() elseif menu.route_error then imgui.text(menu.route_error) end
         local changed,value=menu.toggle("显示预设[1]（仅手动调试）",menu.show_physical)
         if changed then
