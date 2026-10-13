@@ -31,7 +31,9 @@ re.on_draw_ui(function()
         menu.slider("sprint_stop_tau","2档切悬停惯性时间常数（秒）",0,3)
         if active and active.sprint_speed then
             local speed=active.sprint_speed
-            imgui.text(string.format("2档实测速度：%.2f 米／秒；水平 %.2f；竖直 %+.2f%s",speed.total,speed.horizontal,speed.vertical,speed.ready and "" or "（采样中）"))
+            imgui.text(string.format("2档实测总速度：%.2f 米／秒%s",speed.total,speed.ready and "" or "（采样中）"))
+            imgui.text(string.format("水平：%.2f 米／秒",speed.horizontal))
+            imgui.text(string.format("竖直：%+.2f 米／秒",speed.vertical))
         end
         if active and active.sprint_status then imgui.text(active.sprint_status) end
         if active and active.sprint_handoff_speed then imgui.text(string.format("最近LT继承速度：%.2f 米／秒",active.sprint_handoff_speed)) end

@@ -595,3 +595,10 @@ All 22 Lua54 modules and existing/new offline controls, inertia, stage, camera a
 Change takeoff minimum to 1.89 seconds. Measure native sprint world velocity from Universal position deltas and inherit it on LT after hover binds, with independent 0–3 second decay (default 0.8). Display measured total/horizontal/vertical speed. Reject stale/gapped/teleported samples and clear momentum on ground, changed binding, external takeover or new sprint. Native displacement and code coasting do not overlap.
 
 Optional Debug native-speed inspection is read-only and bounded. Metadata identifies candidate FlightControl members, but dive/climb speed modulation awaits native validation and is not enabled. All 23 Lua54 modules and previous/new offline regressions pass, including vector/distance, 30/120Hz agreement, transition sampling, pause, lifecycle, zero/save and bounded zero-write inspection. Real sprint speed and LT feel remain for in-game acceptance. See SPRINT_036_LT_MOMENTUM.md.
+
+
+## Griffin Journey Redux 0.3.7: bounded native speed-rate comparison (2026-10-14)
+
+Add an opt-in Debug A/B test of the native FlySpeedRate getter: original horizontal speed, temporary 0.8 multiplier, then automatic restoration. Return changes are scoped to the exact driven controller/status/native thread; shared objects are not written. Abort on control/phase/pause/ownership/sample changes. Short result lines and separate speed readouts improve readability.
+
+All 24 Lua54 files and previous/new offline regressions pass, including per-call hook storage, exact/shared-object/thread negatives, nesting, nil/retirement/stop behavior, positive response and rejection of a hit without measured speed change. The native candidate remains unverified until game testing; the unified dive/climb model is not enabled. See NATIVE_SPEED_037_AB.md.
