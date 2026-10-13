@@ -546,3 +546,10 @@ All 22 Lua54 files and existing/new offline regressions pass, including bounded 
 Split low-speed translation into independent acceleration, released/reduced-input deceleration and reverse-braking time constants. Defaults are 0.2/0.6/0.6 seconds; each accepts 0–3 seconds and saves automatically. Horizontal movement and vertical climb share acceleration/deceleration. Opposing input brakes through zero before accelerating in the new direction, without locking input. Analytic integration splits at the zero crossing; body-turn smoothing and LT hard stop remain unchanged.
 
 All 22 Lua54 files and existing/new offline regressions pass, including settings/defaults/zero/bounds/save/reload, horizontal and vertical response, opposing-input crossing, live input changes, rotated 30/120Hz agreement, LT/recenter and unchanged 2,000-frame sprint-camera output. Native handling remains to be checked in game. See CONTROLS_029_INERTIA.md.
+
+
+## Griffin Journey Redux 0.3.0: two gears and dedicated vertical controls (2026-10-14)
+
+Use gear 1 for all hover/code movement and gear 2 for native sprint; remove gear 0. Ground-only takeoff finishes in gear 1. Gear 1 defaults are A up, Y down and RS native landing. RB dive / LB climb immediately enter gear 2; sprint guidance continues without repeated requests. LT preserves existing low-speed inertia and suppresses held input until neutral. Stick release never restarts the hover action.
+
+Add independent up/down speeds and vertical time constants (default 0.6 seconds each, range 0–3), retain separate horizontal acceleration/coast/reverse-braking settings, and enable player spherical navigation in gear 1. Former default bindings migrate once; custom/None bindings are retained. All 22 Lua54 modules and existing/new offline controls, settings, protection, camera and lifecycle regressions pass, including analytic LT/vertical response, code down versus native landing, shoulder transitions, sphere response and 30/120Hz consistency. Native handling remains for in-game acceptance. See CONTROLS_030_TWO_GEARS.md.

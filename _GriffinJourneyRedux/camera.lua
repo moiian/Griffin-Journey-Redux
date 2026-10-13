@@ -97,7 +97,7 @@ end
 -- Only the current driving player's exact controller is touched. No camera Transform writes.
 function wrap_yaw(a) return (a+math.pi)%(2*math.pi)-math.pi end
 local function hover_camera_active(d)
-    return alive and d and d.controls_active and not d.external_control and d.gear<=1
+    return alive and d and d.controls_active and not d.external_control and d.gear==1
         and d.hover_motion and settings.hover_camera_yaw_speed>0
 end
 function yaw_failed(err)

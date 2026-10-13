@@ -130,7 +130,7 @@ function Fine:tick(force)
         self.status="三秒探针数据已保留；暂停游戏或结束驾驶后保存";return
     end
     if not force and self.retry and self:clock()<self.retry then return end
-    local payload={version="0.2.9",session=self.session,instances=self.instances,frames=self.frames,
+    local payload={version="0.3.0",session=self.session,instances=self.instances,frames=self.frames,
         summary={reason=self.reason,duration_seconds=self.ended-self.started,observed_frames=#self.frames,
             observed_stages=self.rows,baseline_hz="every_render_frame",read_errors=self.error_count,
             field_errors=copy(self.errors),writes_during_capture=0,beta_periodic_writes_deferred=true,

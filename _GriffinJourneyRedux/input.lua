@@ -6,8 +6,10 @@ controls.rows={
     {"spawn","召唤狮鹫","None","None"},{"start","开始驾驶","F","None"},
     {"stop","结束驾驶","X","None"},{"delete","删除狮鹫","None","None"},
     {"listen","让狮鹫听话","H","None"},{"a","起飞","Space","RDown"},
-    {"rt","冲刺／2档","LShift","RTrigBottom"},{"lt","刹停／悬浮","LControl","LTrigBottom"},
-    {"rb","爬升","E","RTrigTop"},{"lb","俯冲／降落","Q","LTrigTop"},
+    {"rt","冲刺／2档","LShift","RTrigBottom"},{"lt","悬停／1档","LControl","LTrigBottom"},
+    {"hover_up","1档上移","E","RDown"},{"hover_down","1档下移","Q","RUp"},
+    {"landing","1档原生降落","G","RStickPush"},
+    {"rb","冲刺爬升／2档","R","LTrigTop"},{"lb","冲刺俯冲／2档","C","RTrigTop"},
     {"left","向左","A","None"},{"right","向右","D","None"},
     {"up","向上／前","W","None"},{"down","向下／后","S","None"},
     {"preset_next","切换座位预设","None","None"},
@@ -51,15 +53,20 @@ for device,values in pairs(controls.enums) do
     table.sort(controls.choices[device],function(a,b) if a==b then return false end;if a=="None" then return true end;if b=="None" then return false end;return a<b end)
 end
 settings.bindings={}
+local migrate_bindings=not loaded_settings or loaded_settings.flight_bindings_revision~=1
+local old_defaults={rb={keyboard="E",gamepad="RTrigTop"},lb={keyboard="Q",gamepad="LTrigTop"}}
+settings.flight_bindings_revision=1
 for _,row in ipairs(controls.rows) do
     settings.bindings[row[1]]={}
     for i,device in ipairs({"keyboard","gamepad"}) do
         local stored=loaded_settings and loaded_settings.bindings and loaded_settings.bindings[row[1]]
         stored=type(stored)=="table" and stored[device]
+        -- Upgrade only former defaults once; retain custom bindings and explicit None.
+        if migrate_bindings and old_defaults[row[1]] and stored==old_defaults[row[1]][device] then stored=nil end
         settings.bindings[row[1]][device]=(stored=="None" or controls.enums[device][stored]) and stored or row[i+2]
     end
 end
-masks={a=1,rt=2,lt=4,rb=8,lb=16} -- Logical actions; physical enum values remain runtime-resolved above.
+masks={a=1,rt=2,lt=4,rb=8,lb=16,hover_up=32,hover_down=64,landing=128} -- Logical actions; physical enum values remain runtime-resolved above.
 controls.device=function(singleton_name,type_name,method)
     local singleton=sdk.get_native_singleton(singleton_name)
     local def=sdk.find_type_definition(type_name)
@@ -123,7 +130,7 @@ function read_pad()
     if suppressed then x,y,hover_x=0,0,0 end
     local rx,ry,right_error=0,0,nil
     local hover_camera_input=active and active.controls_active and not active.external_control
-        and active.gear<=1 and active.hover_motion and settings.hover_camera_yaw_speed>0
+        and active.gear==1 and active.hover_motion and settings.hover_camera_yaw_speed>0
     if (settings.camera_auto_yaw or hover_camera_input) and pad then
         local ok,right=pcall(function() return pad:call("get_AxisR()") end)
         if ok and right and finite(right.x) and finite(right.y) then rx,ry=right.x,right.y else right_error="右摇杆读取失败" end

@@ -5,13 +5,12 @@ hover_motion={}
 local hover_node="Ch253HoverWaitHoHomingHeight"
 local function eligible(d)
     return alive and d and active==d and state.generation==generation and d.controls_active
-        and not d.external_control and d.gear<=1 and d.mode~="taking_off"
+        and not d.external_control and d.gear==1 and d.mode~="taking_off"
         and d.manual_hold~="landing" and not menu.gameplay_paused()
 end
 function hover_motion:brake(d)
-    local m=d.hover_motion
-    if m then m.vx=0;m.vy=0;m.vz=0;m.turn=0;m.last_time=now() end
-    d.gear=0;d.hover_wait_center=true
+    -- Suppress held input, but let existing translation/rotation decay normally.
+    d.gear=1;d.hover_wait_center=true
 end
 local function binding(d,m)
     local ch=validate_spawn(d.spawn)
@@ -59,11 +58,11 @@ local function damp(value,target,dt,tau)
 end
 -- Opposing input brakes to the exact zero crossing, then accelerates away.
 -- Split the integral at that crossing to keep the result independent of frame rate.
-local function velocity_step(value,target,dt)
-    local acceleration=settings.hover_accel_tau
-    local deceleration=settings.hover_decel_tau
+local function velocity_step(value,target,dt,vertical)
+    local acceleration=vertical and (target>=0 and settings.hover_up_tau or settings.hover_down_tau) or settings.hover_accel_tau
+    local deceleration=vertical and (value>=0 and settings.hover_up_tau or settings.hover_down_tau) or settings.hover_decel_tau
     if value*target<0 then
-        local braking=settings.hover_reverse_tau
+        local braking=vertical and deceleration or settings.hover_reverse_tau
         local crossing=braking*math.log(1+math.abs(value/target))
         if dt<=crossing then return damp(value,target,dt,braking) end
         local _,distance=damp(value,target,crossing,braking)
@@ -93,10 +92,11 @@ function hover_motion:tick(d,ch,tr,fx,fz,flying,ground,action)
     local t=now()
     local dt=math.max(0,math.min(0.1,t-m.last_time));m.last_time=t
     local x,y=input.hover_x or input.x,input.y
-    local climb=held(input.buttons,masks.rb)
+    local climb=held(input.buttons,masks.hover_up)
+    local descend=held(input.buttons,masks.hover_down)
     if d.hover_wait_center then
-        if x==0 and y==0 and not climb then d.hover_wait_center=nil end
-        x,y,climb=0,0,false
+        if x==0 and y==0 and not climb and not descend then d.hover_wait_center=nil end
+        x,y,climb,descend=0,0,false,false
     end
     -- The old right-stick raw sign was reversed in-game. Use the corrected
     -- left-stick slow-flight axis for yaw only; x adds no lateral velocity.
@@ -108,12 +108,14 @@ function hover_motion:tick(d,ch,tr,fx,fz,flying,ground,action)
     local target_z=forward_z*longitudinal
     local dx,dy,dz
     m.vx,dx=velocity_step(m.vx,target_x,dt)
-    m.vy,dy=velocity_step(m.vy,climb and settings.hover_climb_speed or 0,dt)
+    local vertical=0
+    if climb~=descend then vertical=climb and settings.hover_climb_speed or -settings.hover_descend_speed end
+    m.vy,dy=velocity_step(m.vy,vertical,dt,true)
     m.vz,dz=velocity_step(m.vz,target_z,dt)
     m.position.x=m.position.x+dx;m.position.y=m.position.y+dy;m.position.z=m.position.z+dz
-    if x==0 and y==0 and not climb and math.abs(m.vx)+math.abs(m.vy)+math.abs(m.vz)<0.01 and math.abs(m.turn)<0.001 then
-        m.vx=0;m.vy=0;m.vz=0;m.turn=0;d.gear=0
-    else d.gear=1 end
+    if x==0 and y==0 and not climb and not descend and math.abs(m.vx)+math.abs(m.vy)+math.abs(m.vz)<0.01 and math.abs(m.turn)<0.001 then
+        m.vx=0;m.vy=0;m.vz=0;m.turn=0
+    end
     write_pose(d,m)
     d.heading={x=forward_x,z=forward_z};d.body_pitch=0
 end

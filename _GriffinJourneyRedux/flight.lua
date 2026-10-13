@@ -45,7 +45,7 @@ function start_driver()
                 transform = player:call("get_Transform()"), context = player:get_field("<PosRotContext>k__BackingField"),
                 terrain = terrain, controller = terrain and terrain.MainCharacterController,
                 fall = player:get_field("<FallInfo>k__BackingField"), fsm = player_fsm(player),
-                passengers={},fall_reset_pending=true,anchor_mode=anchor_mode, gear=0, controls_active=false, mode = "ground", last_request = -math.huge, started = now(), pending = false}
+                passengers={},fall_reset_pending=true,anchor_mode=anchor_mode, gear=1, controls_active=false, mode = "ground", last_request = -math.huge, started = now(), pending = false}
             assert(d.transform and d.context and d.controller and d.fall and d.fsm, "Player interfaces unavailable")
             local ft = d.fsm:get_type_definition()
             assert(ft:get_method("get_Enabled()") and ft:get_method("set_Enabled(System.Boolean)"), "FSM Enabled interface unavailable")
@@ -70,7 +70,7 @@ function start_driver()
                 d.controls_active=true; d.control_node="Ch253HoverWaitHoHomingHeight"
                 set_intent(d, "Ch253HoverWaitHoHomingHeight", "hover")
             end
-            status = "驾驶中：A 起飞；RT 2档冲刺，LT 刹停；左摇杆前后移动、左右转向；1档镜头仅转向时跟随，右摇杆可打断。"
+            status = "驾驶中：A 地面起飞／1档上移；Y 下移；RS 降落；RB 俯冲／LB 爬升进入2档；LT 惯性悬停；左摇杆前后移动、左右转向；1档镜头仅转向时跟随，右摇杆可打断。"
             event("driver_started", {freeze_player = d.freeze_requested,anchor_mode=d.anchor_mode,navigation_radius=settings.navigation_radius,steering_yaw=settings.steering_yaw,steering_pitch=settings.steering_pitch})
         end)
         if not ok then
@@ -93,13 +93,12 @@ function navigation_anchor(d,ch,tr,fx,fz)
         radius=settings.navigation_radius,height=settings.navigation_height} end
     local radius=settings.navigation_radius
     local nav_x,nav_y=input.x,input.y
-    if d.controls_active and not d.external_control and (d.gear<=1 or d.manual_hold) then nav_x,nav_y=0,0 end
     local yaw=math.max(-1,math.min(1,nav_x))*settings.steering_yaw*math.pi/180
     local height=math.max(-radius*0.9,math.min(radius*0.9,settings.navigation_height))
     local neutral_pitch=math.asin(height/radius)
     local limit=85*math.pi/180
     local pitch=math.max(-limit,math.min(limit,neutral_pitch+math.max(-1,math.min(1,nav_y))*settings.steering_pitch*math.pi/180))
-    if d.controls_active and not d.external_control and d.gear==2 and masks then
+    if d.controls_active and not d.external_control and (d.gear==1 or d.gear==2) and masks then
         local rb,lb=held(input.buttons,masks.rb),held(input.buttons,masks.lb)
         if rb ~= lb then pitch=(rb and 1 or -1)*settings.bumper_pitch*math.pi/180 end
     end
@@ -161,7 +160,7 @@ function tick_driver()
         d.previous_buttons = input.buttons
         local moving=input.x~=0 or input.y~=0
         local function resume(gear)
-            local keep_hover=gear==0 and not d.external_control and d.control_node=="Ch253HoverWaitHoHomingHeight"
+            local keep_hover=gear==1 and not d.external_control and d.control_node=="Ch253HoverWaitHoHomingHeight"
             d.gear=gear; d.controls_active=true; d.external_control=false
             d.manual_hold=nil; d.control_node=keep_hover and "Ch253HoverWaitHoHomingHeight" or nil; d.auto_hover=false
             if not keep_hover then d.intent=nil end
@@ -173,19 +172,19 @@ function tick_driver()
         if held(pressed,masks.rt) then
             resume(2)
         elseif held(pressed,masks.lt) then
-            resume(0);hover_motion:brake(d)
-        elseif held(pressed,masks.a) then
-            if ground and not flying and d.mode~="taking_off" and action_name~="Ch253TakeoffBackJump" then
-                resume(0);hover_motion:release(d);d.mode="taking_off"
-                set_intent(d,"Ch253TakeoffBackJump","taking_off");d.intent.auto_hover=true
-            else event("takeoff_ignored","A仅允许地面起飞") end
-        elseif d.gear<=1 and held(pressed,masks.lb) then
-            resume(0);hover_motion:release(d);d.manual_hold="landing";d.wait_center=true
+            resume(1);hover_motion:brake(d)
+        elseif held(pressed,masks.a) and ground and not flying and d.mode~="taking_off" and action_name~="Ch253TakeoffBackJump" then
+            resume(1);hover_motion:release(d);d.mode="taking_off"
+            set_intent(d,"Ch253TakeoffBackJump","taking_off");d.intent.auto_hover=true
+        elseif d.gear==1 and held(pressed,masks.landing) then
+            resume(1);hover_motion:release(d);d.manual_hold="landing";d.wait_center=true
+        elseif d.gear==1 and flying and not ground and (held(pressed,masks.rb) or held(pressed,masks.lb)) then
+            resume(2)
         end
         if d.mode=="taking_off" then
             if action_name=="Ch253TakeoffBackJump" then d.saw_takeoff=true end
             if d.auto_hover and flying and action_name~="Ch253TakeoffBackJump" and not d.intent then
-                d.mode="hover";d.gear=0;d.control_node=nil;d.hover_wait_center=true
+                d.mode="hover";d.gear=1;d.control_node=nil;d.hover_wait_center=true
             elseif ground and not flying and d.saw_takeoff and action_name~="Ch253TakeoffBackJump" then
                 d.mode="ground";d.controls_active=false
             end
