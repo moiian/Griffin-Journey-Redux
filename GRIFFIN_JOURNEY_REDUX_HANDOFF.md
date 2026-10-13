@@ -199,3 +199,10 @@ Add independent up/down speeds and vertical time constants (default 0.6 seconds 
 Replace the two shared vertical response constants with separate up-start/up-stop/down-start/down-stop controls, defaulting to 0.6/0.2/0.2/0.6 seconds (0–3, zero immediate). Vertical reversal and LT use outgoing stopping response; reversal then uses incoming startup response. Migrate old up/down values to up startup/down stopping, preserving new explicit values and zero. Other controls and horizontal/camera behavior are retained.
 
 All 22 Lua54 modules and existing/new offline regressions pass, including migration/save/reload, independent asymmetric velocity/distance, both reversals, LT, bounds/zero and prior two-gear behavior. In-game feel remains to be checked. See VERTICAL_031_INERTIA.md.
+
+
+## Griffin Journey Redux 0.3.2: both-gear landing and ordinary action phase guard (2026-10-14)
+
+RS native landing now works from both gears. Grounded ordinary hover/sprint/landing requests are suppressed and queued native submissions recheck phase. DEBUG adds a checked-by-default, session-only prohibition on ordinary cross-phase actions; disabling it permits stage testing, while player packages without Debug keep the guard on. External tools retain their explicit allow_cross contract.
+
+All 22 Lua54 files and existing/new offline regressions pass, including both-gear/held landing, grounded hover cancellation, airborne rearm, Debug toggle/reset, queued invalidation and canceled-takeoff recovery. Gear 2 inertia remains unchanged; native behavior still needs in-game acceptance. See PHASE_032_LANDING.md.

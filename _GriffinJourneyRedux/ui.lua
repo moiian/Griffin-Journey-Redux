@@ -25,7 +25,7 @@ re.on_draw_ui(function()
         changed,value=menu.toggle("狮鹫防抖",settings.griffin_anti_jitter)
         if changed then settings.griffin_anti_jitter=value;anti_jitter.griffin_stop:set_enabled(value);controls.save() end
         if settings.griffin_anti_jitter and not anti_jitter.griffin_stop.enabled then imgui.text(anti_jitter.griffin_stop.status) end
-        imgui.text("1档：A 上移／Y 下移／RS 原生降落；左杆前后移动、左右转向；LT 惯性悬停")
+        imgui.text("1档：A 上移／Y 下移；RS 两档原生降落；左杆前后移动、左右转向；LT 惯性悬停")
         imgui.text("RT 冲刺；RB 俯冲／LB 爬升（1档按下即进入2档）；A 仅在地面触发起飞")
         menu.slider("hover_forward_speed","1档前进速度（米／秒）",0,12)
         menu.slider("hover_backward_speed","1档后退速度（米／秒）",0,12)

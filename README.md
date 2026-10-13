@@ -2,7 +2,7 @@
 
 Fly a friendly Griffin with configurable controls, a head-following camera, and separate seats for the player, pawns, and accompanying NPCs.
 
-Version: **0.3.1**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
+Version: **0.3.2**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
 
 ## Install or upgrade
 
@@ -18,20 +18,22 @@ Open **Griffin Journey Redux → 一般设置**, spawn a Griffin, and start driv
 | Take off (ground only) | Space | A |
 | Gear 1 forward/back and turn | WASD | Left stick |
 | Gear 1 code up / down | E / Q | A / Y |
-| Gear 1 native landing | G | RS (right-stick press) |
+| Native landing (gear 1 or 2) | G | RS (right-stick press) |
 | Sprint / gear 2 | Left Shift | RT |
 | Hover / gear 1 | Left Ctrl | LT |
 | Sprint dive / climb | C / R | RB / LB |
 | Camera | Mouse | Right stick |
 | Retarget the player | H | Rebindable |
 
-There are two gears: gear 1 hover and gear 2 sprint. Ground-only takeoff finishes in gear 1. At low speed, forward/back moves along the Griffin's facing, left/right turns it, and A/Y moves vertically through code while using the same native hover action. There is no strafe. RS retains native landing. All movement/turn speeds accept zero. Player spherical navigation works in both gears.
+There are two gears: gear 1 hover and gear 2 sprint. Ground-only takeoff finishes in gear 1. At low speed, forward/back moves along the Griffin's facing, left/right turns it, and A/Y moves vertically through code while using the same native hover action. There is no strafe. RS retains native landing in either gear. All movement/turn speeds accept zero. Player spherical navigation works in both gears.
 
 RT selects gear 2. RB dive / LB climb also immediately select gear 2 from gear 1, then retain the existing sprint guidance. LT returns to gear 1 and preserves any existing low-speed inertia while suppressing held movement input until neutral. Releasing the stick or pressing LT in gear 1 does not reissue the hover action.
 
 Flight Settings has independent horizontal acceleration, released-input deceleration and reverse-braking constants (defaults 0.2/0.6/0.6 seconds), plus independent vertical up-start/up-stop/down-start/down-stop constants (defaults 0.6/0.2/0.2/0.6 seconds). Each phase is separately adjustable; vertical reversal uses outgoing stopping and incoming startup response. All constants allow 0–3 seconds: larger values give more inertia, zero makes that stage immediate. Reversal brakes through zero before accelerating in the new direction. Settings save automatically. Former default bindings migrate once; custom bindings and explicit None remain.
 
 The low-speed camera follows only while the Griffin is turning and stops correcting when rotation stops. Both gears share right-stick blending, takeover threshold, hysteresis and 0.8-second recovery delay, with separately adjustable follow speeds in Camera Settings. Camera pitch remains manually controlled. See [two-gear controls](CONTROLS_030_TWO_GEARS.md).
+
+Ordinary airborne actions, including hover, are not submitted on the ground. DEBUG includes **禁止跨阶段动作**, checked by default, to disable this guard for the current script session when testing. Reload restores the guard; external action tools retain their own explicit cross-phase option. See [phase guard and landing](PHASE_032_LANDING.md).
 
 ## Seats and camera
 

@@ -1,9 +1,9 @@
 -- Griffin Journey Redux: session
 return function(ctx)
 local _ENV=ctx
--- Griffin Flight Beta 0.3.1. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.3.2. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-VERSION = "0.3.1"
+VERSION = "0.3.2"
 state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 _G.GriffinJourneyReduxState = state
@@ -21,6 +21,7 @@ yaw_state, yaw_hook_ready = nil, false
 hover_yaw_state=nil
 yaw_status = "自动转向镜头：未开启"
 controls,menu,passengers = {},{},{}
+menu.block_cross_phase=true -- Session-only; ordinary action phase guard is on without Debug.
 passengers.frame=0
 -- Session-only independent experiments; never persisted in player settings.
 passengers.fall_experiment={reset=false,ground=false}

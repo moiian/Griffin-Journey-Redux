@@ -8,7 +8,7 @@ controls.rows={
     {"listen","让狮鹫听话","H","None"},{"a","起飞","Space","RDown"},
     {"rt","冲刺／2档","LShift","RTrigBottom"},{"lt","悬停／1档","LControl","LTrigBottom"},
     {"hover_up","1档上移","E","RDown"},{"hover_down","1档下移","Q","RUp"},
-    {"landing","1档原生降落","G","RStickPush"},
+    {"landing","原生降落（1／2档）","G","RStickPush"},
     {"rb","冲刺爬升／2档","R","LTrigTop"},{"lb","冲刺俯冲／2档","C","RTrigTop"},
     {"left","向左","A","None"},{"right","向右","D","None"},
     {"up","向上／前","W","None"},{"down","向下／后","S","None"},
@@ -140,8 +140,15 @@ function read_pad()
 end
 
 function held(bits, mask) return (bits & mask) == mask end
+function action_phase_allowed(phase,flying,ground)
+    return not menu.block_cross_phase or phase==nil
+        or phase=="air" and flying and not ground
+        or phase=="ground" and ground and not flying
+end
 function set_intent(d, node, mode)
-    d.intent = {node = node, mode = mode}
+    local phase=mode=="taking_off" and "ground"
+        or (mode=="hover" or mode=="dash" or mode=="landing") and "air" or nil
+    d.intent = {node = node, mode = mode,phase=phase}
 end
 function dispatch(d)
     local c=core()
@@ -154,6 +161,16 @@ function dispatch(d)
         if c and menu.gameplay_paused() then d.pending=false;return end -- keep intent until resume
         local ok, err = pcall(function()
             local ch = validate_spawn(d.spawn)
+            -- Recheck at native submission: the phase may change while queued.
+            if intent.phase and menu.block_cross_phase and not action_phase_allowed(intent.phase,
+                ch:call("get_IsFlight()"),ch:call("get_IsGround()")) then
+                d.intent=nil
+                if d.control_node==intent.node then d.control_node=nil end
+                if intent.mode=="taking_off" and d.mode=="taking_off" then
+                    d.mode="control";d.auto_hover=false
+                end
+                return
+            end
             assert(owned_player(d, true) and player_fsm(d.player) == d.fsm, "Player binding changed")
             local manager = ch:call("get_ActionManager()")
             assert(manager and manager:call("get_GameObject()") == d.spawn.result.go, "ActionManager mismatch")

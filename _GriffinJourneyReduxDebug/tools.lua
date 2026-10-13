@@ -460,7 +460,10 @@ end
 function debug_tools:draw()
     if not imgui.tree_node("DEBUG") then return end
     imgui.text("默认不采样、不写调试日志；用户设置照常保存。")
-    local changed,value=menu.toggle("开启调试记录（暂停／结束驾驶后写盘）",self.enabled)
+    local changed,value=menu.toggle("禁止跨阶段动作",menu.block_cross_phase)
+    if changed then menu.block_cross_phase=value end
+    imgui.text("默认开启：地面不发悬停／冲刺／降落，空中不发起飞；仅本次脚本会话。")
+    changed,value=menu.toggle("开启调试记录（暂停／结束驾驶后写盘）",self.enabled)
     if changed then self:set_enabled(value) end
     imgui.text(self.status)
     changed,value=menu.toggle("三秒逐帧精细记录（暂停后保存）",self.fine.running)

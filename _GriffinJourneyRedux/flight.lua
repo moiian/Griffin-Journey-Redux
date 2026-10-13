@@ -173,10 +173,10 @@ function tick_driver()
             resume(2)
         elseif held(pressed,masks.lt) then
             resume(1);hover_motion:brake(d)
-        elseif held(pressed,masks.a) and ground and not flying and d.mode~="taking_off" and action_name~="Ch253TakeoffBackJump" then
+        elseif held(pressed,masks.a) and action_phase_allowed("ground",flying,ground) and d.mode~="taking_off" and action_name~="Ch253TakeoffBackJump" then
             resume(1);hover_motion:release(d);d.mode="taking_off"
             set_intent(d,"Ch253TakeoffBackJump","taking_off");d.intent.auto_hover=true
-        elseif d.gear==1 and held(pressed,masks.landing) then
+        elseif held(pressed,masks.landing) then
             resume(1);hover_motion:release(d);d.manual_hold="landing";d.wait_center=true
         elseif d.gear==1 and flying and not ground and (held(pressed,masks.rb) or held(pressed,masks.lb)) then
             resume(2)
@@ -198,7 +198,11 @@ function tick_driver()
             if d.manual_hold=="landing" then node,mode="Ch253HoverToLanding","landing"
             elseif d.gear==2 then node,mode="Ch253WrapAroundStartLoop","dash"
             else node,mode="Ch253HoverWaitHoHomingHeight","hover" end
-            if node~=d.control_node then d.control_node=node;set_intent(d,node,mode) end
+            if not action_phase_allowed("air",flying,ground) then
+                -- Cancel our queued airborne action; keep the grounded native action intact.
+                if d.intent and d.intent.phase=="air" then d.intent=nil end
+                d.control_node=nil
+            elseif node~=d.control_node then d.control_node=node;set_intent(d,node,mode) end
         end
         hover_motion:tick(d,ch,tr,fx,fz,flying,ground,action_name)
         if d.hover_motion then fx,fz=d.heading.x,d.heading.z end
