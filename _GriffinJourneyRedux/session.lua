@@ -1,9 +1,9 @@
 -- Griffin Journey Redux: session
 return function(ctx)
 local _ENV=ctx
--- Griffin Flight Beta 0.3.4. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.3.5. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-VERSION = "0.3.4"
+VERSION = "0.3.5"
 state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 _G.GriffinJourneyReduxState = state

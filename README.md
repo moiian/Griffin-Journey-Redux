@@ -2,7 +2,7 @@
 
 Fly a friendly Griffin with configurable controls, a head-following camera, and separate seats for the player, pawns, and accompanying NPCs.
 
-Version: **0.3.4**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
+Version: **0.3.5**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
 
 ## Install or upgrade
 
@@ -25,7 +25,7 @@ Open **Griffin Journey Redux → 一般设置**, spawn a Griffin, and start driv
 | Camera | Mouse | Right stick |
 | Retarget the player | H | Rebindable |
 
-There are two gears: gear 1 hover and gear 2 sprint. Ground-only takeoff requests gear 1 hover as soon as valid airborne flags arrive, without waiting for the takeoff action to finish. Held movement/A/Y flows into code control without release or LT; holding A continues upward. At low speed, forward/back moves along the Griffin's facing, left/right turns it, and A/Y moves vertically through code while using the same native hover action. There is no strafe. RS retains native landing in either gear. All movement/turn speeds accept zero. Player spherical navigation works in both gears.
+There are two gears: gear 1 hover and gear 2 sprint. Ground-only takeoff waits at least 1.5 seconds of unpaused time after observed action start before automatic hover or sprint. Early RT/RB/LB selection is queued; held movement/A/Y flows into code control after the wait without release or LT. At low speed, forward/back moves along the Griffin's facing, left/right turns it, and A/Y moves vertically through code while using the same native hover action. There is no strafe. RS retains native landing in either gear. All movement/turn speeds accept zero. In gear 1 the player's real position follows preset [1] player parameters; entering gear 2 via RT/RB/LB immediately restores spherical navigation. Returning with LT restores preset [1] anchoring. Current visual seats remain independent.
 
 RT selects gear 2. RB dive / LB climb also immediately select gear 2 from gear 1, then retain the existing sprint guidance. LT returns to gear 1 and preserves any existing low-speed inertia while suppressing held movement input until neutral. Releasing the stick or pressing LT in gear 1 does not reissue the hover action.
 

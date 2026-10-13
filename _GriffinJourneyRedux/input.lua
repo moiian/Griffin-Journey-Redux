@@ -181,7 +181,7 @@ function dispatch(d)
             request_camera_follow_check()
             d.mode = intent.mode
             d.intent = nil
-            if d.mode == "taking_off" then d.takeoff_at = now(); d.saw_takeoff = false; d.auto_hover = intent.auto_hover end
+            if d.mode == "taking_off" then d.takeoff_at = now(); d.saw_takeoff = false; d.auto_hover = intent.auto_hover;d.takeoff_play_started=false;d.takeoff_elapsed=0;d.takeoff_timer_last=now();d.takeoff_choice=nil;d.takeoff_stop_requested=nil end
             event("action_returned", intent.node)
         end)
         d.pending = false

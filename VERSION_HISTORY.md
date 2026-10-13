@@ -581,3 +581,10 @@ The actual 0.3.2 module reproduces the disabled-control failure offline; 0.3.3 p
 Request gear 1 hover as soon as valid airborne flags arrive, without waiting for the native takeoff action to end. Remove the automatic takeoff input-release gate: held forward/back, turning and A/Y continue into slow control without a new press. Holding takeoff A now continues code ascent. LT retains its own neutral gate and inertia.
 
 All 22 Lua54 files and previous/new offline regressions pass, including native-takeoff-still-active handoff, each held translation axis, pause/resume and preserved LT behavior. Native control timing remains to be checked. See TAKEOFF_034_HELD_INPUT.md.
+
+
+## Griffin Journey Redux 0.3.5: minimum takeoff time and gear-specific player anchoring (2026-10-14)
+
+Wait at least 1.5 seconds after observed takeoff start before automatic hover or sprint. Exclude paused time; queue early RT/RB/LB selection with LT replacement while retaining continuous movement input. Gear 1 real player position uses preset [1] instead of spherical navigation; entering gear 2 through RT/RB/LB restores sphere navigation immediately, and LT restores preset anchoring. Current visual seats/preset selection remain independent.
+
+All 22 Lua54 modules and existing/new offline controls, inertia, stage, camera and lifecycle regressions pass. New coverage includes the minimum/queued inputs/pause, nonzero and live preset offsets, physical layers, visual selection retention and same-frame RT/RB/LB/LT navigation switching. Native timing and visuals remain to be accepted in game. See TAKEOFF_035_TIMING_AND_ANCHOR.md.

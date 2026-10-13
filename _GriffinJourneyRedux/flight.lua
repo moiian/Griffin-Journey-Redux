@@ -1,6 +1,7 @@
 -- Griffin Journey Redux: flight
 return function(ctx)
 local _ENV=ctx
+local takeoff_min_seconds=1.5
 -- Keep seats/control at any valid body tilt, including a vertical forward axis.
 local function horizontal_heading(d,qx,qy,qz,qw)
     local fx,fz=2*(qx*qz+qw*qy),1-2*(qx*qx+qy*qy)
@@ -87,6 +88,11 @@ function navigation_anchor(d,ch,tr,fx,fz)
     end
     assert(d.rider_head and d.rider_head:get_Valid(),"未找到狮鹫头部，不能建立头部球面导航")
     assert(validate_spawn(d.spawn)==ch,"Griffin reference changed")
+    if d.gear==1 and not d.external_control then
+        local preset=assert(settings.seat_presets and settings.seat_presets[1],"Physical player preset unavailable")
+        local target,base=rider_seat(d,preset.player)
+        return target,target,{mode="physical_player",preset_index=1,center=base}
+    end
     local center=vector(d.rider_head:call("get_Position()"))
     local anchor_detail={mode="head"}
     if debug_tools and debug_tools:recording() then d.route_navigation={center=vector(center),anchor=anchor_detail,input={x=input.x,y=input.y},heading={x=fx,z=fz},
@@ -126,12 +132,12 @@ function tick_driver()
     if not c then stop_driver("游戏上下文不可用");return end
     if menu.gameplay_paused() then
         if not d.menu_paused then event("driver_menu_paused",true) end
-        d.menu_paused=true;d.previous_buttons=input.buttons;hover_yaw_state=nil
+        d.menu_paused=true;d.previous_buttons=input.buttons;hover_yaw_state=nil;d.takeoff_timer_last=now()
         if d.hover_motion then d.hover_motion.last_time=now() end
         return -- preserve player position, FSM, bones, camera and pending intent
     end
     if d.menu_paused then
-        d.menu_paused=nil;d.previous_buttons=input.buttons
+        d.menu_paused=nil;d.previous_buttons=input.buttons;d.takeoff_timer_last=now()
         request_camera_follow_check()
         if d.hover_motion then d.hover_motion.last_time=now() end
         event("driver_menu_resumed",true)
@@ -156,6 +162,17 @@ function tick_driver()
         assert(manager and manager:call("get_GameObject()") == d.spawn.result.go, "ActionManager mismatch")
         local info = manager:get_field("CurrentAction")
         local action_name = info and info:get_field("Name")
+        if d.mode=="taking_off" and d.auto_hover then
+            local t=now()
+            if not d.takeoff_play_started then
+                if action_name=="Ch253TakeoffBackJump" or flying and not ground then
+                    d.takeoff_play_started=true;d.takeoff_elapsed=0
+                end
+            else d.takeoff_elapsed=d.takeoff_elapsed+math.max(0,t-(d.takeoff_timer_last or t)) end
+            d.takeoff_timer_last=t
+        end
+        local takeoff_locked=d.mode=="taking_off" and (not d.takeoff_play_started
+            or (d.takeoff_elapsed or 0)<takeoff_min_seconds)
         local pressed = input.buttons & (~d.previous_buttons)
         d.previous_buttons = input.buttons
         local moving=input.x~=0 or input.y~=0
@@ -165,11 +182,17 @@ function tick_driver()
             d.manual_hold=nil; d.control_node=keep_hover and "Ch253HoverWaitHoHomingHeight" or nil; d.auto_hover=false
             if not keep_hover then d.intent=nil end
             d.mode=keep_hover and "hover" or "control"
-            d.hover_wait_center=nil
+            d.hover_wait_center=nil;d.takeoff_choice=nil;d.takeoff_stop_requested=nil
             if gear==2 then hover_motion:release(d) end
             event("gear_selected",gear)
         end
-        if held(pressed,masks.rt) then
+        if takeoff_locked and not held(pressed,masks.landing) then
+            if held(pressed,masks.rt) or held(pressed,masks.rb) or held(pressed,masks.lb) then
+                d.takeoff_choice="dash";d.takeoff_stop_requested=nil
+            elseif held(pressed,masks.lt) then
+                d.takeoff_choice="hover";d.takeoff_stop_requested=true
+            end
+        elseif held(pressed,masks.rt) then
             resume(2)
         elseif held(pressed,masks.lt) then
             resume(1);hover_motion:brake(d)
@@ -183,12 +206,15 @@ function tick_driver()
         end
         if d.mode=="taking_off" then
             if action_name=="Ch253TakeoffBackJump" then d.saw_takeoff=true end
-            if d.auto_hover and flying and not ground and not d.intent then
-                -- Once airborne, request hover without waiting for the takeoff action to end.
-                -- Held input flows straight into slow movement; LT has its own release gate.
-                d.mode="hover";d.gear=1;d.controls_active=true;d.auto_hover=false
-                d.control_node=action_name=="Ch253HoverWaitHoHomingHeight" and action_name or nil
-                d.hover_wait_center=nil
+            if d.auto_hover and not takeoff_locked and flying and not ground and not d.intent then
+                local choice,stop=d.takeoff_choice,d.takeoff_stop_requested
+                if choice=="dash" then resume(2)
+                else
+                    d.mode="hover";d.gear=1;d.controls_active=true;d.auto_hover=false
+                    d.control_node=action_name=="Ch253HoverWaitHoHomingHeight" and action_name or nil
+                    d.hover_wait_center=nil;d.takeoff_choice=nil;d.takeoff_stop_requested=nil
+                    if stop then hover_motion:brake(d) end
+                end
             elseif not d.auto_hover and ground and not flying and d.saw_takeoff and action_name~="Ch253TakeoffBackJump" then
                 d.mode="ground";d.controls_active=false
             end
