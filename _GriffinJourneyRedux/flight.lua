@@ -49,6 +49,7 @@ function start_driver()
             prepare_anchor_mode(d,d.anchor_mode)
             if settings.rider_anim~="" then d.pose_pending=settings.rider_anim end
             select_player_target(r)
+            assert(ai_takeover:tick(d),"方向6组件恢复失败")
             if r.result.chara:call("get_IsFlight()") then
                 d.controls_active=true; d.control_node="Ch253HoverWaitHoHomingHeight"
                 set_intent(d, "Ch253HoverWaitHoHomingHeight", "hover")

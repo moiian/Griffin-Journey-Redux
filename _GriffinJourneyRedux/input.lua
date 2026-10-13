@@ -146,6 +146,7 @@ function dispatch(d)
             assert(manager and manager:call("get_GameObject()") == d.spawn.result.go, "ActionManager mismatch")
             event("action_request", {node = intent.node, mode = intent.mode})
             d.last_request = now()
+            assert(ai_takeover:tick(d),"方向6组件恢复失败")
             manager:call("requestActionCore(app.ActionManager.Priority, System.String, System.UInt32)", 10, intent.node, 0)
             d.mode = intent.mode
             d.intent = nil

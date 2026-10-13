@@ -81,7 +81,10 @@ re.on_pre_application_entry("UpdateBehavior",function()
     if debug_tools then debug_tools:capture("behavior_before_anchor") end
     passengers.frame=passengers.frame+1
     if menu.apply_pending_preset then menu.apply_pending_preset() end
-    passengers.refresh();tick_skip_think();tick_driver();passengers.griffin_fall_tick();tick_camera_follow()
+    passengers.refresh();tick_skip_think()
+    local ai_ok,ai_err=ai_takeover:tick(active)
+    if not ai_ok then stop_driver("方向6组件恢复失败："..tostring(ai_err)) end
+    tick_driver();passengers.griffin_fall_tick();tick_camera_follow()
     anti_jitter:after_behavior()
 
     if debug_tools then debug_tools:capture("behavior_before_native") end
@@ -249,6 +252,7 @@ _G.GriffinJourneyReduxBridge = bridge
 
 re.on_script_reset(function()
     stop_driver("脚本重置")
+    ai_takeover.enabled=false
     anti_jitter:shutdown()
     if debug_tools then debug_tools:shutdown() end
     alive = false

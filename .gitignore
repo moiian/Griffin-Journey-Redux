@@ -94,3 +94,6 @@
 !/_GriffinJourneyReduxDebug/tools.lua
 
 !/AI_021_TARGET_RESELECT.md
+
+!/_GriffinJourneyRedux/ai_takeover.lua
+!/AI_022_COMPONENT_TAKEOVER.md

@@ -16,6 +16,9 @@ re.on_draw_ui(function()
         imgui.tree_pop()
     end
     if imgui.tree_node("飞行设置") then
+        local ai_changed,ai_value=menu.toggle("方向6：禁用狮鹫决策组件（实验）",ai_takeover.enabled)
+        if ai_changed then ai_takeover:set_enabled(ai_value) end
+        if ai_takeover.enabled or ai_takeover.held or ai_takeover.errors>0 then imgui.text(ai_takeover.status) end
         local changed,value=menu.toggle("玩家与乘客防抖",settings.anti_jitter)
         if changed then settings.anti_jitter=value;anti_jitter.fall_stop:set_enabled(value);controls.save() end
         if settings.anti_jitter and not anti_jitter.fall_stop.enabled then imgui.text(anti_jitter.fall_stop.status) end

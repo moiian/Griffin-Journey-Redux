@@ -6,14 +6,16 @@ stop_driver = function(reason)
     if debug_tools then debug_tools:stop() end
     operation = nil
     queued = false
+    local ai_ok,ai_err=ai_takeover:release()
     local d = active or state.recovery
     active = nil
     passengers.griffin_fall.actor=nil
     input = {x = 0, y = 0, buttons = 0}
     restore_camera()
-    if not d then return true end
+    if not d then return ai_ok end
     d.intent = nil -- queued native action callbacks must see that driving has ended
     local errors = passengers.restore_all and passengers.restore_all(d) or {}
+    if not ai_ok then errors[#errors+1]="决策组件恢复 "..tostring(ai_err) end
     local bone_ok,bone_err=pcall(restore_bone,d)
     if not bone_ok then errors[#errors+1]="骨骼恢复 "..tostring(bone_err) end
     local rot_ok,rot_err=pcall(passengers.restore_rotation,d)
