@@ -1,4 +1,4 @@
--- Griffin Journey Redux 0.3.5. Requires NickCore, EnemySpawner and run_once.
+-- Griffin Journey Redux 0.3.6. Requires NickCore, EnemySpawner and run_once.
 -- One private context per script generation. Only the compatible state/bridge aliases are global.
 local ctx=setmetatable({}, {__index=_G})
 require("_GriffinJourneyRedux.session")(ctx)
@@ -9,6 +9,7 @@ require("_GriffinJourneyRedux.lifecycle")(ctx)
 require("_GriffinJourneyRedux.input")(ctx)
 require("_GriffinJourneyRedux.griffin")(ctx)
 require("_GriffinJourneyRedux.ai_takeover")(ctx)
+require("_GriffinJourneyRedux.sprint_motion")(ctx)
 require("_GriffinJourneyRedux.hover_motion")(ctx)
 require("_GriffinJourneyRedux.flight")(ctx)
 require("_GriffinJourneyRedux.seating")(ctx)

@@ -466,6 +466,9 @@ function debug_tools:draw()
     changed,value=menu.toggle("开启调试记录（暂停／结束驾驶后写盘）",self.enabled)
     if changed then self:set_enabled(value) end
     imgui.text(self.status)
+    changed,value=menu.toggle("原生冲刺速度只读检查",sprint_motion.inspect_native)
+    if changed then sprint_motion.inspect_native=value;sprint_motion.inspect_at=nil end
+    if sprint_motion.inspect_native then imgui.text(sprint_motion.native_status) end
     changed,value=menu.toggle("三秒逐帧精细记录（暂停后保存）",self.fine.running)
     if changed then if value then self.fine:start() else self.fine:stop("手动停止") end end
     imgui.text(self.fine.status)

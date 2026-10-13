@@ -24,6 +24,7 @@ local function binding(d,m)
 end
 function hover_motion:release(d)
     hover_yaw_state=nil
+    if d then d.sprint_handoff=nil end
     local m=d and d.hover_motion
     if not m then return end
     if m.dirty and m.character:get_Valid() and m.go:get_Valid() then
@@ -86,6 +87,7 @@ function hover_motion:tick(d,ch,tr,fx,fz,flying,ground,action)
         m={character=ch,go=d.spawn.result.go,transform=tr,context=context,terrain=terrain,
             controller=controller,position=vector(tr:call("get_UniversalPosition()")),
             yaw=math.atan(fx,fz),vx=0,vy=0,vz=0,turn=0,last_time=now()}
+        m.coast=sprint_motion:consume(d,ch,tr)
         d.hover_motion=m
     end
     binding(d,m)
@@ -112,6 +114,14 @@ function hover_motion:tick(d,ch,tr,fx,fz,flying,ground,action)
     if climb~=descend then vertical=climb and settings.hover_climb_speed or -settings.hover_descend_speed end
     m.vy,dy=velocity_step(m.vy,vertical,dt,true)
     m.vz,dz=velocity_step(m.vz,target_z,dt)
+    if m.coast then
+        local cx,cy,cz
+        m.coast.x,cx=damp(m.coast.x,0,dt,settings.sprint_stop_tau)
+        m.coast.y,cy=damp(m.coast.y,0,dt,settings.sprint_stop_tau)
+        m.coast.z,cz=damp(m.coast.z,0,dt,settings.sprint_stop_tau)
+        dx=dx+cx;dy=dy+cy;dz=dz+cz
+        if math.abs(m.coast.x)+math.abs(m.coast.y)+math.abs(m.coast.z)<0.01 then m.coast=nil end
+    end
     m.position.x=m.position.x+dx;m.position.y=m.position.y+dy;m.position.z=m.position.z+dz
     if x==0 and y==0 and not climb and not descend and math.abs(m.vx)+math.abs(m.vy)+math.abs(m.vz)<0.01 and math.abs(m.turn)<0.001 then
         m.vx=0;m.vy=0;m.vz=0;m.turn=0

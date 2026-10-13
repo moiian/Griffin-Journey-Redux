@@ -1,7 +1,7 @@
 -- Griffin Journey Redux: flight
 return function(ctx)
 local _ENV=ctx
-local takeoff_min_seconds=1.5
+local takeoff_min_seconds=1.89
 -- Keep seats/control at any valid body tilt, including a vertical forward axis.
 local function horizontal_heading(d,qx,qy,qz,qw)
     local fx,fz=2*(qx*qz+qw*qy),1-2*(qx*qx+qy*qy)
@@ -132,12 +132,12 @@ function tick_driver()
     if not c then stop_driver("游戏上下文不可用");return end
     if menu.gameplay_paused() then
         if not d.menu_paused then event("driver_menu_paused",true) end
-        d.menu_paused=true;d.previous_buttons=input.buttons;hover_yaw_state=nil;d.takeoff_timer_last=now()
+        d.menu_paused=true;d.previous_buttons=input.buttons;hover_yaw_state=nil;d.takeoff_timer_last=now();sprint_motion:pause(d)
         if d.hover_motion then d.hover_motion.last_time=now() end
         return -- preserve player position, FSM, bones, camera and pending intent
     end
     if d.menu_paused then
-        d.menu_paused=nil;d.previous_buttons=input.buttons;d.takeoff_timer_last=now()
+        d.menu_paused=nil;d.previous_buttons=input.buttons;d.takeoff_timer_last=now();sprint_motion:pause(d)
         request_camera_follow_check()
         if d.hover_motion then d.hover_motion.last_time=now() end
         event("driver_menu_resumed",true)
@@ -162,6 +162,7 @@ function tick_driver()
         assert(manager and manager:call("get_GameObject()") == d.spawn.result.go, "ActionManager mismatch")
         local info = manager:get_field("CurrentAction")
         local action_name = info and info:get_field("Name")
+        sprint_motion:sample(d,ch,tr,flying,ground,action_name)
         if d.mode=="taking_off" and d.auto_hover then
             local t=now()
             if not d.takeoff_play_started then
@@ -183,7 +184,7 @@ function tick_driver()
             if not keep_hover then d.intent=nil end
             d.mode=keep_hover and "hover" or "control"
             d.hover_wait_center=nil;d.takeoff_choice=nil;d.takeoff_stop_requested=nil
-            if gear==2 then hover_motion:release(d) end
+            if gear==2 then hover_motion:release(d);sprint_motion:clear(d) end
             event("gear_selected",gear)
         end
         if takeoff_locked and not held(pressed,masks.landing) then
@@ -195,7 +196,9 @@ function tick_driver()
         elseif held(pressed,masks.rt) then
             resume(2)
         elseif held(pressed,masks.lt) then
+            local momentum=d.gear==2 and sprint_motion:capture(d) or nil
             resume(1);hover_motion:brake(d)
+            if momentum then d.sprint_handoff=momentum end
         elseif held(pressed,masks.a) and action_phase_allowed("ground",flying,ground) and d.mode~="taking_off" and action_name~="Ch253TakeoffBackJump" then
             resume(1);hover_motion:release(d);d.mode="taking_off"
             set_intent(d,"Ch253TakeoffBackJump","taking_off");d.intent.auto_hover=true

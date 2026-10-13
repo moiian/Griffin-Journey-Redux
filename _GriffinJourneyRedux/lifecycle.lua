@@ -13,6 +13,7 @@ stop_driver = function(reason)
     input = {x = 0, y = 0, buttons = 0}
     restore_camera()
     if not d then return ai_ok end
+    sprint_motion:clear(d)
     d.intent = nil -- queued native action callbacks must see that driving has ended
     local errors = passengers.restore_all and passengers.restore_all(d) or {}
     local hover_ok,hover_err=pcall(hover_motion.release,hover_motion,d)

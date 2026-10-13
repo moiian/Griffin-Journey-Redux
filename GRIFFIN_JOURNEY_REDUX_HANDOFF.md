@@ -227,3 +227,10 @@ All 22 Lua54 files and previous/new offline regressions pass, including native-t
 Wait at least 1.5 seconds after observed takeoff start before automatic hover or sprint. Exclude paused time; queue early RT/RB/LB selection with LT replacement while retaining continuous movement input. Gear 1 real player position uses preset [1] instead of spherical navigation; entering gear 2 through RT/RB/LB restores sphere navigation immediately, and LT restores preset anchoring. Current visual seats/preset selection remain independent.
 
 All 22 Lua54 modules and existing/new offline controls, inertia, stage, camera and lifecycle regressions pass. New coverage includes the minimum/queued inputs/pause, nonzero and live preset offsets, physical layers, visual selection retention and same-frame RT/RB/LB/LT navigation switching. Native timing and visuals remain to be accepted in game. See TAKEOFF_035_TIMING_AND_ANCHOR.md.
+
+
+## Griffin Journey Redux 0.3.6: measured sprint-to-hover momentum (2026-10-14)
+
+Change takeoff minimum to 1.89 seconds. Measure native sprint world velocity from Universal position deltas and inherit it on LT after hover binds, with independent 0–3 second decay (default 0.8). Display measured total/horizontal/vertical speed. Reject stale/gapped/teleported samples and clear momentum on ground, changed binding, external takeover or new sprint. Native displacement and code coasting do not overlap.
+
+Optional Debug native-speed inspection is read-only and bounded. Metadata identifies candidate FlightControl members, but dive/climb speed modulation awaits native validation and is not enabled. All 23 Lua54 modules and previous/new offline regressions pass, including vector/distance, 30/120Hz agreement, transition sampling, pause, lifecycle, zero/save and bounded zero-write inspection. Real sprint speed and LT feel remain for in-game acceptance. See SPRINT_036_LT_MOMENTUM.md.

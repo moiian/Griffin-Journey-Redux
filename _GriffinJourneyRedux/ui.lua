@@ -27,7 +27,14 @@ re.on_draw_ui(function()
         if settings.griffin_anti_jitter and not anti_jitter.griffin_stop.enabled then imgui.text(anti_jitter.griffin_stop.status) end
         imgui.text("1档：A 上移／Y 下移；RS 两档原生降落；左杆前后移动、左右转向；LT 惯性悬停")
         imgui.text("RT 冲刺；RB 俯冲／LB 爬升（1档按下即进入2档）；A 仅在地面触发起飞")
-        imgui.text("起飞至少播放1.5秒后才切悬停／冲刺；1档玩家实体跟随预设[1]，2档启用球面导航。")
+        imgui.text("起飞至少播放1.89秒后才切悬停／冲刺；1档玩家实体跟随预设[1]，2档启用球面导航。")
+        menu.slider("sprint_stop_tau","2档切悬停惯性时间常数（秒）",0,3)
+        if active and active.sprint_speed then
+            local speed=active.sprint_speed
+            imgui.text(string.format("2档实测速度：%.2f 米／秒；水平 %.2f；竖直 %+.2f%s",speed.total,speed.horizontal,speed.vertical,speed.ready and "" or "（采样中）"))
+        end
+        if active and active.sprint_status then imgui.text(active.sprint_status) end
+        if active and active.sprint_handoff_speed then imgui.text(string.format("最近LT继承速度：%.2f 米／秒",active.sprint_handoff_speed)) end
         menu.slider("hover_forward_speed","1档前进速度（米／秒）",0,12)
         menu.slider("hover_backward_speed","1档后退速度（米／秒）",0,12)
         menu.slider("hover_climb_speed","1档垂直爬升速度（米／秒）",0,12)

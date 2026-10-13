@@ -1,9 +1,9 @@
 -- Griffin Journey Redux: session
 return function(ctx)
 local _ENV=ctx
--- Griffin Flight Beta 0.3.5. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.3.6. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-VERSION = "0.3.5"
+VERSION = "0.3.6"
 state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 _G.GriffinJourneyReduxState = state
@@ -29,7 +29,7 @@ passengers.griffin_fall={reset=false,status="狮鹫跌落实验：关闭"}
 passengers.protection={damage=true,relocation=true,lost_check=false,destroy=false,counts={}}
 masks = nil
 input = {x = 0, y = 0, buttons = 0}
-settings = {distance = 30, fov = 90, freeze_player = true, rider_anim="", rider_lookX=0, rider_lookZ=1, rider_tilt_follow=1, rider_pitch_offset=0, rider_anchor="head", rider_neck_joint="", rider_height=1.0, rider_forward=0, rider_side=0, navigation_radius=4.019, steering_yaw=50.276, steering_pitch=22.018, navigation_height=0.991, bumper_pitch=59, controls_revision=1, camera_auto_yaw=false, camera_yaw_speed=120, camera_manual_threshold=0.55, hover_accel_tau=0.2, hover_decel_tau=0.6, hover_reverse_tau=0.6, hover_forward_speed=3, hover_backward_speed=1.5, hover_climb_speed=1.5, hover_descend_speed=1.5, hover_up_accel_tau=0.6, hover_up_decel_tau=0.2, hover_down_accel_tau=0.2, hover_down_decel_tau=0.6, hover_turn_speed=75, hover_camera_yaw_speed=120}
+settings = {distance = 30, fov = 90, freeze_player = true, rider_anim="", rider_lookX=0, rider_lookZ=1, rider_tilt_follow=1, rider_pitch_offset=0, rider_anchor="head", rider_neck_joint="", rider_height=1.0, rider_forward=0, rider_side=0, navigation_radius=4.019, steering_yaw=50.276, steering_pitch=22.018, navigation_height=0.991, bumper_pitch=59, controls_revision=1, camera_auto_yaw=false, camera_yaw_speed=120, camera_manual_threshold=0.55, sprint_stop_tau=0.8, hover_accel_tau=0.2, hover_decel_tau=0.6, hover_reverse_tau=0.6, hover_forward_speed=3, hover_backward_speed=1.5, hover_climb_speed=1.5, hover_descend_speed=1.5, hover_up_accel_tau=0.6, hover_up_decel_tau=0.2, hover_down_accel_tau=0.2, hover_down_decel_tau=0.6, hover_turn_speed=75, hover_camera_yaw_speed=120}
 loaded_settings=nil
 settings_path = "GriffinFlightBeta_Settings.json"
 skip_think_enabled, skip_think_expected = false, nil
@@ -92,7 +92,7 @@ if type(json.load_file) == "function" then
         -- Keep tuned legacy values for the slower stage; new explicit fields win.
         if finite(saved.hover_up_tau) then settings.hover_up_accel_tau=math.max(0,math.min(3,saved.hover_up_tau)) end
         if finite(saved.hover_down_tau) then settings.hover_down_decel_tau=math.max(0,math.min(3,saved.hover_down_tau)) end
-        for _,key in ipairs({"hover_accel_tau","hover_decel_tau","hover_reverse_tau","hover_up_accel_tau","hover_up_decel_tau","hover_down_accel_tau","hover_down_decel_tau"}) do
+        for _,key in ipairs({"sprint_stop_tau","hover_accel_tau","hover_decel_tau","hover_reverse_tau","hover_up_accel_tau","hover_up_decel_tau","hover_down_accel_tau","hover_down_decel_tau"}) do
             if finite(saved[key]) then settings[key]=math.max(0,math.min(3,saved[key])) end
         end
         if finite(saved.hover_turn_speed) then settings.hover_turn_speed=math.max(0,math.min(180,saved.hover_turn_speed)) end
