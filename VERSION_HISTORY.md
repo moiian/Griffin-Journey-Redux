@@ -616,3 +616,10 @@ All 24 Lua54 files and prior/new offline regressions pass, including nested call
 Replace the inconclusive A/B menu entries with an opt-in three-second read-only timing probe. Record exact-controller positions, vectors and old speed before/after flight update and collider methods, native forward-distance returns, and adjacent-stage movement. Show missing optional methods and context/interface errors. No fields, return values, settings or files are modified. Earlier pending vector restoration remains supported.
 
 All 25 Lua54 modules and prior/new offline regressions pass, including exact/unrelated controllers, nesting, bounded sampling, unchanged returns, idle zero reads, zero writes, cancellation and optional-method failure. Native timing must be observed before choosing another speed modification point; dive/climb speed modulation is not enabled. See NATIVE_TIMING_039.md.
+
+
+## Griffin Journey Redux 0.3.10: opt-in sprint displacement overlay (2026-10-14)
+
+Add a bounded Debug comparison of original sprint, six seconds of +6 m/s code displacement and original-speed recovery. Add each step to the current native position after UpdateBehavior and synchronize Transform, position context and controller without absolute locking, rotation changes or sprint restarts. Show actual A/B/recovery speed and immediate coordinate errors; partial setter failures participate in current-position recovery. Normal flight stays unchanged until the experiment is started.
+
+All 26 Lua54 modules and prior/new offline regressions pass, including simulated pullback rejection, 30/120Hz, no speed-magnitude feedback, default zero writes, cancellation/reload repair and actual callback integration with LT inheriting the corrected measured velocity. Native coexistence, pullback and visual quality remain for in-game acceptance. Dive/climb modulation is not enabled. See SPRINT_OVERLAY_0310.md.

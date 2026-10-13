@@ -17,6 +17,7 @@ stop_driver = function(reason)
     d.intent = nil -- queued native action callbacks must see that driving has ended
     local errors = passengers.restore_all and passengers.restore_all(d) or {}
     if debug_tools and not debug_tools.speed_test:repair() then errors[#errors+1]="原生位移向量恢复待重试" end
+    if debug_tools and not debug_tools.overlay:repair() then errors[#errors+1]="冲刺叠加位置恢复待重试" end
     local hover_ok,hover_err=pcall(hover_motion.release,hover_motion,d)
     if not hover_ok then errors[#errors+1]="慢速位置恢复 "..tostring(hover_err) end
     if not ai_ok then errors[#errors+1]="决策组件恢复 "..tostring(ai_err) end

@@ -91,6 +91,7 @@ re.on_pre_application_entry("UpdateBehavior",function()
 end)
 re.on_application_entry("UpdateBehavior",function()
     hover_motion:after_behavior()
+    if debug_tools then debug_tools.overlay:after_behavior() end
     if debug_tools then debug_tools:capture("behavior_native_after") end
 end)
 menu.player_visual_pre=function()

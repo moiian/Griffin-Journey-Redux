@@ -2,7 +2,7 @@
 
 Fly a friendly Griffin with configurable controls, a head-following camera, and separate seats for the player, pawns, and accompanying NPCs.
 
-Version: **0.3.9**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
+Version: **0.3.10**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
 
 ## Install or upgrade
 
@@ -37,7 +37,7 @@ The low-speed camera follows only while the Griffin is turning and stops correct
 
 Ordinary airborne actions, including hover, are not submitted on the ground. DEBUG includes **禁止跨阶段动作**, checked by default, to disable this guard for the current script session when testing. Reload restores the guard; external action tools retain their own explicit cross-phase option. See [phase guard and landing](PHASE_032_LANDING.md).
 
-DEBUG includes **原生位移时序检查（3秒，只读）** to identify native displacement timing before another speed experiment. It samples the driven Griffin's position, vector, old speed and native forward-distance return around flight update methods for three seconds, then stops. It performs no field writes, setting changes or file output. Previous ineffective speed tests are no longer exposed in the menu. Dive/climb speed modulation remains pending native validation. See [movement timing probe](NATIVE_TIMING_039.md).
+DEBUG includes an opt-in **冲刺位移叠加对照（+6米／秒，自动结束）** experiment: original sprint for two seconds, +6 m/s code displacement for six seconds, then two seconds without the addition. Each step adds to the current native position and synchronizes Transform, position context and character controller without changing rotation or restarting sprint. The test shows measured A/B/recovery speeds and immediate coordinate errors; in-game pullback/jitter remains to be checked. See [sprint overlay test](SPRINT_OVERLAY_0310.md). The previous read-only timing probe remains available separately.
 
 ## Seats and camera
 

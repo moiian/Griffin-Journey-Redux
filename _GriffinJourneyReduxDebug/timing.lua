@@ -94,6 +94,7 @@ function probe:start()
  local d=active
  local ok,err=pcall(function()
   assert(d and d.gear==2 and d.sprint_speed and d.sprint_speed.ready,"请先稳定2档平飞约2秒")
+  assert(not debug_tools or not debug_tools.overlay or not debug_tools.overlay.run,"请先结束冲刺叠加对照")
   assert(not debug_tools or not debug_tools.speed_test.pending,"请先完成旧测试向量恢复")
   local ch=validate_spawn(d.spawn);local fc=assert(ch:call("get_FlightCtrl()"))
   assert(fc:call("get_CachedCharacter()")==ch,"FlightControl owner changed")
