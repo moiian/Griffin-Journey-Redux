@@ -532,3 +532,10 @@ All 22 Lua54 files and existing/new offline gameplay, protection, camera, settin
 Low-speed camera following now runs only while body yaw is turning, and stops without idle catch-up when rotation settles. Both gears share right-stick blending, takeover threshold, hysteresis, recovery delay, native-unit calibration and shortest-arc easing. Speed settings remain separate; gear 2's trigger and behavior are preserved. Low-speed right-stick takeover also works with the sprint-follow toggle off.
 
 All 22 Lua54 files and existing/new offline regressions pass. Differential output comparison against saved 0.2.6 source preserves sprint-camera behavior across 2,000 simulated frames. Native handling still requires in-game acceptance. See CONTROLS_027_SHARED_CAMERA.md.
+
+
+## Griffin Journey Redux 0.2.8: head-camera recovery and safe hook context (2026-10-13)
+
+Replace per-frame head-target writes with action-triggered checks and a 0.5-second fallback, writing only changed bindings. Temporary native target/controller/main transitions retry without permanently disabling head follow; explicit off remains authoritative. Manual-camera hooks safely snapshot missing/nested context, and disabled render diagnostics skip native camera sampling. Existing driving and shared yaw policies are preserved.
+
+All 22 Lua54 files and existing/new offline regressions pass, including bounded healthy reads/zero redundant writes, exact binding recovery, manual off, partial failures and a reproduced old nil-context callback. Native terrain clipping/shake remains unverified and is not claimed fixed. See HEAD_CAMERA_028_GUARD.md.

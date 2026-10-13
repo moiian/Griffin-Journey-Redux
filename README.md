@@ -2,7 +2,7 @@
 
 Fly a friendly Griffin with configurable controls, a head-following camera, and separate seats for the player, pawns, and accompanying NPCs.
 
-Version: **0.2.7**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
+Version: **0.2.8**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
 
 ## Install or upgrade
 
@@ -34,7 +34,7 @@ RT goes directly to gear 2, preserving the previous sprint guidance and separate
 
 Edit the player, individual pawns, and accompanying NPCs independently. Presets support cloning, renaming, switching, and confirmed deletion. Seat positions, facing, body tilt, action names, camera distance, and FOV are saved automatically. Ordinary bystanders are not seated.
 
-The camera can follow the Griffin's head. Optional gear 2 turning follows horizontally, with manual right-stick override. Pausing retains seat display; Photo Mode allows seat adjustments.
+The camera can follow the Griffin's head. Its target is checked after submitted Griffin actions/retargeting and at most twice per second as a fallback, then rewritten only if the binding changed. Temporary native camera/controller transitions wait for safe recovery; turning the option off is respected. Optional gear 2 turning follows horizontally, with manual right-stick override. Pausing retains seat display; Photo Mode allows seat adjustments.
 
 Steep, vertical and inverted body attitudes no longer automatically end driving or release seats. At exactly vertical attitudes, navigation retains the last valid horizontal heading.
 
@@ -52,7 +52,7 @@ The player package omits the developer folder. The developer package includes it
 
 Lua54 compilation and offline gameplay, scope, lifecycle, settings, default-no-diagnostics, and Debug-absent regressions pass. The user confirmed normal operation of the refactored 0.2.0 build. The action-time retargeting experiment has been reverted; the autonomous target issue remains unresolved.
 
-AI target research is paused. This control update reduces ordinary movement action changes and does not claim to fix autonomous targets. The 0.2.7 control scheme passes offline checks; native movement stability and feel still require an in-game check.
+AI target research is paused. This control update reduces ordinary movement action changes and does not claim to fix autonomous targets. The 0.2.8 camera guards pass offline checks; native movement stability and feel still require an in-game check.
 
 Author: **aelinore**.
 
@@ -60,3 +60,8 @@ Author: **aelinore**.
 ## Optional decision takeover (0.2.2)
 
 Flight Settings includes **方向6：禁用狮鹫决策组件（实验）**, off by default and not saved. It disables only the current driven Griffin's AIDecisionMaker and restores its original Enabled value when disabled or driving ends. Native actions/navigation stay enabled. No recorder is required. See [AI_022_COMPONENT_TAKEOVER.md](AI_022_COMPONENT_TAKEOVER.md). It remains an optional experiment and is not an adopted AI fix. Leave it off for normal driving.
+
+
+## Camera recovery (0.2.8)
+
+Head-camera recovery no longer writes the target joint every behavior frame or permanently switches off on a temporary camera transition. Render camera diagnostics do no sampling when recording is disabled. The manual-camera post hook safely handles unavailable/nested hook storage and snapshots its state before native calls. Native camera clipping or shaking against terrain is a separate, unresolved visual issue; this update does not claim to change collision handling.

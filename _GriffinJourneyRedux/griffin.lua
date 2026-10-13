@@ -27,6 +27,7 @@ function select_player_target(r)
     assert(tc:call("get_ManualPlayerTarget()"), "ManualPlayer target unavailable")
     event("manual_player_target_request",{value=value,before=debug_tools and debug_tools.enabled and target_snapshot(r) or nil})
     tc:call("setTarget(app.TargetController.TargetTypeEnum)",value)
+    if active and active.spawn==r then request_camera_follow_check() end
     if debug_tools and debug_tools.enabled then event("manual_player_target_returned",target_snapshot(r)) end
 end
 function request_instance_skip(result, player)

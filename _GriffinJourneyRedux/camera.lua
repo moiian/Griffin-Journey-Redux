@@ -17,50 +17,80 @@ function restore_follow()
     if ok then follow_state=nil else event("camera_follow_restore_error",tostring(err)) end
     return ok,err
 end
+-- Head binding checks are action-triggered plus a 2 Hz fallback. Healthy
+-- frames only test cached Lua flags/time, and healthy bindings are never rewritten.
+local follow_due,follow_next,follow_revision=true,0,0
+function request_camera_follow_check()
+    if alive and active and camera_mode=="griffin" then follow_due=true end
+end
 function change_camera_mode(key)
+    follow_revision=follow_revision+1
+    local revision=follow_revision
+    camera_mode=key -- Explicit off takes effect before queued native restoration.
+    follow_due=key=="griffin";follow_next=0
     run_once(function()
-        if not alive then return end
+        if not alive or revision~=follow_revision then return end
         local ok,err=restore_follow()
         if not ok then camera_follow_status="镜头恢复未完成："..tostring(err);return end
-        camera_mode=key
         camera_follow_status=key=="original" and "镜头跟随：游戏默认" or "镜头跟随已选择，驾驶期间生效。"
         event("camera_follow_mode",key)
     end)
 end
 function tick_camera_follow()
-    local d,c=active,core()
-    if not alive or not d or camera_mode=="original" or not c or menu.gameplay_paused() then return end
+    local d=active
+    if not alive or not d or camera_mode~="griffin" then return end
+    local t=now()
+    if not follow_due and t<follow_next then return end
+    if not core() or menu.gameplay_paused() then return end
+    follow_due=false;follow_next=t+0.5
     local ok,err=pcall(function()
         assert(owned_player(d,true),"玩家实例变化")
+        validate_spawn(d.spawn)
         local manager=assert(sdk.get_managed_singleton("app.CameraManager"),"CameraManager不可用")
         local controllers=manager._MainCameraControllers
         local main=controllers and controllers[0]
-        assert(main and main:get_Valid(),"主镜头控制器不可用")
-        assert(main:call("get_TargetCharacter()")==d.player,"当前镜头不属于驾驶玩家")
-        if not follow_state then
-            assert(camera_mode=="griffin","Unsupported camera follow mode")
-            prepare_rider(d)
-            local joint=d.rider_head
-            assert(joint and joint:get_Valid(),"狮鹫头部骨骼不可用；未改镜头")
-            local original_joint=main:call("get_TargetJoint()")
-            if joint then assert(original_joint and original_joint:get_Valid(),"原镜头骨骼不可用，无法安全恢复") end
-            follow_state={main=main,manager=manager,player=d.player,joint=joint,original_joint=original_joint,
-                controller=main._CurrentCameraController}
-            event("camera_follow_bound",{mode=camera_mode,original_joint=original_joint and tostring(original_joint:call("get_Name()")),
-                joint=joint and tostring(joint:call("get_Name()"))})
-        end
+        assert(main and main:get_Valid(),"主镜头控制器暂不可用")
+        assert(main:call("get_TargetCharacter()")==d.player,"等待镜头归还驾驶玩家")
+        local controller=assert(main._CurrentCameraController,"镜头控制器暂不可用")
         local s=follow_state
-        assert(main==s.main and manager==s.manager and main._CurrentCameraController==s.controller,"镜头控制器变化，停止跟随")
-        assert(s.joint:get_Valid(),"跟随骨骼失效")
-        s.last_joint=s.joint
-        main:call("set_TargetJoint(via.Joint)",s.joint)
-        camera_follow_status="镜头跟随中："..camera_mode
+        if s and (s.main~=main or s.manager~=manager) then
+            local restored,restore_err=restore_follow()
+            assert(restored,restore_err)
+            s=nil
+        end
+        if not d.rider_head or not d.rider_head:get_Valid() then prepare_rider(d) end
+        local joint=d.rider_head
+        assert(joint and joint:get_Valid(),"等待狮鹫头部骨骼")
+        local current=main:call("get_TargetJoint()")
+        if not s then
+            assert(current and current:get_Valid(),"等待可恢复的原镜头骨骼")
+            s={main=main,manager=manager,player=d.player,joint=joint,
+                original_joint=current,controller=controller}
+            follow_state=s
+        elseif s.controller~=controller or s.joint~=joint then
+            s.controller=controller;s.joint=joint
+            yaw_state=nil;hover_yaw_state=nil
+        end
+        if current~=joint then
+            -- Preserve the latest native target as the release target. Do not capture
+            -- our own previous head target as a new native/default joint.
+            if current~=s.last_joint then
+                assert(current and current:get_Valid(),"等待可恢复的原镜头骨骼")
+                s.original_joint=current
+            end
+            assert(s.original_joint and s.original_joint:get_Valid(),"原镜头骨骼暂不可用")
+            s.last_joint=joint -- Retain restoration even if the setter raises after writing.
+            main:call("set_TargetJoint(via.Joint)",joint)
+        else s.last_joint=joint end
+        camera_follow_status="镜头跟随中：griffin"
+        d.camera_follow_error=nil
     end)
     if not ok then
-        local restored,restore_err=restore_follow()
-        camera_mode="original"
-        camera_follow_status="镜头跟随已停用："..tostring(err)..(not restored and ("；恢复失败："..tostring(restore_err)) or "")
-        event("camera_follow_error",camera_follow_status)
+        -- Native cutscenes/collision/controller transitions may temporarily replace
+        -- the camera. Keep the requested mode and retry, without writing user settings.
+        camera_follow_status="头部镜头等待恢复："..tostring(err)
+        if d.camera_follow_error~=tostring(err) then event("camera_follow_wait",tostring(err)) end
+        d.camera_follow_error=tostring(err)
     end
 end
 -- Native manual-camera update finishes input handling before rotation is built.
@@ -191,7 +221,9 @@ function install_yaw_hook()
         assert(def:get_method("setYaw(System.Single)") and def:get_method("get_Angle()") and
             def:get_method("get_YawRange()") and def:get_method("get_YawRangeDeg()"),"镜头水平角接口不可用")
         sdk.hook(method,function(args)
-            local storage=thread.get_hook_storage()
+            if not alive then return end
+            local storage_ok,storage=pcall(thread.get_hook_storage)
+            if not storage_ok or not storage then return end
             storage.griffin_yaw_controller=nil
             storage.griffin_hover_yaw_controller=nil
             if not hover_camera_active(active) or menu.gameplay_paused() then hover_yaw_state=nil end
@@ -210,9 +242,14 @@ function install_yaw_hook()
                 if candidate==follow_state.controller then storage.griffin_yaw_controller=candidate end
             end
         end,function(retval)
-            local hover=thread.get_hook_storage().griffin_hover_yaw_controller
+            if not alive then return retval end
+            local storage_ok,storage=pcall(thread.get_hook_storage)
+            if not storage_ok or not storage then return retval end
+            -- Snapshot both before any native call: the first callback may invalidate
+            -- or replace the current thread hook storage through a nested hook.
+            local hover,candidate=storage.griffin_hover_yaw_controller,storage.griffin_yaw_controller
+            storage.griffin_hover_yaw_controller=nil;storage.griffin_yaw_controller=nil
             if hover then tick_hover_camera_yaw(hover) end
-            local candidate=thread.get_hook_storage().griffin_yaw_controller
             if candidate then tick_camera_yaw(candidate) end
             return retval
         end)
@@ -222,6 +259,7 @@ function install_yaw_hook()
     return ok
 end
 function read_camera_follow()
+    if not debug_tools or not debug_tools:recording() then return end
     local d,s=active,follow_state
     if not d or not s then return end
     local ok,probe=pcall(function()

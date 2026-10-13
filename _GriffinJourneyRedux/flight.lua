@@ -133,6 +133,7 @@ function tick_driver()
     end
     if d.menu_paused then
         d.menu_paused=nil;d.previous_buttons=input.buttons
+        request_camera_follow_check()
         if d.hover_motion then d.hover_motion.last_time=now() end
         event("driver_menu_resumed",true)
     end

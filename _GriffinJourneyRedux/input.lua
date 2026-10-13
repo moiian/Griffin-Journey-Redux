@@ -154,6 +154,7 @@ function dispatch(d)
             d.last_request = now()
             assert(ai_takeover:tick(d),"方向6组件恢复失败")
             manager:call("requestActionCore(app.ActionManager.Priority, System.String, System.UInt32)", 10, intent.node, 0)
+            request_camera_follow_check()
             d.mode = intent.mode
             d.intent = nil
             if d.mode == "taking_off" then d.takeoff_at = now(); d.saw_takeoff = false; d.auto_hover = intent.auto_hover end

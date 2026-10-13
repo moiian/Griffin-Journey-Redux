@@ -1,0 +1,11 @@
+# Head-camera recovery and safe hook context — 0.2.8
+
+The previous head follow rewrote TargetJoint every behavior frame, but permanently selected the original camera when any binding check failed. The new guard preserves the requested mode through transient controller/main/target unavailability. It checks after an actual submitted Griffin action or manual retarget, on pause resume, and every 0.5 seconds as a fallback; queued requests coalesce. The fallback covers code-driven low-speed motion that does not submit repeated native actions. Healthy frames only inspect Lua scheduling flags/time. Native target writes occur only when the target differs from the retained Griffin head.
+
+Recovery verifies the exact driver/spawn and current camera target. It waits while another character owns the camera, safely handles controller/main replacement, retains the appropriate native joint for restoration, and preserves partial-write recovery. Manual off cancels queued enable requests and cannot be overridden by fallback/actions. Automatic recovery does not save settings or produce logs without explicit recording.
+
+The manual-camera hook now snapshots hook storage once before invoking callbacks. Missing storage returns the original result; callback-driven nested invalidation cannot cause a second nil dereference, and retired generations skip storage. Default render-phase camera diagnostics now return before native sampling when recording is off.
+
+All 22 Lua54 files, existing gameplay/camera/precise protection/settings/Debug-absent/default-no-diagnostics checks, shared-camera tests and sprint-output comparison pass. New actual-module checks verify <=2 native TargetJoint reads per second and zero redundant joint writes in a healthy 120 Hz fixture, event/fallback recovery, transient target/control/main changes, explicit off, partial failures, pause/resume and restoration. A saved actual 0.2.6 callback reproduces the old post-hook nil-context failure; the updated hook passes missing/nested/retired-context tests while preserving the native return.
+
+Native terrain collision, clipping and camera shake remain unverified and are not changed here. The Lua nil-context error alone does not establish their cause. End driving, Reset scripts and verify v0.2.8; if a fresh error still names an older callback location, restart once to clear old runtime state.
