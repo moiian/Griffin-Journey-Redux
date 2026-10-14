@@ -41,7 +41,10 @@ end
 local function write_pose(d,m)
     binding(d,m) -- Never write retained components after an instance/controller change.
     local p=m.transform:call("get_UniversalPosition()")
-    if hover_collision then hover_collision:constrain(d,m,p) end
+    if hover_collision and not hover_collision:constrain(d,m,p) then
+        d.heading={x=math.sin(m.yaw),z=math.cos(m.yaw)}
+        return false
+    end
     p.x=m.position.x;p.y=m.position.y;p.z=m.position.z
     local q=Quaternion.new(math.cos(m.yaw/2),0,math.sin(m.yaw/2),0)
     m.dirty=true
@@ -50,6 +53,9 @@ local function write_pose(d,m)
     m.context:call("setPosRot(via.Position, via.Quaternion)",p,q)
     m.controller:call("warp()")
     m.dirty=false
+    if hover_collision then hover_collision:accepted(m) end
+    d.heading={x=math.sin(m.yaw),z=math.cos(m.yaw)};d.body_pitch=0
+    return true
 end
 local function damp(value,target,dt,tau)
     if dt<=0 then return value,0 end
@@ -92,6 +98,9 @@ function hover_motion:tick(d,ch,tr,fx,fz,flying,ground,action)
         d.hover_motion=m
     end
     binding(d,m)
+    if hover_collision and hover_collision.enabled and not hover_collision:prepare(d,m) then
+        m.pending_pose=nil;return
+    end
     local t=now()
     local dt=math.max(0,math.min(0.1,t-m.last_time));m.last_time=t
     local x,y=input.hover_x or input.x,input.y
@@ -127,13 +136,21 @@ function hover_motion:tick(d,ch,tr,fx,fz,flying,ground,action)
     if x==0 and y==0 and not climb and not descend and math.abs(m.vx)+math.abs(m.vy)+math.abs(m.vz)<0.01 and math.abs(m.turn)<0.001 then
         m.vx=0;m.vy=0;m.vz=0;m.turn=0
     end
-    write_pose(d,m)
-    d.heading={x=forward_x,z=forward_z};d.body_pitch=0
+    if hover_collision and hover_collision.enabled then
+        -- Plan now; only the post-behavior phase may query and submit the pose.
+        m.pending_pose=true
+    else
+        m.pending_pose=nil
+        write_pose(d,m)
+    end
 end
 function hover_motion:after_behavior()
     local d=active
     if not eligible(d) or not d.hover_motion then return end
-    local ok,err=pcall(write_pose,d,d.hover_motion)
+    local m=d.hover_motion
+    if hover_collision and hover_collision.enabled and not m.pending_pose then return end
+    m.pending_pose=nil
+    local ok,err=pcall(write_pose,d,m)
     if not ok then stop_driver("慢速悬浮同步失败");failed("慢速悬浮同步失败",err) end
 end
 end

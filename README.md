@@ -2,7 +2,7 @@
 
 Fly a friendly Griffin with configurable controls, a head-following camera, and separate seats for the player, pawns, and accompanying NPCs.
 
-Version: **0.3.15**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
+Version: **0.3.16**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
 
 ## Install or upgrade
 
@@ -14,7 +14,7 @@ The manual **召唤演出测试** button plays the native forgery-Ferrystone per
 
 When the controlled Griffin naturally enters the stationary hover action in flight, gear 1 controls activate without pressing LT. LT still requests hover manually and retains its existing inertia and input-centering behavior.
 
-An optional **飞行设置 → 1档防穿模测试** experiment sweeps three body volumes before gear 1 code movement. Enable **启用1档防穿模（实验）** to try it; it defaults off after a script reload. Approaching an obstacle stops that step and clears movement inertia. Radius, center height, front/rear spacing and margin are adjustable for the session. Gear 2 performs no queries or interception. Environment-layer coverage and body sizing still require in-game testing; this is not full mesh collision or automatic landing.
+An optional **飞行设置 → 1档防穿模测试** experiment checks gear 1 requests before submitting movement. Enable **启用1档防穿模（实验）** to try it; it defaults off after a script reload. Planning happens before behavior update; a single post-behavior pass sweeps three body volumes in both directions. Any environment contact rejects the whole step, clears movement inertia and skips every pose setter and warp. The last accepted pose remains the reference; native position drift over 5 cm pauses code movement instead of snapping back. Radius, center height, front/rear spacing and margin are adjustable for the session. Gear 2 performs no queries or interception. Existing overlap may block escape or tangential movement. Coverage, stability and body sizing require in-game testing; see [0.3.16 preflight experiment](COLLISION_0316_PREFLIGHT.md).
 
 ## Controls
 
