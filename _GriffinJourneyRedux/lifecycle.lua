@@ -66,7 +66,7 @@ stop_driver = function(reason,suppress_landing,voluntary)
     state.recovery = (#errors > 0) and d or nil
     status = #errors > 0 and ("驾驶已停止，请再点结束驾驶恢复：" .. table.concat(errors, "; "))
         or "驾驶已结束，玩家和乘客已在当前位置释放。"
-    if event then event("driver_stopped", {reason = reason, errors = errors,release_mode=d.voluntary_exit and "current_preset_seats" or "current_physical_position",player_position=d.release_position}) end
+    if event then event("driver_stopped", {reason = reason, errors = errors,release_mode=d.voluntary_exit and "hidden_preset_1_seats" or "current_physical_position",player_position=d.release_position}) end
     return #errors == 0
 end
 end

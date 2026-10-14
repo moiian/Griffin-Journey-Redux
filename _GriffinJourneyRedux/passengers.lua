@@ -53,7 +53,7 @@ passengers.restore_one=function(a)
     a.pose_pending=nil
     if a.moved then
         if core() and core().properties.player==a.owner then
-            -- Manual exit synchronizes the selected visual seat before releasing FSM.
+            -- Manual exit synchronizes the hidden preset [1] seat before releasing FSM.
             if not apply_exit_seat(a) then sync_player(a,true) end
         end
         a.moved=false

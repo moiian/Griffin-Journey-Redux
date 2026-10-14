@@ -14,7 +14,7 @@ function sync_player(d,reset_fall)
     if reset_fall or d.fall_reset_pending then passengers.reset_fall(d) end
     d.controller:call("warp()")
 end
--- Voluntary exit captures all seat points before any actor/bone restoration.
+-- Voluntary exit captures hidden preset [1] points before any actor/bone restoration.
 function capture_exit_seats(d)
     local function capture(a,config)
         if a.exit_seat or not a.moved or not a.player:get_Valid() then return end
@@ -26,8 +26,9 @@ function capture_exit_seats(d)
         if ok then a.exit_seat=vector(target)
         else if event then event("exit_seat_capture_failed",{group=a.group or "player",slot=a.slot,error=tostring(target)}) end end
     end
-    capture(d,passengers.player_config())
-    for _,a in pairs(d.passengers or {}) do capture(a,passengers.visual_seat(a.group,a.slot)) end
+    local preset=settings.seat_presets[1]
+    capture(d,preset.player)
+    for _,a in pairs(d.passengers or {}) do capture(a,passengers.seat(a.group,a.slot,preset)) end
 end
 function apply_exit_seat(a)
     if not a.exit_seat or a.exit_seat_applied then return end

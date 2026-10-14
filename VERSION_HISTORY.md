@@ -1,3 +1,7 @@
+# 0.3.36（2026-10-15）
+
+主动菜单/长按退出固定采用隐藏预设 [1] 的玩家/随从/同行 NPC 各自位置；保留恢复重试、25米退出策略及明确保存。43 Lua 与配置/玩法/专项双模式离线回归通过；游戏五 Lua 已同步，个人 Settings、Debug、bundle 保留；实机待确认。详见 EXIT_0336_HIDDEN_PRESET.md。
+
 ## 0.3.35 — Runtime / optional Debug add-on and explicit settings persistence
 
 Separate player-only runtime (27 Lua files) from optional developer extensions (16 Lua files). Menu edits are drafts; live preview starts off and writes no settings. Apply and Save writes once; pause/photo, save failure, discard, input recording and release recovery are covered. Remove idle roster scans, repeat whole-party checks within one synchronous callback, repeated type discovery and diagnostic snapshots from normal gameplay. Deployment did not write Settings; external seat edits during deployment were retained. Item bundle remains untouched. 43 Lua54 files, 38 new cases, three fall-control suites, eight gameplay suites in both modes and two add-on diagnostic suites pass offline; no measured FPS claim. Main is not merged.
