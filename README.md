@@ -1,6 +1,6 @@
 # Griffin Journey Redux
 
-Version **0.3.40** · Author **aelinore**
+Version **0.3.41** · Author **aelinore**
 
 Fly a friendly Griffin with configurable controls, a head-following camera, and individual seats for the player, pawns, and accompanying NPCs. Requires the installed **NickCore**, its EnemySpawner, and `run_once`. Only the exact Griffin created by this mod is controlled.
 

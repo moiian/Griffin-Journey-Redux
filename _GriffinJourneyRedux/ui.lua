@@ -13,8 +13,8 @@ re.on_draw_ui(function()
         menu.slider("distance","相机距离",0,80)
         menu.slider("fov","FOV",40,120)
         if imgui.tree_node("镜头跟随") then
-            menu.edit_toggle("head_camera","镜头跟随狮鹫头部")
-            local changed,value=menu.edit_toggle("camera_auto_yaw","2档转向时跟随镜头###BetaCameraYaw")
+            menu.edit_toggle("head_camera","切换到狮鹫视角")
+            local changed,value=menu.edit_toggle("camera_auto_yaw","转向时镜头跟随###BetaCameraYaw")
             if changed and value then menu.draft.head_camera=true end
             menu.slider("hover_camera_yaw_speed","1档镜头跟随速度（度／秒）",0,360)
             menu.slider("camera_yaw_speed","2档镜头跟随速度（度／秒）",15,360)
