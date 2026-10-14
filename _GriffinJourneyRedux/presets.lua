@@ -296,7 +296,7 @@ menu.delete=function()
     operation=nil;queued=false
     if type(run_once)~="function" then status="等待依赖加载后再删除。";return end
     run_once(function()
-        if not alive or not stop_driver("删除狮鹫") then return end
+        if not alive or not stop_driver("删除狮鹫",true) then return end
         set_skip_think(false)
         for _,r in ipairs(state.spawns) do r.delete_requested=true;delete_one(r) end
     end)

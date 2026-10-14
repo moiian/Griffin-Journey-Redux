@@ -14,6 +14,7 @@ local function flow_instance()
     return flow
 end
 local function can_start(allow_paused)
+    assert(not consumables or not consumables.current,"披萨清理请求正在执行")
     if spawn_watch then spawn_watch:reap_invalid() end
     assert(not state.pending_cleanup or #state.pending_cleanup<4,"迟到生成请求仍待清理，请等待原生返回")
     local c=assert(core(),"等待 NickCore 加载")
@@ -52,6 +53,11 @@ local function begin_request(request)
             request.flow:call("startForgery()")
             request.last=now();request.stage="playing"
             assert(request.flow:call("get_IsActive()")==true and request.flow:get_field("Routine")==7,"赝品演出未进入运行状态")
+            if request.give_pizza and not request.pizza_sent then
+                request.pizza_sent=true
+                local gift_ok,gift_err=pcall(consumables.grant,consumables,request.owner)
+                if not gift_ok then consumables.status="披萨发放失败："..tostring(gift_err);event("pizza_grant_failed",tostring(gift_err)) end
+            end
             summon.status=string.format("召唤演出：开始后 %.2f 秒生成狮鹫",request.delay)
         end)
         if not started then summon:cancel(err) end

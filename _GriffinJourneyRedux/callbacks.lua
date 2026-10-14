@@ -90,7 +90,9 @@ re.on_application_entry("UpdateHID",function()
 end)
 
 re.on_pre_application_entry("UpdateBehavior",function()
+    consumables:tick()
     spawn_watch:tick()
+    tick_exit_landing()
     if debug_tools then debug_tools:capture("behavior_before_anchor") end
     passengers.frame=passengers.frame+1
     if menu.apply_pending_preset then menu.apply_pending_preset() end
@@ -231,8 +233,11 @@ function bridge.summon_performance_from_item(user)
     local c=core()
     if not alive or state.generation~=generation then return false,"脚本已重载" end
     if not c or not user or user~=c.properties.player then return false,"召唤道具仅允许当前玩家使用" end
-    return summon:request(true)
+    local accepted,reason=summon:request(true)
+    if accepted then summon.current.give_pizza=true end
+    return accepted,reason
 end
+function bridge.dismiss_from_item(user) return consumables:request(user) end
 function bridge.set_skip_think(enabled) return set_skip_think(enabled) end
 function bridge.get_skip_think() return skip_think_enabled,skip_think_status end
 function bridge.is_driving() return alive and (active ~= nil or state.recovery ~= nil or queued) end
@@ -282,7 +287,7 @@ re.on_script_reset(function()
     shop_item:shutdown()
     if item_probe then item_probe:set_enabled(false) end    if collision_debug then collision_debug:record("script_reset",{},true);collision_debug:flush(true) end
     summon:cancel("脚本重置")
-    stop_driver("脚本重置")
+    stop_driver("脚本重置",true)
     ai_takeover.enabled=false
     anti_jitter:shutdown()
     if debug_tools then debug_tools:shutdown() end

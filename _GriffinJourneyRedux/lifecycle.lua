@@ -1,7 +1,7 @@
 -- Griffin Journey Redux: lifecycle
 return function(ctx)
 local _ENV=ctx
-stop_driver = function(reason)
+stop_driver = function(reason,suppress_landing)
     if summon then summon:cancel(reason) end
     local early_errors={}
     local anti_ok,anti_err=pcall(anti_jitter.stop,anti_jitter)
@@ -15,6 +15,7 @@ stop_driver = function(reason)
     local ai_call_ok,ai_ok,ai_err=pcall(ai_takeover.release,ai_takeover)
     if not ai_call_ok then ai_err=ai_ok;ai_ok=false end
     local d = active or state.recovery
+    if d and not suppress_landing and request_exit_landing then pcall(request_exit_landing,d) end
     active = nil
     passengers.griffin_fall.actor=nil
     input = {x = 0, y = 0, buttons = 0}

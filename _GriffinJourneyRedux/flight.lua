@@ -159,6 +159,38 @@ function request_hover_landing(d,source)
     d.control_node=nil;d.intent=nil;d.auto_hover=false
     event("hover_landing_requested",{source=source})
 end
+local exit_landing
+exit_landing_status="退出降落：等待退出驾驶"
+function request_exit_landing(d)
+    if not d or d.external_control or d.exit_landing_requested or not d.spawn or d.spawn.delete_requested then return end
+    local allowed=spawn_watch:mountable(d.spawn)
+    if not allowed then return end
+    local ch=d.spawn.result.chara
+    if not ch:call("get_IsFlight()") or ch:call("get_IsGround()") then return end
+    d.exit_landing_requested=true
+    exit_landing={spawn=d.spawn,ch=ch,go=d.spawn.result.go,owner=d.player,deadline=os.time()+30}
+    exit_landing_status="退出降落：等待释放完成并关闭暂停"
+end
+function tick_exit_landing()
+    local ticket=exit_landing
+    if not ticket then return end
+    if not alive or os.time()>ticket.deadline or active or queued or ticket.spawn.delete_requested then exit_landing=nil;return end
+    if state.recovery or menu.gameplay_paused() then return end
+    exit_landing=nil -- one native request; never resend on every frame
+    local ok,err=pcall(function()
+        local c=core();local r=ticket.spawn
+        assert(c and c.properties.player==ticket.owner and r.result.chara==ticket.ch and r.result.go==ticket.go,"退出降落归属已变化")
+        local ch=validate_spawn(r)
+        assert(spawn_watch:mountable(r),"狮鹫不适合降落")
+        if not ch:call("get_IsFlight()") or ch:call("get_IsGround()") then return end
+        local manager=ch:call("get_ActionManager()")
+        assert(manager and manager:call("get_GameObject()")==ticket.go,"降落动作管理器归属不符")
+        manager:call("requestActionCore(app.ActionManager.Priority, System.String, System.UInt32)",10,"Ch253HoverToLanding",0)
+        exit_landing_status="退出降落：已提交一次原生指令"
+        event("exit_landing_requested","Exact instance, once after rider release")
+    end)
+    if not ok then exit_landing_status="退出降落：跳过／"..tostring(err);event("exit_landing_skipped",tostring(err)) end
+end
 function tick_driver()
     local d = active
     if not d or not alive then return end

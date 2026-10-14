@@ -2,6 +2,7 @@
 return function(ctx)
 local _ENV=ctx
 function spawn(options)
+    if consumables and consumables.current then return false end
     if spawn_watch then spawn_watch:reap_invalid() end
     if state.pending_cleanup and #state.pending_cleanup>=4 then status="迟到生成请求仍待清理，请等待原生返回。";return false end
     if summon and summon.current and (not options or options.session~=summon.current) then return false end

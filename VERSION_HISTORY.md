@@ -654,3 +654,7 @@ Register chocolate natively in Shop 5 at array position 2, stock 19 / daily 9; p
 ## Griffin Journey Redux 0.3.30
 
 Add exact-instance lifecycle checks: native death/sink exits and cleanup, knockdown exits without treating ordinary damage as knockdown, stale record reaping for item reuse, idle >30m cleanup after 10s grace, recovery retry, and 45s async spawn timeout with late-result cleanup. Keep duplicate summon guards. Isolate release failures so player FSM restoration is still attempted. Existing 15 offline suites plus boundary suite passed; native death/down/sink and release behavior await game verification. No new pizza item yet; user Settings and item bundle unchanged.
+
+## Griffin Journey Redux 0.3.31
+
+Normal airborne driver exit requests native landing once after successful rider release. Add Durian-Flavored Pizza (58995/script 67608115), buy 150/sell 100, 0.01kg, NPC/pawn gifting; no shop entry. Chocolate item playback requests one pizza via native inventory API. Pizza defers until menu closes, requests native 50 HP recovery once and safely dismisses owned Griffins. Duplicate and recovery guards retained. Existing 16 suites plus new item/landing tests passed offline; inventory, native healing, consumption and visible landing await game verification. Settings unchanged, original chocolate preserved.

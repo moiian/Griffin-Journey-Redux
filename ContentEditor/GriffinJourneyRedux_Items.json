@@ -48,6 +48,53 @@
             "label": "67608110 custom_script",
             "script": "local api = rawget(_G, \"GriffinJourneyReduxBridge\")\nif not api or type(api.summon_performance_from_item) ~= \"function\" then return end\nlocal accepted, reason = api.summon_performance_from_item(input[2] and input[2].from)\nif not accepted then log.info(\"[Griffin item] \" .. tostring(reason)) end",
             "type": "custom_script"
+        },
+        {
+            "data": {
+                "$type": "app.ItemDataParam",
+                "_AddStatus": 0,
+                "_Attr": 2563,
+                "_AutoSellPrio": 100,
+                "_BuyPrice": 150,
+                "_Category": 0,
+                "_Decay": 0,
+                "_DecayedItemId": 0,
+                "_FakeItemId": 0,
+                "_FakePrice": 0,
+                "_Favor": 1,
+                "_FavoriteAttr": 0,
+                "_FieldModelId": 21,
+                "_HealBlackHp": 0,
+                "_HealStamina": 0,
+                "_HealWhiteHp": 50,
+                "_IconNo": 80,
+                "_Id": 58995,
+                "_ItemDropId": 4,
+                "_Material": 0,
+                "_ModelId": 21,
+                "_RemoveStatus": 0,
+                "_SellPrice": 100,
+                "_SortNo": 31,
+                "_StackNum": 99,
+                "_StolenPrio": 0,
+                "_SubCategory": 0,
+                "_UseAttr": 0,
+                "_UseEffect": 67608115,
+                "_Weight": 1,
+                "_Worth": 0
+            },
+            "description": "Its scent sends griffins fleeing.\nOne man's meat is another's poison.",
+            "id": 58995,
+            "label": "Durian-Flavored Pizza",
+            "name": "Durian-Flavored Pizza",
+            "type": "item_data"
+        },
+        {
+            "type": "custom_script",
+            "id": 67608115,
+            "label": "Griffin emergency pizza",
+            "hook_type": "",
+            "script": "local api = rawget(_G, \"GriffinJourneyReduxBridge\")\nif not api or type(api.dismiss_from_item) ~= \"function\" then return end\nlocal accepted, reason = api.dismiss_from_item(input[2] and input[2].from)\nif not accepted then log.info(\"[Griffin pizza] \" .. tostring(reason)) end"
         }
     ],
     "description": "",
@@ -58,6 +105,6 @@
         "item_data": 58990
     },
     "name": "GriffinJourneyRedux_Items",
-    "updated_at": "2026-10-14 14:28:44 UTC",
-    "updated_at_time": 1791988124
+    "updated_at": "2026-10-14 15:23:10 UTC",
+    "updated_at_time": 1791991390
 }

@@ -6,22 +6,28 @@ local adapter=item_integration
 local function current_generation()
     return alive and state.generation==generation
 end
-local function entities()
+local function entities(id,script_id)
+    id=id or adapter.id;script_id=script_id or adapter.script_id
     local uc=rawget(_G,"usercontent")
     local db=uc and uc.database
     if not db or type(db.get_entity)~="function" then return end
-    local item=db.get_entity("item_data",adapter.id)
-    local script=db.get_entity("custom_script",adapter.script_id)
+    local item=db.get_entity("item_data",id)
+    local script=db.get_entity("custom_script",script_id)
     return item,script
 end
 local function allow_use(from,to,data,outer)
     if item_probe and not outer then item_probe:effect_check(from,to,data) end
-    if not current_generation() or not data or data._Id~=adapter.id or data._UseEffect~=adapter.script_id then return nil end
+    if not current_generation() or not data then return nil end
+    local pizza=consumables and data._Id==consumables.id
+    local expected=pizza and consumables.script_id or adapter.script_id
+    if (data._Id~=adapter.id and not pizza) or data._UseEffect~=expected then return nil end
     local c=core()
     if not c or not c.properties.player or from~=c.properties.player or (to~=nil and to~=c.properties.player) then return nil end
-    local item,script=entities()
+    local item,script=entities(data._Id,expected)
     if not item or not script or type(script.script_func)~="function" then return nil end
     adapter.use_checks=adapter.use_checks+1
+    if pizza then return not consumables.current and not menu.photo_active() end
+    if consumables and consumables.current then return false end
     if spawn_watch then spawn_watch:reap_invalid() end
     local allowed=(not state.pending_cleanup or #state.pending_cleanup<4) and not active and not state.recovery and not queued and #state.spawns==0
         and not summon.current and not menu.photo_active()
@@ -55,10 +61,10 @@ install("app.ItemManager","isUseEnableNoLockCommon(app.ItemDefine.StorageData, a
     if not current_generation() then return end
     local ok,record=pcall(function()
         local storage=sdk.to_valuetype(args[3],"app.ItemDefine.StorageData")
-        if not storage or storage._ItemId~=adapter.id then return end
+        if not storage or storage._ItemId~=adapter.id and (not consumables or storage._ItemId~=consumables.id) then return end
         local manager=sdk.to_managed_object(args[2])
         local dict=manager and manager._ItemDataDict
-        local data=dict and dict[adapter.id]
+        local data=dict and dict[storage._ItemId]
         return {from=sdk.to_managed_object(args[4]),to=sdk.to_managed_object(args[5]),data=data}
     end)
     if ok then s.griffin_item_common=record
@@ -83,8 +89,9 @@ local function detail_hook(signature,reader,key)
         local s=thread.get_hook_storage();s[key]=nil
         if not current_generation() then return end
         local ok,record=pcall(function()
-            if reader(args)~=adapter.id then return end
-            local item=entities()
+            local id=reader(args)
+            if id~=adapter.id and (not consumables or id~=consumables.id) then return end
+            local item=entities(id,consumables and id==consumables.id and consumables.script_id or adapter.script_id)
             if not item or type(item.description)~="string" then return end
             return {widget=sdk.to_managed_object(args[2]),text=item.description}
         end)
@@ -120,6 +127,8 @@ function adapter:draw()
     if self.test_result then imgui.text("接口测试："..self.test_result) end
     if item_probe then item_probe:draw() end
     if shop_item then imgui.text(shop_item.status) end
+    if consumables then imgui.text(consumables.status) end
+    if exit_landing_status then imgui.text(exit_landing_status) end
     if spawn_watch then
         imgui.text(spawn_watch.status)
         imgui.text(string.format("生命周期回收 %d；沉水Hook %s；检查错误 %d；迟到生成 %d",spawn_watch.removed,tostring(spawn_watch.sink_hook),spawn_watch.errors,#state.pending_cleanup))
