@@ -158,7 +158,6 @@ menu.edit_facing=function(seat,id)
     end
     local changed,value=menu.toggle("角色身体倾斜跟随###"..id.."Tilt",(seat.tilt_follow or 1)>0)
     if changed then seat.tilt_follow=value and 1 or 0;dirty=true end
-    imgui.text("Look At X左右面向、Z前后面向；(0, 1)朝狮鹫前方。倾斜仅作用于角色身体。")
     return dirty
 end
 menu.animation=function(seat,id,preset)
@@ -195,7 +194,6 @@ menu.edit_seat=function(seat,id,preset)
             if changed then seat.neck_joint=index==1 and "" or names[index];dirty=true end
         end
     end
-    if seat.anchor=="root" then imgui.text("根节点为狮鹫Transform原点；测量检测球时关闭角色身体倾斜跟随。") end
     for _,spec in ipairs({{"side","X（左右）",-10,10},{"forward","Z（前后）",-15,15},{"height","Y（高度）",-5,15}}) do
         if not finite(seat[spec[1]]) then seat[spec[1]]=0 end
         if preset==menu.draft.seat_presets[1] or seat.anchor=="root" then spec[3],spec[4]=-100,100 end
@@ -274,10 +272,10 @@ menu.presets=function()
         imgui.tree_pop()
     end
     menu.passenger_seats(preset)
-    imgui.text("调整只修改内存草稿；点击“应用并保存”写入文件。新增复制当前布局，删除需确认。")
     if menu.pending_edit then imgui.text("修改已排队，继续游戏或进入照片模式后应用。") end
     if active and menu.photo_active() then imgui.text("照片模式：保持座位显示；飞行输入和动画请求暂停。") end
     if menu.save_error then imgui.text(menu.save_error) end
+    imgui.text("记得点击保存按钮")
 end
 
 menu.stop=function()

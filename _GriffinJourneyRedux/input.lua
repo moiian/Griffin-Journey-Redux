@@ -3,18 +3,25 @@ return function(ctx)
 local _ENV=ctx
 -- Independent HID mapping, following OJR's capture/release-gate layout (no OJR/Hotkeys dependency).
 controls.rows={
-    {"spawn","召唤狮鹫","None","None"},{"start","开始驾驶（长按1秒）","F","RRight"},
-    {"stop","结束驾驶（长按1秒）","X","None"},{"delete","删除狮鹫","None","None"},
-    {"a","起飞","Space","RDown"},
-    {"rt","冲刺／2档","LShift","RTrigBottom"},{"lt","悬停／1档","LControl","LTrigBottom"},
-    {"hover_up","1档上移","E","RDown"},{"hover_down","1档下移","Q","RUp"},
-    {"landing","原生降落（1／2档）","G","RStickPush"},
-    {"rb","冲刺爬升／2档","R","LTrigTop"},{"lb","冲刺俯冲／2档","C","RTrigTop"},
-    {"ground_wind_start","地面翼风攻击开始／循环","C","RTrigTop"},
-    {"ground_wind_end","地面翼风攻击结束","R","LTrigTop"},
-    {"left","向左","A","None"},{"right","向右","D","None"},
-    {"up","向前","W","None"},{"down","向后","S","None"},
     {"preset_next","切换座位预设","None","None"},
+    {"start","开始驾驶（长按1秒）","F","RRight"},
+    {"stop","结束驾驶（长按1秒）","X","None"},
+    {"a","起飞","Space","RDown"},
+    {"rt","冲刺","LShift","RTrigBottom"},
+    {"lt","悬停","LControl","LTrigBottom"},
+    {"hover_up","上移","E","RDown"},
+    {"hover_down","下移","Q","RUp"},
+    {"landing","降落","G","RStickPush"},
+    {"rb","冲刺爬升","R","LTrigTop"},
+    {"lb","冲刺俯冲","C","RTrigTop"},
+    {"ground_wind_start","开始翼风攻击","C","RTrigTop"},
+    {"ground_wind_end","结束翼风攻击","R","LTrigTop"},
+    {"left","向左","A","None"},
+    {"right","向右","D","None"},
+    {"up","向前","W","None"},
+    {"down","向后","S","None"},
+    {"spawn","召唤狮鹫","None","None"},
+    {"delete","删除狮鹫","None","None"},
 }
 controls.enums={keyboard={},gamepad={}}
 controls.choices={keyboard={"None"},gamepad={"None"}}

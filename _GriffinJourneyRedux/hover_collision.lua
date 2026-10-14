@@ -299,13 +299,13 @@ function guard:observe(d,ch,tr,flying,ground,action)
     end
 end
 function guard:draw()
-    if not imgui.tree_node("防穿模与近地降落") then return end
+    if not imgui.tree_node("碰撞检测与自动降落") then return end
     local cfg=menu.draft.hover_collision_config
-    for _,spec in ipairs({{"enabled","启用1档防穿模"},{"auto_land","启用1/2档近地自动降落"}}) do
+    for _,spec in ipairs({{"enabled","悬停防穿模"},{"auto_land","近地自动降落"}}) do
         local changed,value=menu.toggle(spec[2],cfg[spec[1]])
         if changed then cfg[spec[1]]=value;menu.changed() end
     end
-    for _,spec in ipairs({{"land_distance","近地降落距离（米）",0.25,15},{"land_grace","起飞/切档保护时间（秒）",0,10},
+    for _,spec in ipairs({{"land_distance","近地降落距离（米）",0.25,15},{"land_grace","起飞与切换模式保护时间（秒）",0,10},
         {"center_distance","中心球固定探测距离（米）",0.25,50},{"end_distance","前后球固定探测距离（米）",0.25,50},
         {"side_distance","左右球固定探测距离（米）",0.25,50},{"radius","检测球半径（米）",0.25,20},
         {"height","检测球中心高度（米）",-15,20},{"span","前后检测球偏移（米）",0,30},
@@ -315,7 +315,6 @@ function guard:draw()
         if changed and finite(value) then cfg[spec[1]]=math.max(spec[3],math.min(spec[4],value));menu.changed() end
     end
     imgui.text(self.status);imgui.text(self.ground_status)
-    imgui.text("防穿模仅1档；近地降落覆盖1/2档。修改遵循上方实时应用与保存设置。")
     imgui.tree_pop()
 end
 end

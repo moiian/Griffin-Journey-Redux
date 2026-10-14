@@ -8,7 +8,7 @@
 
 验证：43 Lua 通过 Lua54 编译；38 个配置/组件用例、3 组落体套件、8 组玩法套件在无/有 Debug 双模式通过，另 2 组 Debug 诊断套件通过。主动退出专项原 12 用例改为固定隐藏预设断言，新增 3 用例覆盖不同正常预设与未应用草稿隔离、隐藏禁用槽位、缺失隐藏槽位与零磁盘写入；共 15 用例双模式通过。旧夹具版本断言更新为 0.3.36。均为离线证据。
 
-部署：只同步入口、session、player、passengers、lifecycle 五个 Lua；Settings、现有 Debug、个人图标/道具 bundle 与第三方文件不覆盖。通过直接内容比较核对同步及保护文件，未使用哈希。测试保存在 LocalTests/exit_hidden_0336；备份见下。Git 已在实验分支本地提交；远端推送被自动审批拒绝，原因是当前消息未明确授权向 GitHub 发送源码及文档，待用户确认。不合 main。
+部署：只同步入口、session、player、passengers、lifecycle 五个 Lua；Settings、现有 Debug、个人图标/道具 bundle 与第三方文件不覆盖。通过直接内容比较核对同步及保护文件，未使用哈希。测试保存在 LocalTests/exit_hidden_0336；备份见下。Git 9083ad2 已于本轮用户明确允许后推送 experiment/oxcart-preset-ui。不合 main。
 
 待实机：结束旧驾驶并 Reset scripts 后，在正常预设 [2]/[3] 下分别以菜单和长按退出，确认玩家、随从及同行 NPC 的真实释放点均为 [1] 各自槽位，视觉/碰撞同步正常；高低空降落/悬停沿既有行为。新行为尚未经实机确认。
 
