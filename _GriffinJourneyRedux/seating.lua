@@ -68,14 +68,16 @@ function rider_seat(d,config)
     local ch=validate_spawn(d.spawn,true)
     assert(ch:call("get_Transform()")==d.rider_griffin_transform,"Griffin anchor changed")
     local base
-    if d.rider_head then
+    if config.anchor=="root" then
+        base=vector(d.rider_griffin_transform:call("get_Position()"))
+    elseif d.rider_head then
         assert(d.rider_head:get_Valid(),"Griffin Head unavailable")
         base=vector(d.rider_head:call("get_Position()"))
     else
         base=vector(d.rider_griffin_transform:call("get_Position()"))
         base={x=base.x+d.heading.x*3,y=base.y+4,z=base.z+d.heading.z*3}
     end
-    local selected_name=d.rider_head_name
+    local selected_name=config.anchor=="root" and "Transform root" or d.rider_head_name
     if config.anchor=="neck" then
         local neck=d.rider_necks and d.rider_necks[1]
         for _,candidate in ipairs(d.rider_necks or {}) do
@@ -175,12 +177,12 @@ passengers.seat=function(group,index,preset)
         local key,default,lo,hi=spec[1],spec[2],spec[3],spec[4]
         seat[key]=finite(seat[key]) and math.max(lo,math.min(hi,seat[key])) or default
     end
-    seat.anchor=seat.anchor=="head" and "head" or "neck"
+    seat.anchor=seat.anchor=="root" and "root" or (seat.anchor=="head" and "head" or "neck")
     if type(seat.neck_joint)~="string" then seat.neck_joint="" end
     if not finite(seat.height) then seat.height=0.5 end
     if not finite(seat.forward) then seat.forward=-index*1.2-(group=="companions" and 3.6 or 0) end
     if not finite(seat.side) then seat.side=index%2==1 and -0.7 or 0.7 end
-    if not physical then
+    if not physical and seat.anchor~="root" then
         seat.height=math.max(-5,math.min(15,seat.height))
         seat.forward=math.max(-15,math.min(15,seat.forward))
         seat.side=math.max(-10,math.min(10,seat.side))

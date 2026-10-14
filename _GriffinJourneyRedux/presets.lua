@@ -82,14 +82,14 @@ end
 menu.pull_values=function(index)
     local preset=settings.seat_presets[index]
     local player=preset.player
-    player.anchor=player.anchor=="neck" and "neck" or "head"
+    player.anchor=player.anchor=="root" and "root" or (player.anchor=="neck" and "neck" or "head")
     player.neck_joint=type(player.neck_joint)=="string" and player.neck_joint or ""
     player.anim=type(player.anim)=="string" and player.anim or ""
     for _,spec in ipairs({{"height",1,-5,15},{"forward",0,-15,15},{"side",0,-10,10},
         {"lookX",0,-1,1},{"lookZ",1,-1,1},{"tilt_follow",index==1 and 0 or 1,0,1},{"pitch_offset",0,-45,45}}) do
         local value=player[spec[1]]
         local coordinate=spec[1]=="height" or spec[1]=="forward" or spec[1]=="side"
-        player[spec[1]]=finite(value) and (index==1 and coordinate and value or math.max(spec[3],math.min(spec[4],value))) or spec[2]
+        player[spec[1]]=finite(value) and ((index==1 or player.anchor=="root") and coordinate and value or math.max(spec[3],math.min(spec[4],value))) or spec[2]
     end
     for key,value in pairs(player) do
         if ({anchor=true,neck_joint=true,anim=true,height=true,forward=true,side=true,lookX=true,lookZ=true,tilt_follow=true,pitch_offset=true})[key] then
@@ -186,8 +186,8 @@ end
 menu.edit_seat=function(seat,id,preset)
     local dirty=false
     if type(imgui.combo)=="function" then
-        local changed,index=imgui.combo("骨骼锚点###"..id.."Anchor",seat.anchor=="neck" and 2 or 1,{"头部","颈部"})
-        if changed then seat.anchor=index==2 and "neck" or "head";dirty=true end
+        local changed,index=imgui.combo("骨骼锚点###"..id.."Anchor",seat.anchor=="root" and 3 or (seat.anchor=="neck" and 2 or 1),{"头部","颈部","根节点（Transform）"})
+        if changed then seat.anchor=index==3 and "root" or (index==2 and "neck" or "head");dirty=true end
         if seat.anchor=="neck" then
             local names={"自动（首个颈部骨骼）"};local selected=1
             for _,entry in ipairs(active and active.rider_necks or {}) do
@@ -197,9 +197,10 @@ menu.edit_seat=function(seat,id,preset)
             if changed then seat.neck_joint=index==1 and "" or names[index];dirty=true end
         end
     end
+    if seat.anchor=="root" then imgui.text("根节点为狮鹫Transform原点；测量检测球时关闭角色身体倾斜跟随。") end
     for _,spec in ipairs({{"side","X（左右）",-10,10},{"forward","Z（前后）",-15,15},{"height","Y（高度）",-5,15}}) do
         if not finite(seat[spec[1]]) then seat[spec[1]]=0 end
-        if preset==settings.seat_presets[1] then spec[3],spec[4]=-100,100 end
+        if preset==settings.seat_presets[1] or seat.anchor=="root" then spec[3],spec[4]=-100,100 end
         local changed,value=menu.number(spec[2].."###"..id..spec[1],seat[spec[1]],0.05,spec[3],spec[4])
         if changed and finite(value) then seat[spec[1]]=math.max(spec[3],math.min(spec[4],value));dirty=true end
     end

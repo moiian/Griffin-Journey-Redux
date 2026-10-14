@@ -1,9 +1,9 @@
 -- Griffin Journey Redux: session
 return function(ctx)
 local _ENV=ctx
--- Griffin Flight Beta 0.3.20. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.3.21. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-VERSION = "0.3.20"
+VERSION = "0.3.21"
 state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 _G.GriffinJourneyReduxState = state
@@ -113,11 +113,13 @@ if type(json.load_file) == "function" then
         for _,spec in ipairs({{"rider_lookX",-1,1},{"rider_lookZ",-1,1},{"rider_tilt_follow",0,1},{"rider_pitch_offset",-45,45}}) do
             if finite(saved[spec[1]]) then settings[spec[1]]=math.max(spec[2],math.min(spec[3],saved[spec[1]])) end
         end
-        settings.rider_anchor=saved.rider_anchor=="neck" and "neck" or "head"
+        settings.rider_anchor=saved.rider_anchor=="root" and "root" or (saved.rider_anchor=="neck" and "neck" or "head")
         settings.rider_neck_joint=type(saved.rider_neck_joint)=="string" and saved.rider_neck_joint or ""
-        if finite(saved.rider_height) then settings.rider_height=math.max(-5,math.min(15,saved.rider_height)) end
-        if finite(saved.rider_forward) then settings.rider_forward=math.max(-15,math.min(15,saved.rider_forward)) end
-        if finite(saved.rider_side) then settings.rider_side=math.max(-10,math.min(10,saved.rider_side)) end
+        for _,spec in ipairs({{"rider_height",-5,15},{"rider_forward",-15,15},{"rider_side",-10,10}}) do
+            local lo,hi=spec[2],spec[3]
+            if settings.rider_anchor=="root" then lo,hi=-100,100 end
+            if finite(saved[spec[1]]) then settings[spec[1]]=math.max(lo,math.min(hi,saved[spec[1]])) end
+        end
     end
 end
 
