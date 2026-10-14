@@ -658,3 +658,7 @@ Add exact-instance lifecycle checks: native death/sink exits and cleanup, knockd
 ## Griffin Journey Redux 0.3.31
 
 Normal airborne driver exit requests native landing once after successful rider release. Add Durian-Flavored Pizza (58995/script 67608115), buy 150/sell 100, 0.01kg, NPC/pawn gifting; no shop entry. Chocolate item playback requests one pizza via native inventory API. Pizza defers until menu closes, requests native 50 HP recovery once and safely dismisses owned Griffins. Duplicate and recovery guards retained. Existing 16 suites plus new item/landing tests passed offline; inventory, native healing, consumption and visible landing await game verification. Settings unchanged, original chocolate preserved.
+
+## Griffin Journey Redux 0.3.32
+
+User did not receive pizza in 0.3.31; herb observations are inconclusive. Pin native getItem(Int32,Int32,CharacterID) method definition and player enum, validate native item dictionary, and read player stack before/after. Add independent one-item grant test and transaction JSON; Void return is not proof of inventory success and unconfirmed calls never auto-retry. Existing 17 suites plus new grant tests passed offline; in-game result pending. Settings and bundle untouched.

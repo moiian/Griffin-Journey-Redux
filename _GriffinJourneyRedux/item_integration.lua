@@ -128,6 +128,15 @@ function adapter:draw()
     if item_probe then item_probe:draw() end
     if shop_item then imgui.text(shop_item.status) end
     if consumables then imgui.text(consumables.status) end
+    if consumables and beta_button("测试发放披萨（1个）###BetaTestPizzaGrant") then
+        run_once(function()
+            if not current_generation() then return end
+            if menu.gameplay_paused() then consumables.status="请先关闭游戏物品菜单，再测试发放";return end
+            local c=core()
+            local ok,err=pcall(consumables.grant,consumables,c and c.properties.player)
+            if not ok then consumables.status="披萨发放失败："..tostring(err) end
+        end)
+    end
     if exit_landing_status then imgui.text(exit_landing_status) end
     if spawn_watch then
         imgui.text(spawn_watch.status)

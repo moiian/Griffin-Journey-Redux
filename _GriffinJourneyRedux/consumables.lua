@@ -3,6 +3,27 @@ return function(ctx)
 local _ENV=ctx
 consumables={id=58995,script_id=67608115,heal=50,status="榴莲味披萨：待使用"}
 local pizza=consumables
+local grant_signature="getItem(System.Int32, System.Int32, app.CharacterID)"
+pizza.log_path="GriffinJourneyRedux_PizzaGrant.json"
+local function method(td,signature)
+    return td and (td:get_method(signature) or td:get_method((signature:gsub(", ",","))))
+end
+local function save_record()
+    if not pizza.last_grant then return end
+    local ok,err=pcall(json.dump_file,pizza.log_path,pizza.last_grant)
+    if not ok or err==false then pizza.log_error=tostring(err) end
+end
+local function count(manager,reader,id,player_id)
+    if not reader then return nil,"getStorageData重载不可用" end
+    local ok,value=pcall(function()
+        local storage=reader:call(manager,id,player_id)
+        if not storage or storage._ItemId~=id then return 0 end
+        assert(type(storage._Num)=="number","库存数量不可读")
+        return storage._Num
+    end)
+    if ok then return value end
+    return nil,tostring(value)
+end
 local function current() return alive and state.generation==generation end
 local function entity()
     local uc=rawget(_G,"usercontent");local db=uc and uc.database
@@ -12,13 +33,54 @@ local function entity()
         and script and type(script.script_func)=="function"
 end
 function pizza:grant(owner)
+    assert(not self.verification,"上一笔披萨发放尚待确认")
+    self.last_grant={version=VERSION,item=self.id,script=self.script_id,amount=1,method=grant_signature,stage="checking"}
+    local record=self.last_grant
+    local ok,err=pcall(function()
+        local c=core()
+        assert(current() and c and owner==c.properties.player and owner:get_Valid(),"披萨发放玩家已变化")
+        assert(entity(),"披萨道具或脚本未加载")
+        local manager=assert(sdk.get_managed_singleton("app.ItemManager"),"物品管理器未就绪")
+        local native=manager._ItemDataDict and manager._ItemDataDict[self.id]
+        record.native_id=native and native._Id;record.native_effect=native and native._UseEffect
+        assert(native and native._Id==self.id and native._UseEffect==self.script_id,"披萨未正确注入原生物品字典")
+        local td=sdk.find_type_definition("app.ItemManager")
+        local give=assert(method(td,grant_signature),"指定的CharacterID发放重载不可用")
+        local enum=sdk.find_type_definition("app.CharacterID")
+        local field=enum and enum:get_field("ch000000_00")
+        local player_id=assert(field and field:get_data(),"当前玩家CharacterID枚举不可用")
+        assert(finite(player_id),"玩家CharacterID不是数值")
+        record.player_id=player_id
+        local reader=method(td,"getStorageData(System.Int32, app.CharacterID)")
+        record.before,record.before_error=count(manager,reader,self.id,player_id)
+        record.stage="calling"
+        -- Pin the exact REMethodDefinition and receiver; no dynamic overload dispatch.
+        give:call(manager,self.id,1,player_id)
+        record.stage="requested"
+        self.verification={owner=owner,manager=manager,reader=reader,player_id=player_id,due=os.clock()+1,record=record}
+        self.status="榴莲味披萨：已调用玩家ID发放重载，等待背包数量确认"
+        event("pizza_grant_requested",{item=self.id,count=1,player_id=player_id})
+    end)
+    if not ok then record.stage="failed";record.error=tostring(err);self.status="披萨发放失败："..tostring(err) end
+    save_record()
+    if not ok then error(err) end
+end
+function pizza:verify_grant()
+    local verify=self.verification
+    if not verify or os.clock()<verify.due then return end
+    self.verification=nil
+    local record=verify.record
     local c=core()
-    assert(current() and c and owner==c.properties.player and owner:get_Valid(),"披萨发放玩家已变化")
-    assert(entity(),"披萨道具或脚本未加载")
-    local manager=assert(sdk.get_managed_singleton("app.ItemManager"),"物品管理器未就绪")
-    manager:call("getItem(System.Int32,System.Int32,app.Character)",self.id,1,owner)
-    self.status="榴莲味披萨：已请求向当前玩家发放1个"
-    event("pizza_granted",{item=self.id,count=1})
+    local manager_ok,manager=pcall(sdk.get_managed_singleton,"app.ItemManager")
+    if not current() or not c or c.properties.player~=verify.owner or not manager_ok or manager~=verify.manager then
+        record.stage="unconfirmed";record.error="发放确认前玩家已变化"
+    else
+        record.after,record.after_error=count(verify.manager,verify.reader,self.id,verify.player_id)
+        record.stage=type(record.before)=="number" and type(record.after)=="number" and record.after==record.before+1 and "confirmed" or "unconfirmed"
+    end
+    self.status=record.stage=="confirmed" and "榴莲味披萨：玩家道具栈数量已确认增加1"
+        or "榴莲味披萨：未确认玩家数量增加，请查看发放LOG（不会自动重发）"
+    save_record()
 end
 function pizza:request(owner)
     local c=core()
@@ -30,6 +92,7 @@ function pizza:request(owner)
     return true,"披萨使用请求已接受"
 end
 function pizza:tick()
+    self:verify_grant()
     local request=self.current
     if not request then return end
     local c=core()
