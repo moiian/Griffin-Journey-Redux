@@ -223,6 +223,9 @@ menu.passenger_seats=function(preset)
 end
 menu.presets=function()
     local settings=menu.draft
+    local aligned=type(imgui.indent)=="function" and type(imgui.unindent)=="function"
+    local function finish_header() if aligned then imgui.unindent(0) end end
+    if aligned then imgui.indent(0) end
     imgui.text("当前生效预设："..ctx.settings.seat_presets[ctx.settings.seat_index].name)
     if imgui.separator then imgui.separator() end
     local first=menu.show_physical and 1 or 2
@@ -242,6 +245,7 @@ menu.presets=function()
             clone.name="狮鹫座位 - "..(#settings.seat_presets+1)
             settings.seat_presets[#settings.seat_presets+1]=clone
             menu.selected_index=#settings.seat_presets;settings.seat_index=menu.selected_index;menu.changed()
+            finish_header()
             return
         end
         if #settings.seat_presets>2 then
@@ -256,6 +260,7 @@ menu.presets=function()
                     menu.last_normal=math.max(2,math.min(menu.last_normal or 2,#settings.seat_presets))
                     menu.selected_index=math.max(2,math.min(index,#settings.seat_presets));menu.confirm_delete=nil
                     menu.changed()
+                    finish_header()
                     return
                 end
                 if imgui.same_line then imgui.same_line() end
@@ -267,6 +272,7 @@ menu.presets=function()
             if changed and type(name)=="string" and name:match("%S") then preset.name=name:sub(1,120);menu.persist_preset(preset) end
         end
     else imgui.text("调试[1]：各随从／同伴的实体与当前Hip使用各自参数；玩家参数只控制玩家Hip。") end
+    finish_header()
     if imgui.tree_node("玩家参数###BetaPlayerParameters") then
         menu.edit_seat(preset.player,"BetaPlayerSeat",preset)
         imgui.tree_pop()
