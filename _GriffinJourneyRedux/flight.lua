@@ -246,7 +246,7 @@ function tick_driver()
         end
         -- Fresh controls below can still leave an already active native hover.
         if takeoff_locked and not held(pressed,masks.landing) then
-            if held(pressed,masks.rt) or held(pressed,masks.rb) or held(pressed,masks.lb) then
+            if held(pressed,masks.rt) then
                 d.takeoff_choice="dash";d.takeoff_stop_requested=nil
             elseif held(pressed,masks.lt) then
                 d.takeoff_choice="hover";d.takeoff_stop_requested=true
@@ -262,7 +262,9 @@ function tick_driver()
             set_intent(d,"Ch253TakeoffBackJump","taking_off");d.intent.auto_hover=true
         elseif held(pressed,masks.landing) then
             resume(1);request_hover_landing(d,"manual")
-        elseif d.gear==1 and flying and not ground and (held(pressed,masks.rb) or held(pressed,masks.lb)) then
+        elseif d.gear==1 and action_name==hover_node and d.mode=="hover" and flying and not ground
+            and not d.external_control and not d.manual_hold and not d.pending and not outgoing
+            and (held(pressed,masks.rb) or held(pressed,masks.lb)) then
             resume(2)
         end
         if d.mode=="taking_off" then

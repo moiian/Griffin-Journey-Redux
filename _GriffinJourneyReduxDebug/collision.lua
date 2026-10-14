@@ -53,7 +53,7 @@ function dbg:tick()
             center_probe=g.center_probe,request=g.request,actual=g.actual,target=g.target,probes=g.probes,last_query=g.last_query,casts=g.casts,blocks=g.blocks,held_blocks=g.held_blocks,contacts=g.contacts,
             ball=g.last_ball,center_ball=g.last_center,lateral_ball=g.last_lateral,direction=g.last_direction,writes=g.writes},
             landing={enabled=g.auto_land,status=g.ground_status,distance=g.land_distance,grace=g.land_grace,
-                hits=g.land_hits,within=g.ground_within,checked_at=g.ground_checked_at},
+                hits=g.land_hits,gear=g.land_gear,sample_interval=g.land_gear==2 and .05 or .2,within=g.ground_within,checked_at=g.ground_checked_at},
             motion=m and {position=m.position,yaw=m.yaw,vx=m.vx,vy=m.vy,vz=m.vz,turn=m.turn,coast=m.coast,
                 pending=m.pending_pose,input_lock=m.input_lock,rebase_after_block=m.rebase_after_block,dirty=m.dirty,accepted=m.collision_safe},
             inertia={horizontal_accel=settings.hover_accel_tau,horizontal_stop=settings.hover_decel_tau,

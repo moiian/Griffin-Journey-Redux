@@ -16,7 +16,7 @@ menu.snapshot=function(name,source)
     preset.schema=5;preset.name=name
     preset.player=preset.player or {}
     for k,v in pairs(passengers.player_config()) do preset.player[k]=v end
-    preset.camera=preset.camera or {};preset.camera.distance=settings.distance;preset.camera.fov=settings.fov
+    preset.camera=nil -- New layouts contain seats only; camera values are global.
     preset.pawns=menu.clone(settings.pawn_seats or preset.pawns or {})
     preset.companions=menu.clone(settings.companion_seats or preset.companions or {})
     return preset
@@ -37,14 +37,22 @@ if #settings.seat_presets==1 then
     settings.seat_presets[2]=menu.clone(settings.seat_presets[1]);settings.seat_presets[2].name="默认乘坐座位"
 end
 settings.seat_index=math.max(2,math.min(#settings.seat_presets,math.floor(tonumber(loaded_settings and loaded_settings.seat_index) or 2)))
+-- Migrate the previously active normal layout once, matching the old effective view.
+-- Keep legacy camera records in old layouts as inert data; never read them after revision 1.
+if not loaded_settings or loaded_settings.camera_global_revision~=1 then
+    local preset=settings.seat_presets[settings.seat_index]
+    local legacy=type(preset.camera)=="table" and preset.camera or {}
+    for _,spec in ipairs({{"distance",0,80},{"fov",40,120}}) do
+        if finite(legacy[spec[1]]) then settings[spec[1]]=math.max(spec[2],math.min(spec[3],legacy[spec[1]])) end
+    end
+end
+settings.camera_global_revision=1
 -- Recover legacy edits that were written only to the runtime mirrors, once.
 if loaded_settings and loaded_settings.preset_store_revision~=1 and loaded_settings.seat_index~=1 then
     local preset=settings.seat_presets[settings.seat_index]
     for key,value in pairs(passengers.player_config()) do
         if loaded_settings["rider_"..key]~=nil then preset.player[key]=value end
     end
-    preset.camera=type(preset.camera)=="table" and preset.camera or {}
-    for _,key in ipairs({"distance","fov"}) do if loaded_settings[key]~=nil then preset.camera[key]=settings[key] end end
     for _,entry in ipairs({{"pawn_seats","pawns"},{"companion_seats","companions"}}) do
         if type(loaded_settings[entry[1]])=="table" then preset[entry[2]]=menu.clone(loaded_settings[entry[1]]) end
     end
@@ -98,14 +106,7 @@ menu.pull_values=function(index)
     end
     -- The current layout controls visible seats and carry options, including debug [1].
     settings.pawn_seats=preset.pawns;settings.companion_seats=preset.companions
-    if index~=1 then
-        preset.camera=type(preset.camera)=="table" and preset.camera or {}
-        for _,spec in ipairs({{"distance",30,0,80},{"fov",90,40,120}}) do
-            local value=preset.camera[spec[1]]
-            preset.camera[spec[1]]=finite(value) and math.max(spec[3],math.min(spec[4],value)) or spec[2]
-            settings[spec[1]]=preset.camera[spec[1]]
-        end
-    end
+
 end
 menu.persist_preset=function(preset)
     for index,entry in ipairs(settings.seat_presets) do
@@ -245,7 +246,7 @@ menu.presets=function()
     local preset=settings.seat_presets[index]
     if index~=1 then
         if #settings.seat_presets<15 and beta_button("＋新增预设（最多15项）###BetaPresetNew") then
-            local clone=menu.clone(preset)
+            local clone=menu.clone(preset);clone.camera=nil
             clone.name="狮鹫座位 - "..(#settings.seat_presets+1)
             settings.seat_presets[#settings.seat_presets+1]=clone
             menu.reindex();controls.save();menu.queue_preset(#settings.seat_presets)
@@ -276,13 +277,6 @@ menu.presets=function()
     else imgui.text("调试[1]：各随从／同伴的实体与当前Hip使用各自参数；玩家参数只控制玩家Hip。") end
     if imgui.tree_node("玩家参数###BetaPlayerParameters") then
         menu.edit_seat(preset.player,"BetaPlayerSeat",preset)
-        if index~=1 then
-            preset.camera=type(preset.camera)=="table" and preset.camera or {distance=settings.distance,fov=settings.fov}
-            for _,spec in ipairs({{"distance","相机距离偏移",0,80},{"fov","FOV",40,120}}) do
-                local changed,value=menu.number(spec[2].."###BetaPresetCamera"..spec[1],preset.camera[spec[1]],0.1,spec[3],spec[4])
-                if changed and finite(value) then preset.camera[spec[1]]=math.max(spec[3],math.min(spec[4],value));menu.persist_preset(preset) end
-            end
-        end
         imgui.tree_pop()
     end
     menu.passenger_seats(preset)

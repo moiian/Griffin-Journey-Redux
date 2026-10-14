@@ -70,6 +70,9 @@ re.on_draw_ui(function()
         imgui.tree_pop()
     end
     if imgui.tree_node("镜头设置") then
+        menu.slider("distance","相机距离偏移",0,80)
+        menu.slider("fov","FOV",40,120)
+        imgui.text("全局镜头配置；切换座位预设不改变距离和FOV。")
         local changed,value=menu.toggle("镜头跟随狮鹫头部",settings.head_camera)
         if changed then settings.head_camera=value;change_camera_mode(value and "griffin" or "original");controls.save() end
         changed,value=menu.toggle("2档转向时跟随镜头###BetaCameraYaw",settings.camera_auto_yaw)

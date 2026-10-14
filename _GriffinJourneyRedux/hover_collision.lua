@@ -25,7 +25,7 @@ function guard:configuration()
 end
 settings.hover_collision_config=guard:configuration()
 guard.status=guard.enabled and "1档防穿模：等待位移" or "1档防穿模：关闭"
-guard.ground_status=guard.auto_land and "近地降落：等待1档悬停" or "近地降落：关闭"
+guard.ground_status=guard.auto_land and "近地降落：等待1/2档飞行" or "近地降落：关闭"
 function guard:persist()
     settings.hover_collision_config=self:configuration()
     local ok=controls.save()
@@ -270,8 +270,8 @@ function guard:constrain(d,m,current)
     return ok and allowed
 end
 function guard:set_auto_land(value)
-    self.auto_land=value==true;self.land_driver=nil;self.land_since=nil;self.land_hits=0;self.land_next=nil
-    self.ground_status=self.auto_land and "近地降落：等待1档悬停" or "近地降落：关闭"
+    self.auto_land=value==true;self.land_driver=nil;self.land_gear=nil;self.land_since=nil;self.land_hits=0;self.land_next=nil
+    self.ground_status=self.auto_land and "近地降落：等待1/2档飞行" or "近地降落：关闭"
     self:record("auto_land_toggle",{enabled=self.auto_land,distance=self.land_distance},true)
     self:persist()
 end
@@ -283,24 +283,31 @@ function guard:observe(d,ch,tr,flying,ground,action)
     if self.enabled and (not flying or ground) then self.status="1档防穿模：等待位移（地面）"
     elseif self.enabled and d.mode=="taking_off" then self.status="1档防穿模：起飞中，等待悬停" end
     if not self.auto_land then return end
-    local valid=alive and state.generation==generation and active==d and d.gear==1 and d.controls_active
+    local stable_hover=d.gear==1 and action=="Ch253HoverWaitHoHomingHeight"
+    local stable_sprint=d.gear==2 and type(action)=="string" and action:sub(1,15)=="Ch253WrapAround"
+    local valid=alive and state.generation==generation and active==d and (stable_hover or stable_sprint) and d.controls_active
         and flying and not ground and not d.external_control and d.mode~="taking_off"
-        and action=="Ch253HoverWaitHoHomingHeight" and not d.pending
+        and not d.pending
         and not d.intent and not d.action_transition and not d.manual_hold and not menu.gameplay_paused()
     if not valid then
-        self.land_since=nil;self.land_driver=nil;self.land_hits=0
-        self.ground_status=d.manual_hold=="landing" and "近地降落：降落中" or "近地降落：等待1档稳定悬停"
+        self.land_since=nil;self.land_driver=nil;self.land_gear=nil;self.land_hits=0;self.land_next=nil
+        self.ground_status=d.manual_hold=="landing" and "近地降落：降落中" or "近地降落：等待1/2档稳定飞行"
         return
     end
-    if self.land_driver~=d then self.land_driver=d;self.land_since=now();self.land_hits=0;self.land_next=nil end
+    if self.land_driver~=d or self.land_gear~=d.gear then self.land_driver=d;self.land_gear=d.gear;self.land_since=now();self.land_hits=0;self.land_next=nil end
     if now()-self.land_since<self.land_grace then
         self.ground_status=string.format("近地降落：起飞/切入保护剩余 %.1f 秒",self.land_grace-(now()-self.land_since));return
     end
-    if held(input.buttons,masks.hover_up) then
+    local ascending=d.gear==1 and held(input.buttons,masks.hover_up)
+    if d.gear==2 then
+        local up,down=held(input.buttons,masks.rb),held(input.buttons,masks.lb)
+        ascending=up~=down and up or up==down and (input.y or 0)>0
+    end
+    if ascending then
         self.land_hits=0;self.ground_status="近地降落：上升输入，暂缓降落";return
     end
     if self.land_next and now()<self.land_next then return end
-    self.land_next=now()+0.2
+    self.land_next=now()+(d.gear==2 and 0.05 or 0.2)
     local ok,hit=pcall(function()
         assert(validate_spawn(d.spawn)==ch and d.spawn.result.go==ch:call("get_GameObject()"),"Ground query instance changed")
         local p=vector(tr:call("get_Position()"))
@@ -321,23 +328,23 @@ function guard:observe(d,ch,tr,flying,ground,action)
     if self.land_hits>=3 then
         request_hover_landing(d,"near_ground")
         self.ground_status="近地降落：已提交原生降落"
-        self:record("auto_land_requested",{distance=self.land_distance,hits=self.land_hits},true)
-        self.land_since=nil;self.land_driver=nil;self.land_hits=0
+        self:record("auto_land_requested",{distance=self.land_distance,hits=self.land_hits,gear=self.land_gear},true)
+        self.land_since=nil;self.land_driver=nil;self.land_gear=nil;self.land_hits=0
     end
 end
 function guard:draw()
-    if not imgui.tree_node("1档防穿模测试") then return end
+    if not imgui.tree_node("防穿模与近地降落测试") then return end
     local changed,value=menu.toggle("启用1档防穿模（实验）",self.enabled)
     if changed then self:set_enabled(value) end
     changed,value=menu.toggle("受阻后拉回最后安全位置（对照）",self.return_to_safe)
     if changed then self:set_return_to_safe(value) end
     imgui.text("拉回关闭时：受阻同向输入保持阻断，松开或改变方向才重新检测。")
     imgui.text(self.return_to_safe and "受阻拉回：开启（0.3.17旧逻辑）" or "受阻拉回：关闭（受阻后按实际位置重新计算）")
-    changed,value=menu.toggle("启用1档近地自动降落（实验）",self.auto_land)
+    changed,value=menu.toggle("启用1/2档近地自动降落（实验）",self.auto_land)
     if changed then self:set_auto_land(value) end
     local edit,distance=imgui.slider_float("近地降落距离（根节点到下方表面/米）",self.land_distance,0.25,15)
     if edit and finite(distance) then self.land_distance=math.max(0.25,math.min(15,distance));self.land_hits=0;self.land_next=nil;self:persist() end
-    local grace_edit,grace=imgui.slider_float("起飞/切入悬停保护时间（秒）",self.land_grace,0,10)
+    local grace_edit,grace=imgui.slider_float("起飞/切档保护时间（秒）",self.land_grace,0,10)
     if grace_edit and finite(grace) then self.land_grace=math.max(0,math.min(10,grace));self.land_hits=0;self.land_since=now();self:persist() end
     imgui.text("球半径表示身体体积；固定探测距离表示沿请求方向额外探测多远。")
     for _,spec in ipairs({{"center_distance","中心球固定探测距离（米）",0.25,50},
@@ -353,7 +360,7 @@ function guard:draw()
     if collision_debug then collision_debug:draw() end
     imgui.text(string.format("球体查询：%d；拦截：%d；接触点：%d",self.casts,self.blocks,self.contacts))
     if self.casts>0 then imgui.text(string.format("粗略Lua计时／查询：%.3f 毫秒",self.cost*1000/self.casts)) end
-    imgui.text("仅1档；2档不查询。检测参数与功能开关自动保存；LOG录制重载关闭。")
+    imgui.text("防穿模仅1档；近地降落覆盖1/2档，冲刺仅向下细球探测。参数自动保存；LOG录制重载关闭。")
     imgui.tree_pop()
 end
 end
