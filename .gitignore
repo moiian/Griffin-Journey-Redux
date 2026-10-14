@@ -168,3 +168,6 @@
 !/ContentEditor/GriffinJourneyRedux_Items.json
 
 !/FLIGHT_0326_LANDING_CAMERA_BUMPERS.md
+
+!/_GriffinJourneyReduxDebug/item_probe.lua
+!/ITEM_0327_USE_GATE_PROBE.md

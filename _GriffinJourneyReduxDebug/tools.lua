@@ -2,6 +2,7 @@
 return function(ctx)
 local _ENV=ctx
 require("_GriffinJourneyReduxDebug.collision")(ctx)
+require("_GriffinJourneyReduxDebug.item_probe")(ctx)
 Fine=require("_GriffinJourneyReduxDebug.fine")
 debug_tools={enabled=false,status="调试记录：关闭",observers_installed=false}
 journal={version=VERSION,events={},samples={}}

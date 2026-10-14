@@ -15,6 +15,7 @@ local function entities()
     return item,script
 end
 local function allow_use(from,to,data)
+    if item_probe then item_probe:effect_check(from,to,data) end
     if not current_generation() or not data or data._Id~=adapter.id or data._UseEffect~=adapter.script_id then return nil end
     local c=core()
     if not c or from~=c.properties.player or (to~=nil and to~=c.properties.player) then return nil end
@@ -81,6 +82,14 @@ detail_hook("setup(app.ItemDefine.StorageData)",function(args)
 end,"griffin_detail_storage")
 function adapter:draw()
     if not imgui.tree_node("召唤道具适配 DEBUG") then return end
+    if beta_button("测试道具接口（模拟当前玩家）###BetaTestItemSummon") then
+        local c=core()
+        local ok,accepted,reason=pcall(bridge.summon_performance_from_item,c and c.properties.player)
+        self.test_result=ok and tostring(reason) or tostring(accepted)
+        self.test_accepted=ok and accepted==true
+    end
+    if self.test_result then imgui.text("接口测试："..self.test_result) end
+    if item_probe then item_probe:draw() end
     imgui.text(self.status)
     imgui.text(string.format("道具 %d / 脚本 %d；使用检查 %d；最近放行 %s",self.id,self.script_id,self.use_checks,tostring(self.last_allowed)))
     imgui.text(string.format("描述修正 %d；接口错误 %d",self.description_writes,self.errors))
