@@ -334,22 +334,5 @@ menu.bindings=function()
         for _,row in ipairs(controls.rows) do settings.bindings[row[1]]={keyboard=row[3],gamepad=row[4]} end
         controls.capture=nil;controls.release_gate=true;controls.previous={};menu.changed()
     end
-    local used={}
-    for _,row in ipairs(controls.rows) do
-        for _,device in ipairs({"keyboard","gamepad"}) do
-            local name=settings.bindings[row[1]][device];local key=device..":"..name
-            if name~="None" then
-                local entries=used[key] or {}
-                for _,other in ipairs(entries) do
-                    local ground=row[1]=="ground_wind_start" or row[1]=="ground_wind_end"
-                    local other_ground=other[1]=="ground_wind_start" or other[1]=="ground_wind_end"
-                    local air=row[1]=="rb" or row[1]=="lb"
-                    local other_air=other[1]=="rb" or other[1]=="lb"
-                    if not (ground and other_air or air and other_ground) then imgui.text("重复绑定："..other[2].."／"..row[2].." → "..name) end
-                end
-                entries[#entries+1]=row;used[key]=entries
-            end
-        end
-    end
 end
 end

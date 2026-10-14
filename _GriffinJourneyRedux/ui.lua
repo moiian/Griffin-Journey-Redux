@@ -12,12 +12,15 @@ re.on_draw_ui(function()
     if imgui.tree_node("镜头设置") then
         menu.slider("distance","相机距离",0,80)
         menu.slider("fov","FOV",40,120)
-        menu.edit_toggle("head_camera","镜头跟随狮鹫头部")
-        local changed,value=menu.edit_toggle("camera_auto_yaw","2档转向时跟随镜头###BetaCameraYaw")
-        if changed and value then menu.draft.head_camera=true end
-        menu.slider("hover_camera_yaw_speed","1档镜头跟随速度（度／秒）",0,360)
-        menu.slider("camera_yaw_speed","2档镜头跟随速度（度／秒）",15,360)
-        menu.slider("camera_manual_threshold","右摇杆接管阈值",0.25,0.95)
+        if imgui.tree_node("镜头跟随") then
+            menu.edit_toggle("head_camera","镜头跟随狮鹫头部")
+            local changed,value=menu.edit_toggle("camera_auto_yaw","2档转向时跟随镜头###BetaCameraYaw")
+            if changed and value then menu.draft.head_camera=true end
+            menu.slider("hover_camera_yaw_speed","1档镜头跟随速度（度／秒）",0,360)
+            menu.slider("camera_yaw_speed","2档镜头跟随速度（度／秒）",15,360)
+            menu.slider("camera_manual_threshold","右摇杆接管阈值",0.25,0.95)
+            imgui.tree_pop()
+        end
         imgui.tree_pop()
     end
     if imgui.tree_node("按键设置") then menu.bindings();imgui.tree_pop() end
