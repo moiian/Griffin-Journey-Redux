@@ -39,9 +39,9 @@ local function install_hooks(td)
     end
     return #entries
 end
-function M.new(env,scope)
-    local label=scope=="griffin" and "狮鹫" or "玩家／座位NPC"
-    return setmetatable({env=env,scope=scope or "riders",label=label,enabled=false,calls=0,attempts=0,errors=0,
+function M.new(env)
+    local label=env.label or "玩家／座位NPC"
+    return setmetatable({env=env,scope=env.group or "riders",label=label,enabled=false,calls=0,attempts=0,errors=0,
         bindings={},start_calls=0,start_counts={},passenger_start_calls=0,
         passenger_states={},passenger_calls=0,passenger_attempts=0,passenger_errors=0,
         status="停止"..label.."自由落体：关闭"},M)
@@ -95,7 +95,7 @@ function M:before_start(pointer,label)
     if not valid then return false end
     if binding.passenger then self.passenger_start_calls=self.passenger_start_calls+1
     else self.start_calls=self.start_calls+1 end
-    local group=binding.passenger and (key.group..":"..key.slot) or self.scope=="griffin" and "griffin" or "player"
+    local group=binding.passenger and (key.group..":"..key.slot) or self.env.group or "player"
     local count_key=group..":"..label
     self.start_counts[count_key]=(self.start_counts[count_key] or 0)+1
     self.start_last={group=group,entry=label}
@@ -138,17 +138,14 @@ function M:after_anchor(d)
         self.driver=d
         local character=d.player
         local function verify() self:check_driver(d);return true end
-        if self.scope=="griffin" then
-            local ch,go=self.env.griffin(d)
-            assert(ch and go and (not self.character or self.character==ch and self.go==go),"精确狮鹫实例变化")
-            self.character=ch;self.go=go;character=ch
-            verify=function() self:check_driver(d);return self.env.griffin_owned(d,ch,go) end
+        if self.env.resolve_actor then
+            character,verify=self.env.resolve_actor(d)
         end
         local did=stop_native(character,verify,self.env.time,function(last) self.last=last;self.attempts=self.attempts+1 end,
             function(obj) self:bind_controller(d,character,obj,verify,false) end)
         if not did then return false end
         self.calls=self.calls+1
-        self.status="停止"..self.label.."自由落体：已停止 "..self.calls.." 次"..(self.scope=="griffin" and "" or "（玩家）")
+        self.status="停止"..self.label.."自由落体：已停止 "..self.calls.." 次"
         return true
     end)
     if not ok then
@@ -177,16 +174,5 @@ function M:after_passenger(d,a)
     end
     if did then self.passenger_calls=self.passenger_calls+1 end
     return did
-end
-function M:snapshot()
-    local last
-    if self.last then last={};for k,v in pairs(self.last) do last[k]=v end end
-    local passenger_last
-    if self.passenger_last then passenger_last={};for k,v in pairs(self.passenger_last) do passenger_last[k]=v end end
-    local start_counts={};for k,v in pairs(self.start_counts) do start_counts[k]=v end
-    local start_last;if self.start_last then start_last={};for k,v in pairs(self.start_last) do start_last[k]=v end end
-    return {enabled=self.enabled,calls=self.calls,attempts=self.attempts,errors=self.errors,last=last,status=self.status,
-        start_calls=self.start_calls,passenger_start_calls=self.passenger_start_calls,start_counts=start_counts,start_last=start_last,hook_entries=self.hook_entries,
-        passenger_calls=self.passenger_calls,passenger_attempts=self.passenger_attempts,passenger_errors=self.passenger_errors,passenger_last=passenger_last}
 end
 return M

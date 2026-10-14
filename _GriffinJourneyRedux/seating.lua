@@ -53,11 +53,10 @@ passengers.orient=function(d,config)
         -- Read back even after a Lua error raised after the native setter wrote.
         d.seat_rotation.last=d.transform:call("get_Rotation()")
         assert(applied,apply_err)
-        if debug_tools and debug_tools:recording() then d.orientation_trace={lookX=x,lookZ=z,pitch=pitch,body_pitch=d.body_pitch or 0,direction=direction,up=up} end
     end)
     if not ok then
         d.orientation_failed=true
-        event("seat_orientation_error",{group=d.group or "player",slot=d.slot,error=tostring(err)})
+        if event then event("seat_orientation_error",{group=d.group or "player",slot=d.slot,error=tostring(err)}) end
         pcall(passengers.restore_rotation,d)
     end
 end
@@ -89,7 +88,7 @@ function rider_seat(d,config)
         elseif not d.rider_neck_missing then
             d.rider_neck_missing=true
             status="未找到可用颈部骨骼，座位暂用头部；导航与驾驶继续。"
-            event("rider_neck_unavailable",config.neck_joint)
+            if event then event("rider_neck_unavailable",config.neck_joint) end
         end
     end
     d.rider_seat_joint_name=selected_name
@@ -103,6 +102,16 @@ end
 passengers.refresh=function(force)
     local c=core()
     if not alive or not c or menu.gameplay_paused() or not c.properties.player then return end
+    local needed=active or state.recovery
+    if not needed then
+        for _,r in ipairs(state.spawns) do
+            if r.friend and not r.deleted and not r.delete_requested and r.owner==c.properties.player then needed=true;break end
+        end
+    end
+    if not needed then
+        passengers.roster=nil;passengers.npcs=nil;passengers.next_roster=nil;passengers.next_npc=nil
+        return
+    end
     if not force and now()<(passengers.next_roster or -math.huge) then return end
     passengers.next_roster=now()+0.25
     local ok,party=pcall(c.object.get_party)
@@ -138,7 +147,7 @@ passengers.refresh=function(force)
             passengers.npcs=found;passengers.npc_status="同行NPC识别正常"
         else
             passengers.npc_status="同行NPC扫描暂不可用，保留上次有效名单"
-            if not passengers.npc_error_logged then event("passenger_npc_scan_error",tostring(found));passengers.npc_error_logged=true end
+            if not passengers.npc_error_logged then if event then event("passenger_npc_scan_error",tostring(found)) end;passengers.npc_error_logged=true end
         end
     end
     local companions={}
@@ -153,16 +162,16 @@ passengers.refresh=function(force)
             local changed=#(r.party or {})~=#friends
             for i,ch in ipairs(friends) do if (r.party or {})[i]~=ch then changed=true end end
             r.party=friends
-            if changed then event("friend_roster_refreshed",{pawns=#pawns,companions=#companions}) end
+            if changed then if event then event("friend_roster_refreshed",{pawns=#pawns,companions=#companions}) end end
         end
     end
 end
-passengers.seat=function(group,index,preset)
+passengers.seat=function(group,index,preset,physical_override)
     local key=preset and group or (group=="pawns" and "pawn_seats" or "companion_seats")
     local store=preset or settings
     if type(store[key])~="table" then store[key]={} end
     local seat=store[key][index]
-    local physical=settings.seat_presets and (preset==settings.seat_presets[1] or not preset and settings.seat_index==1)
+    local physical=physical_override or settings.seat_presets and (preset==settings.seat_presets[1] or not preset and settings.seat_index==1)
     if type(seat)~="table" then
         seat={};store[key][index]=seat
         if physical then

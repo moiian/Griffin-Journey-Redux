@@ -31,7 +31,7 @@ function spawn(options)
             assert(type(r.result) == "table", "Spawn interface returned no reference table")
             state.spawns[#state.spawns+1] = r
             status = "正在生成狮鹫并设置友方……"
-            event("spawn_requested", "NickCore Griffin; ThinkStop requested; exact returned reference")
+            if event then event("spawn_requested", "NickCore Griffin; ThinkStop requested; exact returned reference") end
         end)
         if not ok then failed("生成失败", err) end
     end)
@@ -57,9 +57,9 @@ local function departure_action(r,ch,go,node)
         local manager=ch:call("get_ActionManager()")
         assert(manager and manager:call("get_GameObject()")==go,"离场动作管理器归属不符")
         manager:call("requestActionCore(app.ActionManager.Priority, System.String, System.UInt32)",10,node,0)
-        event("cleanup_departure_action",{node=node,elapsed=r.departure and r.departure.elapsed})
+        if event then event("cleanup_departure_action",{node=node,elapsed=r.departure and r.departure.elapsed}) end
     end)
-    if not ok then event("cleanup_departure_action_failed",tostring(err)) end
+    if not ok then if event then event("cleanup_departure_action_failed",tostring(err)) end end
     return ok
 end
 delete_one = function(r)
@@ -100,12 +100,12 @@ delete_one = function(r)
                         end
                     end
                 end
-                event("delete_requested", "Only this Beta's returned GameObject")
+                if event then event("delete_requested", "Only this Beta's returned GameObject") end
                 go:destroy(go) -- same native destruction form as installed NickCore; never destroy_spawns()
             end
             r.deleted = true; r.friend = false
             status = "本 Beta 生成的狮鹫已删除。"
-            event("deleted", "Owned instance only")
+            if event then event("deleted", "Owned instance only") end
         end)
         r.destroy_queued = false
         if not ok then r.delete_requested = false; failed("删除失败", err) end

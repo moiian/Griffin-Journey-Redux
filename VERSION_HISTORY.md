@@ -1,3 +1,6 @@
+## 0.3.35 — Runtime / optional Debug add-on and explicit settings persistence
+
+Separate player-only runtime (27 Lua files) from optional developer extensions (16 Lua files). Menu edits are drafts; live preview starts off and writes no settings. Apply and Save writes once; pause/photo, save failure, discard, input recording and release recovery are covered. Remove idle roster scans, repeat whole-party checks within one synchronous callback, repeated type discovery and diagnostic snapshots from normal gameplay. Deployment did not write Settings; external seat edits during deployment were retained. Item bundle remains untouched. 43 Lua54 files, 38 new cases, three fall-control suites, eight gameplay suites in both modes and two add-on diagnostic suites pass offline; no measured FPS claim. Main is not merged.
 # 狮鹫项目版本索引
 
 当前部署测试版：Beta 0.1.35（新增狮鹫独立跌落重置与读数，待实机）；最近用户确认乘客基本正常的版本为0.1.21，完整驾驶基线为0.1.17。阶段三工具当前0.3.23。下文历史条目的待验证状态以随后用户验收记录为准。

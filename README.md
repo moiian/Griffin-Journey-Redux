@@ -1,92 +1,45 @@
 # Griffin Journey Redux
 
-Fly a friendly Griffin with configurable controls, a head-following camera, and separate seats for the player, pawns, and accompanying NPCs.
+Version **0.3.35** · Author **aelinore**
 
-Version: **0.3.22**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
+Fly a friendly Griffin with configurable controls, a head-following camera, and individual seats for the player, pawns, and accompanying NPCs. Requires the installed **NickCore**, its EnemySpawner, and `run_once`. Only the exact Griffin created by this mod is controlled.
 
 ## Install or upgrade
 
-Copy `reframework/autorun` from the package into the game folder. When upgrading from the Beta, remove the old `reframework/autorun/GriffinFlightBeta.lua` entry before loading the new script. Keep `reframework/data/GriffinFlightBeta_Settings.json`: existing controls and seat presets are reused.
+The **Runtime** archive contains the player scripts. Extract its `reframework` folder into the game directory. Keep `reframework/data/GriffinFlightBeta_Settings.json` and your existing item bundle and textures. This runtime update does not contain or replace personal configuration, item data, third-party mods, or developer tools.
 
-Open **Griffin Journey Redux → 一般设置**, spawn a Griffin, and start driving. End driving before resetting scripts. Only the Griffin spawned by this mod is controlled.
+For an existing Beta installation, remove the old `GriffinFlightBeta.lua` entry before loading Griffin Journey Redux. End driving before resetting scripts. The public player installation does not need `_GriffinJourneyReduxDebug`.
 
-The manual **召唤演出测试** button plays the native forgery-Ferrystone performance and requests a Griffin spawn after a configurable delay (default: 5 seconds of unpaused gameplay; range: 0–30 seconds). **召唤演出设置** also controls the height and forward distance (defaults: 10 m above the player's position and 5 m forward). Settings are captured when the button is pressed. If the performance finishes normally before the selected delay, the summon waits until that delay. The Griffin faces the player horizontally once its returned instance is ready, and uses the same friendly and SkipThink initialization as the ordinary spawn button. Driving remains manual. The native performance can consume a forgery Ferrystone if one is carried.
+The separately supplied **Debug Addon** installs `_GriffinJourneyReduxDebug` alongside the player modules. It connects to the existing driver and does not run another copy of the mod. Remove this folder for a player-only installation. Experiments and recording start off, even if older settings enabled them.
 
-When the controlled Griffin naturally enters the stationary hover action in flight, gear 1 controls activate without pressing LT. LT still requests hover manually and retains its existing inertia and input-centering behavior.
+## Configure and save
 
-The optional **飞行设置 → 1档防穿模测试** experiment now uses a fixed look-ahead length along each submitted pose movement direction, including inertia. **中心球固定探测距离**, **前后球固定探测距离** and **左右球固定探测距离** are independently adjustable from 0.25 to 50 m, default 3 m each. These lengths stay fixed when the frame's movement amount changes. Sphere radius, center height, front/rear spacing and side spacing define the body volume separately. The center retains its independent extra radius. Turning keeps the arc coverage margin. If a sphere's submitted movement exceeds its configured fixed length, that step is rejected instead of silently extending the query.
+Open **Griffin Journey Redux** in REFramework. The controls at the top apply to seat presets, flight, camera, summoning, collision settings, and key bindings:
 
-The forward segment is also queried in reverse to find oppositely facing thin surfaces; both queries cover the same ahead segment. A blocked request skips pose setters/context/warp and clears velocity. With **受阻后拉回最后安全位置（对照）** off, the same effective input stays blocked until released or changed, then detection restarts from the actual pose. The option to retain the previous safe target remains available. Native motion is not frozen. Gear 2 performs no queries.
+- **实时应用修改（仅预览）**: off at script startup. With it off, edits stay in a draft and the current configuration remains active. With it on, edits preview in memory without saving to disk.
+- **应用并保存**: applies the draft and writes the settings file once. Repeated slider changes never write the file. A failed save keeps the draft and displays an error for retry.
+- **撤销未保存修改**: restores the last saved configuration and cancels a queued save. Script resets discard unsaved drafts and previews.
 
-For a new configuration, body radius is 4 m, center height 4 m, front/rear offset 8 m, side offset 0 and center extra margin 0. Left/right offset above zero adds two side spheres to the middle/front/rear arrangement. Existing saved values take precedence. Dimensions and distances save automatically in `GriffinFlightBeta_Settings.json` under `hover_collision_config`; functional switches also survive script resets. The dedicated recorder always starts off, preserving its previous file.
+Choose **编辑布局（应用后生效）** to edit a layout. Normal presets start at [2]. Clone, rename, and delete layouts in the draft, then apply them. Player and passenger seats have independent position, facing, tilt, and action settings. Ordinary bystanders are not seated. Physical calibration layout [1] is available through the Debug Addon only.
 
-The independent **启用1档近地自动降落（实验）** switch still uses a narrow downward surface check and the native RS landing action. Its distance defaults to 2 m, stable-hover grace to 3 seconds, with three hits at 0.2-second intervals. Ground, takeoff, upward input, external control, pending/outgoing actions and gear 2 are excluded. Roofs count as surfaces. This check is separate from the body's fixed look-ahead distances.
+Ordinary paused menus defer application until gameplay resumes. Photo Mode allows visual seat preview while physics, flight controls, and new animation requests remain paused. Preset hotkeys remain immediate gameplay actions; their selection is saved only when **应用并保存** is pressed. Key recording edits the draft; game controls continue using applied bindings.
 
-The optional developer folder provides **位移与降落 DEBUG** and **记录防穿模/近地降落专属LOG**. It logs each ball's configured look-ahead length, requested movement, radius, direction and hit counts in `reframework/data/GriffinJourneyRedux_Collision_Log.json`. Logging defaults off, samples about 4 times per second and flushes every second or on key events; restarting it replaces the previous session. Current in-game coverage and stability need validation; the former large-sphere misses are not considered resolved. See [fixed probes and saved configuration](COLLISION_0322_FIXED_DISTANCE.md).
+## Driving
 
-## Controls
+Use **一般设置** to spawn a Griffin or play the summoning performance, then start driving. Start/stop hotkeys require a continuous one-second hold. Starting checks the configured three-dimensional distance between the player and this mod's Griffin. Existing bindings and calibrated settings are reused.
 
-| Action | Keyboard default | Controller default |
-| --- | --- | --- |
-| Start / stop driving | F / X | Rebindable |
-| Take off (ground only) | Space | A |
-| Gear 1 forward/back and turn | WASD | Left stick |
-| Gear 1 code up / down | E / Q | A / Y |
-| Native landing (gear 1 or 2) | G | RS (right-stick press) |
-| Sprint / gear 2 | Left Shift | RT |
-| Hover / gear 1 | Left Ctrl | LT |
-| Sprint dive / climb | C / R | RB / LB |
-| Camera | Mouse | Right stick |
-| Retarget the player | H | Rebindable |
+- Gear 1: custom slow movement and hover, turning, and independent vertical movement with inertia.
+- Gear 2: native sprint and player-target navigation. LT returns to hover and coasts using sampled sprint velocity. Native hover can also adopt gear 1 automatically.
+- A starts takeoff on the ground. Takeoff has a 1.89-second minimum before normal hover/sprint handoff. RS requests native landing in either gear.
 
-There are two gears: gear 1 hover and gear 2 sprint. Ground-only takeoff waits at least 1.89 seconds of unpaused time after observed action start before automatic hover or sprint. Early RT/RB/LB selection is queued; held movement/A/Y flows into code control after the wait without release or LT. At low speed, forward/back moves along the Griffin's facing, left/right turns it, and A/Y moves vertically through code while using the same native hover action. There is no strafe. RS retains native landing in either gear. All movement/turn speeds accept zero. In gear 1 the player's real position follows preset [1] player parameters; entering gear 2 via RT/RB/LB immediately restores spherical navigation. Returning with LT restores preset [1] anchoring. Current visual seats remain independent.
+The body guard applies only to gear 1. It uses fixed directional probe lengths, rejects blocked writes, and waits for held input to change before retrying. Near-ground landing covers both gears, with the existing 5 Hz / 20 Hz limits and three-hit confirmation. Camera distance and FOV are global and do not change with seat presets.
 
-RT selects gear 2. RB dive / LB climb also immediately select gear 2 from gear 1, then retain the existing sprint guidance. LT returns to gear 1 and preserves any existing low-speed inertia while suppressing held movement input until neutral. Releasing the stick or pressing LT in gear 1 does not reissue the hover action.
+Player and seated-NPC anti-jitter and scoped protection remain gameplay features. Voluntary exit captures the current layout's seat positions before releasing actors. An airborne Griffin lands when a surface is within 25 metres below its root and hovers otherwise. Automatic protection and deletion retain their separate recovery behavior.
 
-Flight Settings has independent horizontal acceleration, released-input deceleration and reverse-braking constants (defaults 0.2/0.6/0.6 seconds), plus independent vertical up-start/up-stop/down-start/down-stop constants (defaults 0.6/0.2/0.2/0.6 seconds). Each phase is separately adjustable; vertical reversal uses outgoing stopping and incoming startup response. All constants allow 0–3 seconds: larger values give more inertia, zero makes that stage immediate. Reversal brakes through zero before accelerating in the new direction. Settings save automatically. Former default bindings migrate once; custom bindings and explicit None remain.
+## Items and developer tools
 
-Sprint-to-hover LT now inherits measured world velocity and coasts after native hover binds. Flight Settings displays sprint speed and provides **2档切悬停惯性时间常数（秒）** (default 0.8, range 0–3; zero disables coasting). Invalid or stale samples do not produce momentum. Dive/climb speed modulation is shelved; the failed experiments and native parameter inspection have been removed. See [sprint momentum](SPRINT_036_LT_MOMENTUM.md).
+Existing chocolate summoning, pizza grant/use, native shop stock, and cleanup integrations are retained. This update leaves installed item bundles and custom icons untouched. A fresh item installation still needs the existing Content Editor bundle and assets, which are not included in this runtime-only update.
 
-The low-speed camera follows only while the Griffin is turning and stops correcting when rotation stops. Both gears share right-stick blending, takeover threshold, hysteresis and 0.8-second recovery delay, with separately adjustable follow speeds in Camera Settings. Camera pitch remains manually controlled. See [two-gear controls](CONTROLS_030_TWO_GEARS.md).
+The Debug Addon contains the optional decision-component experiment, Griffin anti-jitter, return-to-safe collision comparison, full-display mode, extra loss/destroy guards, physical-layout display, item test buttons, input diagnostics, collision recording, and position/fall probes. It reuses the release's driver, seat pipeline, inventory operations, and fall-control engine. Logging requires explicit recording; ordinary pizza use no longer writes a grant log.
 
-Ordinary airborne actions, including hover, are not submitted on the ground. DEBUG includes **禁止跨阶段动作**, checked by default, to disable this guard for the current script session when testing. Reload restores the guard; external action tools retain their own explicit cross-phase option. See [phase guard and landing](PHASE_032_LANDING.md).
-
-Sprint speed experiments are shelved. The clean version removes native speed inspection, multiplier/vector tests, timing probes and code-overlay controls/callbacks. Native sprint remains unchanged; measured-velocity LT coasting stays available. The failed experiment source is preserved on `archive/failed-sprint-speed-0.3.11`. See [failure handoff](SPRINT_SPEED_EXPERIMENTS_SHELVED.md).
-
-## Seats and camera
-
-Version 0.3.21 adds **根节点（Transform）** to every seat's anchor selector. It uses the exact spawned Griffin Transform origin, the same origin used by the collision spheres. Existing head/neck layouts retain their values. Root seats allow XYZ offsets up to ±100 m and retain their anchor/coordinates through save, clone and reload. For collision-range comparison, use a cloned ordinary visual preset and disable body tilt follow so the offsets use horizontal heading and world Y. Zero offsets mark the seat reference at the root; the character model has its own skeletal offset. See [root seat reference](SEAT_0321_ROOT_ANCHOR.md).
-
-Edit the player, individual pawns, and accompanying NPCs independently. Presets support cloning, renaming, switching, and confirmed deletion. Seat positions, facing, body tilt, action names, camera distance, and FOV are saved automatically. Ordinary bystanders are not seated.
-
-The camera can follow the Griffin's head. Its target is checked after submitted Griffin actions/retargeting and at most twice per second as a fallback, then rewritten only if the binding changed. Temporary native camera/controller transitions wait for safe recovery; turning the option off is respected. Optional gear 2 turning follows horizontally, with manual right-stick override. Pausing retains seat display; Photo Mode allows seat adjustments.
-
-Steep, vertical and inverted body attitudes no longer automatically end driving or release seats. At exactly vertical attitudes, navigation retains the last valid horizontal heading.
-
-Stopping driving restores the original camera and actor states at their current physical locations.
-
-## Anti-jitter and diagnostics
-
-Player and seated-NPC anti-jitter is enabled by default. Griffin anti-jitter is a separate option, disabled by default.
-
-Diagnostic recording is **off by default**. User settings still save normally. The optional developer folder `_GriffinJourneyReduxDebug` adds a DEBUG panel with three fall experiments, protection controls, runtime diagnostics, and a three-second position recorder. Logs are written only when recording was explicitly enabled and the game is paused or driving has ended. Stopping a three-second recording while flying retains its data in memory until that save boundary.
-
-The player package omits the developer folder. The developer package includes it, with unselected experiments and recording options disabled. Core driving, seats, camera, protection, and anti-jitter work without the developer folder.
-
-## Validation and current limitation
-
-Lua54 compilation and offline gameplay, scope, lifecycle, settings, default-no-diagnostics, and Debug-absent regressions pass. The user confirmed normal operation of the refactored 0.2.0 build. The action-time retargeting experiment has been reverted; the autonomous target issue remains unresolved.
-
-AI target research is paused. This control update reduces ordinary movement action changes and does not claim to fix autonomous targets. The 0.2.8 camera guards pass offline checks; native movement stability and feel still require an in-game check.
-
-Author: **aelinore**.
-
-
-## Optional decision takeover (0.2.2)
-
-Flight Settings includes **方向6：禁用狮鹫决策组件（实验）**, off by default and not saved. It disables only the current driven Griffin's AIDecisionMaker and restores its original Enabled value when disabled or driving ends. Native actions/navigation stay enabled. No recorder is required. See [AI_022_COMPONENT_TAKEOVER.md](AI_022_COMPONENT_TAKEOVER.md). It remains an optional experiment and is not an adopted AI fix. Leave it off for normal driving.
-
-
-## Camera recovery (0.2.8)
-
-Head-camera recovery no longer writes the target joint every behavior frame or permanently switches off on a temporary camera transition. Render camera diagnostics do no sampling when recording is disabled. The manual-camera post hook safely handles unavailable/nested hook storage and snapshots its state before native calls. Native camera clipping or shaking against terrain is a separate, unresolved visual issue; this update does not claim to change collision handling.
+Lua54 compilation, offline behavior checks, and both player-only and add-on installation modes were checked. These checks do not establish a measured FPS improvement or new in-game visual acceptance. Previously shelved AI target and sprint-speed experiments remain shelved.

@@ -34,7 +34,7 @@ function hotkey_start_driver()
     end)
     if not ok then failed("无法开始驾驶",distance);return end
     local limit=settings.boarding_distance
-    event("boarding_distance_check",{distance=distance,limit=limit,allowed=distance<limit})
+    if event then event("boarding_distance_check",{distance=distance,limit=limit,allowed=distance<limit}) end
     if distance>=limit then status=string.format("距离狮鹫根节点 %.2f 米，需小于 %.2f 米；请靠近后松开重按。",distance,limit);return end
     start_driver(r)
 end
@@ -84,20 +84,20 @@ function start_driver(expected_spawn)
             if settings.head_camera~=false then change_camera_mode("griffin") end
             install_fall_hook()
             passengers.install_protection()
-            pcall(passengers.capture_probe_refs,d)
+            pcall(passengers.capture_identity,d)
             apply_player_freeze(d, settings.freeze_player)
             local joint_ok,joint_err=pcall(discover_joints,d)
-            if not joint_ok then event("anchor_joint_probe_error",tostring(joint_err)) end
+            if not joint_ok then if event then event("anchor_joint_error",tostring(joint_err)) end end
             prepare_anchor_mode(d,d.anchor_mode)
             if settings.rider_anim~="" then d.pose_pending=settings.rider_anim end
             select_player_target(r)
-            assert(ai_takeover:tick(d),"方向6组件恢复失败")
+            if driver_extension then assert(driver_extension:tick(d),"附加组件恢复失败") end
             if r.result.chara:call("get_IsFlight()") then
                 d.controls_active=true; d.control_node="Ch253HoverWaitHoHomingHeight"
                 set_intent(d, "Ch253HoverWaitHoHomingHeight", "hover")
             end
             status = "驾驶中：地面RB翼风攻击／LB结束；A 地面起飞／1档上移；Y 下移；RS 降落；RB 俯冲／LB 爬升进入2档；LT 惯性悬停；左摇杆前后移动、左右转向；1档镜头仅转向时跟随，右摇杆可打断。"
-            event("driver_started", {freeze_player = d.freeze_requested,anchor_mode=d.anchor_mode,navigation_radius=settings.navigation_radius,steering_yaw=settings.steering_yaw,steering_pitch=settings.steering_pitch})
+            if event then event("driver_started", {freeze_player = d.freeze_requested,anchor_mode=d.anchor_mode,navigation_radius=settings.navigation_radius,steering_yaw=settings.steering_yaw,steering_pitch=settings.steering_pitch}) end
         end)
         if not ok then
             if active then stop_driver("Start failed") end
@@ -120,8 +120,6 @@ function navigation_anchor(d,ch,tr,fx,fz)
     end
     local center=vector(d.rider_head:call("get_Position()"))
     local anchor_detail={mode="head"}
-    if debug_tools and debug_tools:recording() then d.route_navigation={center=vector(center),anchor=anchor_detail,input={x=input.x,y=input.y},heading={x=fx,z=fz},
-        radius=settings.navigation_radius,height=settings.navigation_height} end
     local radius=settings.navigation_radius
     local nav_x,nav_y=input.x,input.y
     local yaw=math.max(-1,math.min(1,nav_x))*settings.steering_yaw*math.pi/180
@@ -157,7 +155,7 @@ function request_hover_landing(d,source)
     d.gear=1;d.manual_hold="landing";d.wait_center=true
     d.auto_landing_hold=source=="near_ground" or nil
     d.control_node=nil;d.intent=nil;d.auto_hover=false
-    event("hover_landing_requested",{source=source})
+    if event then event("hover_landing_requested",{source=source}) end
 end
 local exit_landing
 exit_landing_status="退出降落：等待退出驾驶"
@@ -174,8 +172,8 @@ function request_exit_landing(d)
             return hover_collision:ground_within(ch:call("get_Transform()"),25)
         end)
         if not ok or not near then node="Ch253HoverWaitHoHomingHeight" end
-        event("exit_ground_check",{threshold=25,query_ok=ok,ground_within_limit=ok and near or false,
-            node=node,error=not ok and tostring(near) or nil})
+        if event then event("exit_ground_check",{threshold=25,query_ok=ok,ground_within_limit=ok and near or false,
+            node=node,error=not ok and tostring(near) or nil}) end
     end
     d.exit_landing_requested=true
     exit_landing={spawn=d.spawn,ch=ch,go=d.spawn.result.go,owner=d.player,deadline=os.time()+30,node=node,voluntary=d.voluntary_exit==true}
@@ -197,9 +195,9 @@ function tick_exit_landing()
         assert(manager and manager:call("get_GameObject()")==ticket.go,"降落动作管理器归属不符")
         manager:call("requestActionCore(app.ActionManager.Priority, System.String, System.UInt32)",10,ticket.node,0)
         exit_landing_status=ticket.node=="Ch253HoverToLanding" and "退出降落：已提交一次原生指令" or "退出悬停：已提交一次原生指令"
-        event("exit_landing_requested",{node=ticket.node,voluntary=ticket.voluntary})
+        if event then event("exit_landing_requested",{node=ticket.node,voluntary=ticket.voluntary}) end
     end)
-    if not ok then exit_landing_status="退出降落：跳过／"..tostring(err);event("exit_landing_skipped",tostring(err)) end
+    if not ok then exit_landing_status="退出降落：跳过／"..tostring(err);if event then event("exit_landing_skipped",tostring(err)) end end
 end
 function tick_driver()
     local d = active
@@ -207,7 +205,7 @@ function tick_driver()
     local c = core()
     if not c then stop_driver("游戏上下文不可用");return end
     if menu.gameplay_paused() then
-        if not d.menu_paused then event("driver_menu_paused",true) end
+        if not d.menu_paused then if event then event("driver_menu_paused",true) end end
         d.menu_paused=true;d.previous_buttons=input.buttons;hover_yaw_state=nil;d.takeoff_timer_last=now();sprint_motion:pause(d)
         if d.hover_motion then d.hover_motion.last_time=now() end
         return -- preserve player position, FSM, bones, camera and pending intent
@@ -216,7 +214,7 @@ function tick_driver()
         d.menu_paused=nil;d.previous_buttons=input.buttons;d.takeoff_timer_last=now();sprint_motion:pause(d)
         request_camera_follow_check()
         if d.hover_motion then d.hover_motion.last_time=now() end
-        event("driver_menu_resumed",true)
+        if event then event("driver_menu_resumed",true) end
     end
     if now()<d.started then stop_driver("游戏时间上下文变化");return end
     local ok, err = pcall(function()
@@ -267,7 +265,7 @@ function tick_driver()
             d.mode=keep_hover and "hover" or "control"
             d.hover_wait_center=nil;d.takeoff_choice=nil;d.takeoff_stop_requested=nil
             if gear==2 then hover_motion:release(d);sprint_motion:clear(d) end
-            event("gear_selected",gear)
+            if event then event("gear_selected",gear) end
         end
         -- Adopt only the exact stationary hover action, never a name substring or
         -- target-height/attack/landing action. Actual native state owns idle gear.
@@ -285,7 +283,7 @@ function tick_driver()
                 end
                 d.gear=1;d.controls_active=true;d.mode="hover";d.control_node=hover_node
                 if d.intent and d.intent.node==hover_node then d.intent=nil end
-                event("native_hover_adopted",{natural=natural})
+                if event then event("native_hover_adopted",{natural=natural}) end
             end
         end
         -- Fresh controls below can still leave an already active native hover.
@@ -354,12 +352,8 @@ function tick_driver()
         local target,neutral,sphere=navigation_anchor(d,ch,tr,fx,fz)
         write_anchor(d,target,neutral)
         dispatch(d)
-        if debug_tools and debug_tools:recording() then d.trace = {navigation_sphere=sphere,neutral_anchor=neutral,anchor_plan=d.anchor_plan,griffin = pos, player = vector(d.transform:call("get_Position()")), target = target,
-            physical = vector(d.controller:call("get_Position()")), flight = flying, ground = ground,
-            action = tostring(action_name), mode = d.mode, gear=d.gear, manual_hold=d.manual_hold, external_control=d.external_control, bumpers={rb=held(input.buttons,masks.rb),lb=held(input.buttons,masks.lb)}, anchor_mode=d.anchor_mode, stick = {x=input.x,y=input.y}} else d.trace=nil end
         passengers.tick_pose(d)
         passengers.tick(d)
-        if d.trace then d.trace.passenger_protection=passengers.protection.counts;d.trace.seat_orientation=d.orientation_trace end
     end)
     if not ok then
         if hover_collision then hover_collision:record("driver_error",tostring(err),true) end

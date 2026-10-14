@@ -1,23 +1,25 @@
 -- Griffin Journey Redux: callbacks
 return function(ctx)
 local _ENV=ctx
-re.on_frame(function()
+local function phase(fn)
+    return function(...)
+        local previous=validation_epoch
+        validation_epoch={}
+        local ok,err=pcall(fn,...)
+        validation_epoch=previous
+        if not ok then error(err) end
+    end
+end
+re.on_frame(phase(function()
     if not alive then return end
     tick_cleanup_departures()
-    if collision_debug then collision_debug:tick() end
-    if item_probe then item_probe:tick() end
     shop_item:tick()
-    if debug_tools then debug_tools:capture("frame_before_beta_tick");debug_tools:tick() end
     anti_jitter:tick()
     local c = core()
     if not c then return end
     if menu.gameplay_paused() then
         flush()
         return
-    end
-    if debug_tools and debug_tools.enabled then passengers.probe_tick() end
-    if fall_hits~=fall_logged and now()-fall_log_at>=1 then
-        fall_logged=fall_hits;fall_log_at=now();event("player_fall_request",{hits=fall_hits,blocked=fall_blocked})
     end
     for i=#state.spawns,1,-1 do
         local r = state.spawns[i]
@@ -39,9 +41,9 @@ re.on_frame(function()
                     local before=data:call("get_IsThinkStop()")
                     if before then data:call("set_IsThinkStop(System.Boolean)",false) end
                     r.spawn_think_stop=data:call("get_IsThinkStop()")
-                    event("spawn_think_stop",{before=before,after=r.spawn_think_stop})
+                    if event then event("spawn_think_stop",{before=before,after=r.spawn_think_stop}) end
                     status = "狮鹫已生成并设为队伍友方，可以开始驾驶。"
-                    event("spawn_ready", "Friend bound; spawn ThinkStop released when true")
+                    if event then event("spawn_ready", "Friend bound; spawn ThinkStop released when true") end
                     set_skip_think(true)
                     if r.summon_facing then
                         local facing_ok,facing_err=pcall(apply_spawn_facing,r,ch)
@@ -52,9 +54,8 @@ re.on_frame(function()
             end)
         end
     end
-    if debug_tools then debug_tools:sample();debug_tools:capture("frame_after_beta_tick") end
-end)
-re.on_application_entry("UpdateHID",function()
+end))
+re.on_application_entry("UpdateHID",phase(function()
     if not alive then return end
     local ok,result=pcall(read_pad)
     if not ok then
@@ -88,28 +89,25 @@ re.on_application_entry("UpdateHID",function()
             break
         end
     end
-end)
+end))
 
-re.on_pre_application_entry("UpdateBehavior",function()
+re.on_pre_application_entry("UpdateBehavior",phase(function()
+    if not alive then return end
+    menu.apply_edits()
     consumables:tick()
     spawn_watch:tick()
     tick_exit_landing()
-    if debug_tools then debug_tools:capture("behavior_before_anchor") end
     passengers.frame=passengers.frame+1
     if menu.apply_pending_preset then menu.apply_pending_preset() end
     passengers.refresh();tick_skip_think()
-    local ai_ok,ai_err=ai_takeover:tick(active)
-    if not ai_ok then stop_driver("方向6组件恢复失败："..tostring(ai_err)) end
-    tick_driver();passengers.griffin_fall_tick();tick_camera_follow()
-    anti_jitter:after_behavior()
+    if driver_extension then driver_extension:tick(active) end
+    tick_driver();tick_camera_follow()
 
-    if debug_tools then debug_tools:capture("behavior_before_native") end
-end)
-re.on_application_entry("UpdateBehavior",function()
+end))
+re.on_application_entry("UpdateBehavior",phase(function()
     summon:tick()
     hover_motion:after_behavior()
-    if debug_tools then debug_tools:capture("behavior_native_after") end
-end)
+end))
 menu.player_visual_pre=function()
     local d=active
     if not d or not alive or not d.bones_applied or not menu.visual_allowed() then return end
@@ -147,14 +145,7 @@ menu.player_visual_post=function()
             a.joint:call("set_Position(via.vec3)",Vector3f.new(a.written.x,a.written.y,a.written.z))
             if d.anchor_plan then d.anchor_plan[a.key]=a.written end
         end
-        if seat and debug_tools and debug_tools:recording() then
-            d.rider_trace={phase="UpdateJointExpression",mode="rider",head_joint=d.rider_head_name,seat_joint=d.rider_seat_joint_name,seat_anchor=settings.rider_anchor,
-                fallback=not d.rider_head,head=head,seat=seat,
-                hip=vector(d.hip_joint:call("get_Position()")),
-                root=d.root_joint and vector(d.root_joint:call("get_Position()")) or nil,
-                transform=actor}
-            if d.trace then d.trace.rider=d.rider_trace end
-        end
+
     end)
     if not ok then menu.visual_error("座位显示更新失败",err) end
 end
@@ -165,37 +156,31 @@ menu.visual_error=function(label,err)
         if menu.visual_last_error~=message then menu.visual_last_error=message;failed(label,err) end
     else stop_driver(label);failed(label,err) end
 end
-re.on_pre_application_entry("UpdateJointExpression",function()
-    if debug_tools then debug_tools:capture("joint_before_restore") end
+re.on_pre_application_entry("UpdateJointExpression",phase(function()
     passengers.pre();menu.player_visual_pre()
-end)
-re.on_application_entry("UpdateJointExpression",function()
-    if debug_tools then debug_tools:capture("joint_native_before_seat") end
+end))
+re.on_application_entry("UpdateJointExpression",phase(function()
 
     passengers.post();menu.player_visual_post()
 
-    if debug_tools then debug_tools:capture("joint_seated_after") end
-end)
-re.on_pre_application_entry("PrepareRendering",function()
-    if debug_tools then debug_tools:capture("render_before_seat") end
+end))
+re.on_pre_application_entry("PrepareRendering",phase(function()
 
     if not menu.visual_allowed() then return end
     -- Menu transitions can replace the pose before NickCore reports pause. Keep
     -- this fallback active every rendered frame, using the same Hip restore path.
     -- No physics, AI, input or FSM updates here; normal menu preset changes wait.
     menu.apply_pending_preset()
+    menu.apply_edits(true)
     menu.rendering_visual=true
     passengers.pre();menu.player_visual_pre()
     passengers.post();menu.player_visual_post()
     menu.rendering_visual=false
 
-    if debug_tools then debug_tools:capture("render_seated_after") end
-end)
-re.on_application_entry("PrepareRendering",function()
-    if debug_tools then debug_tools:capture("render_native_after") end
+end))
+re.on_application_entry("PrepareRendering",phase(function()
 
     if not core() or menu.gameplay_paused() then return end
-    read_camera_follow()
     local d = active
     if not d or d.camera_failed then return end
     local ok, err = pcall(function()
@@ -211,11 +196,11 @@ re.on_application_entry("PrepareRendering",function()
                 last_distance=distance,last_fov=fov}
         end
         camera_state.last_distance=settings.distance; camera_state.last_fov=settings.fov
-        manager._DistanceOffset=settings.distance
-        camera:call("set_FOV",settings.fov)
+        if manager._DistanceOffset~=settings.distance then manager._DistanceOffset=settings.distance end
+        if camera:call("get_FOV")~=settings.fov then camera:call("set_FOV",settings.fov) end
     end)
-    if not ok then restore_camera(); d.camera_failed=true; event("camera_error",tostring(err)) end
-end)
+    if not ok then restore_camera(); d.camera_failed=true; if event then event("camera_error",tostring(err)) end end
+end))
 -- Runtime bridge: only retained Beta instances; never resolve by character ID/address.
 bridge = {}
 external_serial = 0
@@ -262,7 +247,7 @@ function bridge.request_action(node, allow_cross, phase)
         active.control_node = nil
         active.auto_hover = false
         set_intent(active, node, "external")
-        event("external_action_queued", node)
+        if event then event("external_action_queued", node) end
     else
         local r = state.spawns[#state.spawns]
         run_once(function()
@@ -272,9 +257,9 @@ function bridge.request_action(node, allow_cross, phase)
                 local ch = validate_spawn(r)
                 local manager = ch:call("get_ActionManager()")
                 assert(manager and manager:call("get_GameObject()") == r.result.go, "ActionManager mismatch")
-                event("action_request", {node=node, mode="external"})
+                if event then event("action_request", {node=node, mode="external"}) end
                 manager:call("requestActionCore(app.ActionManager.Priority, System.String, System.UInt32)", 10, node, 0)
-                event("action_returned", node)
+                if event then event("action_returned", node) end
             end)
             if not ok then failed("实验工具动作请求失败", err) end
         end)
@@ -284,21 +269,18 @@ end
 _G.GriffinFlightBetaBridge = bridge
 _G.GriffinJourneyReduxBridge = bridge
 
-re.on_script_reset(function()
+re.on_script_reset(phase(function()
     shop_item:shutdown()
-    if item_probe then item_probe:set_enabled(false) end    if collision_debug then collision_debug:record("script_reset",{},true);collision_debug:flush(true) end
     summon:cancel("脚本重置")
     stop_driver("脚本重置",true)
-    ai_takeover.enabled=false
     anti_jitter:shutdown()
-    if debug_tools then debug_tools:shutdown() end
     alive = false
     skip_think_enabled=false;skip_think_expected=nil;block_player_fall=false
     if rawget(_G, "GriffinFlightBetaBridge") == bridge then _G.GriffinFlightBetaBridge = nil end
     if rawget(_G,"GriffinJourneyReduxBridge")==bridge then _G.GriffinJourneyReduxBridge=nil end
     for _, r in ipairs(state.spawns) do r.friend = false; r.ready = false; r.destroy_queued = false end
     flush()
-end)
+end))
 
 -- Rebind only when this global table survives a same-Lua-state reload. A full Lua reset
 -- may discard all references; never reconstruct native objects from addresses/IDs.

@@ -2,15 +2,15 @@
 return function(ctx)
 local _ENV=ctx
 function beta_button(label) return imgui.button(label) end
--- Player-facing menu. Debug controls share this script and are collapsed by default.
-settings.anchor_mode=loaded_settings and loaded_settings.anchor_mode=="full" and "full" or "rider"
+-- Player-facing configuration editor.
+settings.anchor_mode="rider"
 anchor_mode=settings.anchor_mode
 settings.head_camera=not loaded_settings or loaded_settings.head_camera~=false
 menu.clone=function(value)
     if type(value)~="table" then return value end
     local result={};for k,v in pairs(value) do result[k]=menu.clone(v) end;return result
 end
--- OJR preset contract: edit the persisted layout itself, never a second draft.
+-- Runtime layouts and menu drafts are separate; explicit apply publishes a snapshot.
 menu.snapshot=function(name,source)
     local preset=menu.clone(source or {})
     preset.schema=5;preset.name=name
@@ -109,11 +109,7 @@ menu.pull_values=function(index)
 
 end
 menu.persist_preset=function(preset)
-    for index,entry in ipairs(settings.seat_presets) do
-        if entry==preset and index==settings.seat_index then menu.pull_values(index);break end
-    end
-    menu.reindex()
-    controls.save()
+    menu.changed()
 end
 menu.apply_preset=function(index)
     local preset=settings.seat_presets[index]
@@ -128,6 +124,7 @@ menu.apply_preset=function(index)
         end
     end
     controls.save();status="当前生效预设："..preset.name
+    if menu.draft then menu.draft.seat_index=index;menu.selected_index=index end
 end
 menu.apply_pending_preset=function()
     local preset=menu.pending_preset
@@ -147,7 +144,7 @@ menu.next_preset=function()
 end
 menu.reindex();menu.pull_values(settings.seat_index)
 -- No settings file is overwritten during deployment. This migration runs on script load.
-if loaded_settings then controls.save() end
+-- Migration is retained in memory until the user explicitly saves.
 
 menu.edit_facing=function(seat,id)
     local dirty=false
@@ -170,7 +167,7 @@ menu.animation=function(seat,id,preset)
         local changed,value=imgui.input_text("动作名称###"..id.."Anim",seat.anim)
         if changed and type(value)=="string" then seat.anim=value:sub(1,160);menu.persist_preset(preset) end
     end
-    if beta_button("播放动画###"..id.."Play") then
+    if menu.realtime and beta_button("播放动画###"..id.."Play") then
         local d=active
         local a=id=="BetaPlayerPose" and d or nil
         for _,member in pairs(d and d.passengers or {}) do
@@ -201,19 +198,13 @@ menu.edit_seat=function(seat,id,preset)
     if seat.anchor=="root" then imgui.text("根节点为狮鹫Transform原点；测量检测球时关闭角色身体倾斜跟随。") end
     for _,spec in ipairs({{"side","X（左右）",-10,10},{"forward","Z（前后）",-15,15},{"height","Y（高度）",-5,15}}) do
         if not finite(seat[spec[1]]) then seat[spec[1]]=0 end
-        if preset==settings.seat_presets[1] or seat.anchor=="root" then spec[3],spec[4]=-100,100 end
+        if preset==menu.draft.seat_presets[1] or seat.anchor=="root" then spec[3],spec[4]=-100,100 end
         local changed,value=menu.number(spec[2].."###"..id..spec[1],seat[spec[1]],0.05,spec[3],spec[4])
         if changed and finite(value) then seat[spec[1]]=math.max(spec[3],math.min(spec[4],value));dirty=true end
     end
     if menu.edit_facing(seat,id=="BetaPlayerSeat" and "BetaPlayerFacing" or id) then dirty=true end
     if dirty then
         menu.persist_preset(preset)
-        if active then
-            if id=="BetaPlayerSeat" then active.fall_reset_pending=true end
-            for _,a in pairs(active.passengers or {}) do
-                if id=="BetaSeat"..a.group..a.slot then a.fall_reset_pending=true end
-            end
-        end
     end
     menu.animation(seat,id=="BetaPlayerSeat" and "BetaPlayerPose" or id,preset)
 end
@@ -223,7 +214,7 @@ menu.passenger_seats=function(preset)
         local count=math.max(group=="pawns" and 3 or 0,#roster,#preset[group])
         for i=1,count do
             if imgui.tree_node((group=="pawns" and "随从 " or "同伴NPC ")..i.."###BetaSeat"..group..i) then
-                local seat=passengers.seat(group,i,preset)
+                local seat=passengers.seat(group,i,preset,preset==menu.draft.seat_presets[1])
                 local changed,value=menu.toggle("自动携带／冻结FSM###BetaSeatEnabled"..group..i,seat.enabled~=false)
                 if changed then seat.enabled=value;menu.persist_preset(preset) end
                 menu.edit_seat(seat,"BetaSeat"..group..i,preset)
@@ -233,14 +224,17 @@ menu.passenger_seats=function(preset)
     end
 end
 menu.presets=function()
-    imgui.text("当前生效预设："..settings.seat_presets[settings.seat_index].name)
+    local settings=menu.draft
+    imgui.text("当前生效预设："..ctx.settings.seat_presets[ctx.settings.seat_index].name)
     if imgui.separator then imgui.separator() end
     local first=menu.show_physical and 1 or 2
     local names={};for i=first,#settings.seat_presets do names[#names+1]=settings.seat_presets[i].name end
     menu.selected_index=math.max(first,math.min(#settings.seat_presets,menu.selected_index or settings.seat_index))
     if type(imgui.combo)=="function" then
-        local changed,index=imgui.combo("当前布局###BetaPresetSelect",menu.selected_index-first+1,names)
-        if changed and names[index] then menu.queue_preset(index+first-1) end
+        local changed,index=imgui.combo("编辑布局（应用后生效）###BetaPresetSelect",menu.selected_index-first+1,names)
+        if changed and names[index] then
+            menu.selected_index=index+first-1;settings.seat_index=menu.selected_index;menu.confirm_delete=nil;menu.changed()
+        end
     end
     local index=menu.selected_index
     local preset=settings.seat_presets[index]
@@ -249,7 +243,7 @@ menu.presets=function()
             local clone=menu.clone(preset);clone.camera=nil
             clone.name="狮鹫座位 - "..(#settings.seat_presets+1)
             settings.seat_presets[#settings.seat_presets+1]=clone
-            menu.reindex();controls.save();menu.queue_preset(#settings.seat_presets)
+            menu.selected_index=#settings.seat_presets;settings.seat_index=menu.selected_index;menu.changed()
             return
         end
         if #settings.seat_presets>2 then
@@ -263,7 +257,7 @@ menu.presets=function()
                     elseif settings.seat_index==index then settings.seat_index=math.max(2,math.min(index,#settings.seat_presets)) end
                     menu.last_normal=math.max(2,math.min(menu.last_normal or 2,#settings.seat_presets))
                     menu.selected_index=math.max(2,math.min(index,#settings.seat_presets));menu.confirm_delete=nil
-                    menu.reindex();menu.pull_values(settings.seat_index);controls.save();menu.queue_preset(settings.seat_index)
+                    menu.changed()
                     return
                 end
                 if imgui.same_line then imgui.same_line() end
@@ -280,8 +274,8 @@ menu.presets=function()
         imgui.tree_pop()
     end
     menu.passenger_seats(preset)
-    imgui.text("与牛车MOD相同：调整立即保存；新增复制当前布局，删除需确认。")
-    if menu.pending_preset then imgui.text("布局切换已排队，继续游戏或进入照片模式后应用。") end
+    imgui.text("调整只修改内存草稿；点击“应用并保存”写入文件。新增复制当前布局，删除需确认。")
+    if menu.pending_edit then imgui.text("修改已排队，继续游戏或进入照片模式后应用。") end
     if active and menu.photo_active() then imgui.text("照片模式：保持座位显示；飞行输入和动画请求暂停。") end
     if menu.save_error then imgui.text(menu.save_error) end
 end
@@ -303,14 +297,15 @@ menu.delete=function()
 end
 menu.slider=function(key,label,low,high)
     if type(imgui.slider_float)~="function" then return end
-    local changed,value=imgui.slider_float(label,math.max(low,math.min(high,settings[key])),low,high)
-    if changed and finite(value) then settings[key]=math.max(low,math.min(high,value));controls.save() end
+    local changed,value=imgui.slider_float(label,math.max(low,math.min(high,menu.draft[key])),low,high)
+    if changed and finite(value) then menu.draft[key]=math.max(low,math.min(high,value));menu.changed() end
 end
 menu.toggle=function(label,value)
     if type(imgui.checkbox)~="function" then return false,value end
     return imgui.checkbox(label,value)
 end
 menu.bindings=function()
+    local settings=menu.draft
     local table_open=type(imgui.begin_table)=="function" and imgui.begin_table("GriffinBindings",3,1)
     if table_open then
         imgui.table_next_row()
@@ -334,23 +329,12 @@ menu.bindings=function()
         if beta_button("取消录入###BetaBindCancel") then controls.capture=nil;controls.release_gate=true end
         if beta_button("清除此绑定###BetaBindClear") then
             settings.bindings[controls.capture.action][controls.capture.device]="None"
-            controls.capture=nil;controls.release_gate=true;controls.save()
+            controls.capture=nil;controls.release_gate=true;menu.changed()
         end
     end
     if beta_button("恢复默认按键###BetaBindDefaults") then
         for _,row in ipairs(controls.rows) do settings.bindings[row[1]]={keyboard=row[3],gamepad=row[4]} end
-        controls.capture=nil;controls.release_gate=true;controls.previous={};controls.save()
-    end
-    if imgui.tree_node("长按驾驶 DEBUG") then
-        local sampled=input.pad_down or {}
-        imgui.text("手柄原始按键："..tostring(input.pad_bits or 0).."；开始："..tostring(sampled.start==true).."；结束："..tostring(sampled.stop==true))
-        for _,name in ipairs({"start","stop"}) do
-            local h=controls.holds[name] or {}
-            local elapsed=h.started and math.max(0,math.min(1,now()-h.started)) or 0
-            imgui.text(string.format("%s：%.2f / 1.00 秒；已触发/屏蔽：%s",name=="start" and "开始驾驶" or "结束驾驶",elapsed,tostring(h.consumed==true)))
-        end
-        imgui.text(controls.hold_status or "等待输入")
-        imgui.tree_pop()
+        controls.capture=nil;controls.release_gate=true;controls.previous={};menu.changed()
     end
     local used={}
     for _,row in ipairs(controls.rows) do

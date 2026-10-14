@@ -56,7 +56,7 @@ local function begin_request(request)
             if request.give_pizza and not request.pizza_sent then
                 request.pizza_sent=true
                 local gift_ok,gift_err=pcall(consumables.grant,consumables,request.owner)
-                if not gift_ok then consumables.status="披萨发放失败："..tostring(gift_err);event("pizza_grant_failed",tostring(gift_err)) end
+                if not gift_ok then consumables.status="披萨发放失败："..tostring(gift_err);if event then event("pizza_grant_failed",tostring(gift_err)) end end
             end
             summon.status=string.format("召唤演出：开始后 %.2f 秒生成狮鹫",request.delay)
         end)

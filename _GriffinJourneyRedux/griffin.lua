@@ -25,11 +25,11 @@ function select_player_target(r)
     local type_def=sdk.find_type_definition("app.TargetController")
     assert(type_def and type_def:get_method("setTarget(app.TargetController.TargetTypeEnum)"), "Target selection interface unavailable")
     assert(tc:call("get_ManualPlayerTarget()"), "ManualPlayer target unavailable")
-    event("manual_player_target_request",{value=value,before=debug_tools and debug_tools.enabled and target_snapshot(r) or nil})
+    if event then event("manual_player_target_request",{value=value,}) end
     tc:call("setTarget(app.TargetController.TargetTypeEnum)",value)
     if active and active.spawn==r then request_camera_follow_check() end
-    if debug_tools and debug_tools.enabled then event("manual_player_target_returned",target_snapshot(r)) end
 end
+local skip_methods_ready=false
 function request_instance_skip(result, player)
     assert(result and result.go and result.chara and result.go:get_Valid() and result.chara:get_Valid(), "Griffin unavailable")
     local ch = result.chara
@@ -39,22 +39,25 @@ function request_instance_skip(result, player)
     local module=maker:call("get_DecisionModule()")
     assert(module and module:call("get_Chara()")==ch and module:call("get_Owner()")==result.go
         and module:call("get_AIDecisionMaker()")==maker, "DecisionModule mismatch")
-    local td=sdk.find_type_definition("app.AIDecisionModule")
-    assert(td and td:get_method("requestSkipThink()") and td:get_method("get_IsSkipThink()"), "SkipThink interface unavailable")
+    if not skip_methods_ready then
+        local td=sdk.find_type_definition("app.AIDecisionModule")
+        assert(td and td:get_method("requestSkipThink()") and td:get_method("get_IsSkipThink()"), "SkipThink interface unavailable")
+        skip_methods_ready=true
+    end
     module:call("requestSkipThink()")
     assert(module:call("get_IsSkipThink()")==true, "SkipThink flag readback failed")
 end
 
 function set_skip_think(enabled)
     skip_think_enabled, skip_think_expected = false, nil
-    if not enabled then skip_think_status="已停止请求跳过狮鹫思考。";event("skip_think_disabled",true);return true end
+    if not enabled then skip_think_status="已停止请求跳过狮鹫思考。";if event then event("skip_think_disabled",true) end;return true end
     local r=active and active.spawn or state.spawns[#state.spawns]
     if not alive or not r or not r.ready or r.delete_requested then return false,"请先生成并等待狮鹫就绪" end
     r.skip_retry_at=nil
     skip_think_expected=r
     skip_think_enabled=true
     skip_think_status="已开启逐帧跳过思考，等待首次请求。"
-    event("skip_think_enabled",true)
+    if event then event("skip_think_enabled",true) end
     return true
 end
 function tick_skip_think()
@@ -73,7 +76,7 @@ function tick_skip_think()
         r.skip_applied=false;r.skip_retry_at=now()+0.25
         skip_think_status="跳过思考：等待模块就绪，自动重试"
         if not r.skip_error_time or now()-r.skip_error_time>=5 then
-            r.skip_error_time=now();event("skip_think_retry",tostring(err))
+            r.skip_error_time=now();if event then event("skip_think_retry",tostring(err)) end
         end
     end
 
@@ -81,7 +84,6 @@ end
 
 fall_hook_installed,fall_hook_tried=false,false
 block_player_fall=true
-fall_hits,fall_blocked,fall_logged,fall_log_at=0,0,0,-math.huge
 fall_hook_status="坠落死亡请求拦截：默认开启（驾驶玩家与接管乘客）"
 function install_fall_hook()
     if fall_hook_installed or fall_hook_tried then return end
@@ -96,14 +98,13 @@ function install_fall_hook()
                 local ch=sdk.to_managed_object(args[2])
                 local member=d.passengers and d.passengers[ch]
                 if ch==d.player and d.moved or member and member.moved and member.anchor_target and not member.recovery_pending then
-                    fall_hits=fall_hits+1
-                    passengers.record_protection(ch==d.player and d or member,"fall",block_player_fall)
-                    if block_player_fall then fall_blocked=fall_blocked+1;return sdk.PreHookResult.SKIP_ORIGINAL end
+                    if passengers.on_protection then passengers.on_protection(ch==d.player and d or member,"fall",block_player_fall) end
+                    if block_player_fall then return sdk.PreHookResult.SKIP_ORIGINAL end
                 end
             end
         end,function(ret) return ret end)
         fall_hook_installed=true
     end)
-    if not ok then fall_hook_status="坠落请求 Hook 不可用："..tostring(err);event("fall_hook_error",fall_hook_status) end
+    if not ok then fall_hook_status="坠落请求 Hook 不可用："..tostring(err);if event then event("fall_hook_error",fall_hook_status) end end
 end
 end

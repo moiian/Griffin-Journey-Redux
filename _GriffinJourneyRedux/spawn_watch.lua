@@ -28,7 +28,7 @@ local function remove_record(index,reason)
     if skip_think_expected==r then skip_think_enabled=false;skip_think_expected=nil end
     watch.removed=watch.removed+1;watch.last_reason=reason
     watch.status="狮鹫生命周期：已回收记录／"..reason
-    event("spawn_record_reaped",{reason=reason})
+    if event then event("spawn_record_reaped",{reason=reason}) end
 end
 -- Read-only native validity checks; safe to call from item eligibility hooks.
 -- No destruction, driver release or other native mutation runs inside those hooks.
@@ -50,7 +50,7 @@ local function exit(r,reason)
     watch.last_reason=reason;watch.status="狮鹫生命周期："..reason
     if active and active.spawn==r then
         stop_driver(reason)
-        event("driver_boundary_exit",{reason=reason})
+        if event then event("driver_boundary_exit",{reason=reason}) end
     end
 end
 local function retire(r,reason)
@@ -79,7 +79,7 @@ local function sample(r,t)
             end
             state.pending_cleanup[#state.pending_cleanup+1]=r
             watch.last_reason=r.cleanup_reason;watch.status="狮鹫生命周期：生成超时，保留迟到实例清理记录"
-            event("spawn_wait_timeout",{pending=#state.pending_cleanup})
+            if event then event("spawn_wait_timeout",{pending=#state.pending_cleanup}) end
         end
         return
     end
@@ -89,7 +89,7 @@ local function sample(r,t)
     if ch:call("get_GameObject()")~=result.go or ch:get_CharaIDString()~="ch253000_00" then
         exit(r,"狮鹫归属发生变化")
         if not state.recovery then r.deleted=true;r.friend=false end
-        event("spawn_identity_lost","Unknown object not destroyed")
+        if event then event("spawn_identity_lost","Unknown object not destroyed") end
         return
     end
     if r.sinking then retire(r,"狮鹫进入沉水死亡流程");return end

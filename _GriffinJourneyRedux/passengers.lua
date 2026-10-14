@@ -20,7 +20,7 @@ passengers.play_pose=function(a,node)
         a.pose_freeze_frame=nil;error(err)
     end
     a.fall_reset_pending=true
-    event("seat_animation_requested",{group=a.group or "player",slot=a.slot,node=node})
+    if event then event("seat_animation_requested",{group=a.group or "player",slot=a.slot,node=node}) end
 end
 passengers.tick_pose=function(a)
     if a.pose_freeze_frame and passengers.frame>=a.pose_freeze_frame then
@@ -33,7 +33,7 @@ passengers.tick_pose=function(a)
     if a.pose_pending~=nil then
         local node=a.pose_pending;a.pose_pending=nil
         local ok,err=pcall(passengers.play_pose,a,node)
-        if not ok then event("seat_animation_error",{group=a.group or "player",slot=a.slot,error=tostring(err)});status="动画请求失败："..tostring(err) end
+        if not ok then if event then event("seat_animation_error",{group=a.group or "player",slot=a.slot,error=tostring(err)}) end;status="动画请求失败："..tostring(err) end
     end
 end
 
@@ -88,9 +88,9 @@ passengers.bind=function(d,ch,group,index)
     discover_joints(a)
     assert(a.hip_joint and a.hip_joint:get_Valid(),"Passenger Hip unavailable")
     a.pose_pending=passengers.visual_seat(group,index).anim
-    pcall(passengers.capture_probe_refs,a) -- ready before the first anchored game tick
+    pcall(passengers.capture_identity,a) -- ready before the first anchored game tick
     d.passengers[ch]=a -- recovery registered before the first native mutation
-    event("passenger_bound",{group=group,slot=index,instance=tostring(ch)})
+    if event then event("passenger_bound",{group=group,slot=index,instance=tostring(ch)}) end
     return a
 end
 passengers.prepare_rig=function(a,d)
@@ -113,15 +113,14 @@ passengers.tick=function(d)
             local in_roster=false
             for _,member in ipairs((passengers.roster or {})[a.group] or {}) do if member==ch then in_roster=true end end
             local reason=not valid and "invalid_instance" or (in_roster and "seat_disabled" or "absent_from_engine_roster")
-            passengers.record_release_context(a,reason,valid)
-            if not valid then event("passenger_unloaded",{group=a.group,slot=a.slot,instance=tostring(ch),protection=a.protection_counts,health=a.health_probe}) end
+            if passengers.on_release then passengers.on_release(a,reason,valid) end
+            if not valid then if event then event("passenger_unloaded",{group=a.group,slot=a.slot,instance=tostring(ch),protection=a.protection_counts,health=a.health_probe}) end end
             a.anchor_target=nil
             local ok,err=pcall(passengers.restore_one,a)
-            if ok then d.passengers[ch]=nil;event("passenger_released",{group=a.group,slot=a.slot})
-            elseif not a.restore_error_logged then event("passenger_restore_error",tostring(err));a.restore_error_logged=true end
+            if ok then d.passengers[ch]=nil;if event then event("passenger_released",{group=a.group,slot=a.slot}) end
+            elseif not a.restore_error_logged then if event then event("passenger_restore_error",tostring(err)) end;a.restore_error_logged=true end
         end
     end
-    d.passenger_trace=debug_tools and debug_tools:recording() and {} or nil
     for ch,slot in pairs(wanted) do
         local ok,err=pcall(function()
             local a=d.passengers[ch] or passengers.bind(d,ch,slot.group,slot.slot)
@@ -142,17 +141,16 @@ passengers.tick=function(d)
             a.transform:call("set_Position(via.vec3)",Vector3f.new(physical.x,physical.y,physical.z))
             passengers.orient(a,passengers.visual_seat(a.group,a.slot))
             sync_player(a)
-            passengers.apply_fall_experiment(a)
+            if passengers.on_anchor then passengers.on_anchor(a) end
             anti_jitter:after_passenger(d,a)
             passengers.tick_pose(a)
-            if d.passenger_trace then d.passenger_trace[#d.passenger_trace+1]={group=a.group,slot=a.slot,physical=physical,fsm_enabled=a.fsm:call("get_Enabled()"),protection=a.protection_counts,health=a.health_probe,orientation=a.orientation_trace,orientation_failed=a.orientation_failed or false} end
         end)
         if not ok then
             passengers.last_error=slot.group.." "..slot.slot..": "..tostring(err)
             local key=slot.group..":"..slot.slot
             passengers.errors=passengers.errors or {}
             if now()>=(passengers.errors[key] or -math.huge) then
-                passengers.errors[key]=now()+5;event("passenger_control_error",{group=slot.group,slot=slot.slot,error=tostring(err)})
+                passengers.errors[key]=now()+5;if event then event("passenger_control_error",{group=slot.group,slot=slot.slot,error=tostring(err)}) end
             end
             -- A partial write must recover before retrying. Keep failures for stop/reset recovery.
             local a=d.passengers[ch]
@@ -163,7 +161,6 @@ passengers.tick=function(d)
             end
         end
     end
-    if d.trace then d.trace.passengers=d.passenger_trace end
 end
 passengers.pre=function()
     if not alive or not active or not menu.visual_allowed() then return end
@@ -172,7 +169,7 @@ passengers.pre=function()
             restore_bone(a)
             if a.anchor_target then passengers.orient(a,passengers.visual_seat(a.group,a.slot)) end
         end)
-        if not ok then event("passenger_bone_restore_error",tostring(err)) end
+        if not ok then if event then event("passenger_bone_restore_error",tostring(err)) end end
     end
 end
 passengers.post=function()
@@ -198,7 +195,7 @@ passengers.post=function()
                 a.bones_applied=items
                 for _,item in ipairs(items) do item.joint:call("set_Position(via.vec3)",Vector3f.new(item.written.x,item.written.y,item.written.z)) end
             end)
-            if not ok and not a.pose_error_logged then event("passenger_pose_error",tostring(err));a.pose_error_logged=true end
+            if not ok and not a.pose_error_logged then if event then event("passenger_pose_error",tostring(err)) end;a.pose_error_logged=true end
         end
     end
 end

@@ -1,4 +1,4 @@
--- Griffin Journey Redux 0.3.34. Requires NickCore, EnemySpawner and run_once.
+-- Griffin Journey Redux 0.3.35. Requires NickCore, EnemySpawner and run_once.
 -- One private context per script generation. Only the compatible state/bridge aliases are global.
 local ctx=setmetatable({}, {__index=_G})
 require("_GriffinJourneyRedux.session")(ctx)
@@ -8,7 +8,6 @@ require("_GriffinJourneyRedux.camera")(ctx)
 require("_GriffinJourneyRedux.lifecycle")(ctx)
 require("_GriffinJourneyRedux.input")(ctx)
 require("_GriffinJourneyRedux.griffin")(ctx)
-require("_GriffinJourneyRedux.ai_takeover")(ctx)
 require("_GriffinJourneyRedux.sprint_motion")(ctx)
 require("_GriffinJourneyRedux.hover_collision")(ctx)
 require("_GriffinJourneyRedux.hover_motion")(ctx)
@@ -23,10 +22,11 @@ require("_GriffinJourneyRedux.consumables")(ctx)
 require("_GriffinJourneyRedux.item_integration")(ctx)
 require("_GriffinJourneyRedux.shop_item")(ctx)
 require("_GriffinJourneyRedux.presets")(ctx)
-local available,developer_tools=pcall(require,"_GriffinJourneyReduxDebug.tools")
+require("_GriffinJourneyRedux.settings_editor")(ctx)
+require("_GriffinJourneyRedux.callbacks")(ctx)
+local available,developer_tools=pcall(require,"_GriffinJourneyReduxDebug.addon")
 if available then
     local initialized,err=pcall(developer_tools,ctx)
     if not initialized then error("Griffin Journey Redux Debug: "..tostring(err)) end
 end
-require("_GriffinJourneyRedux.callbacks")(ctx)
 require("_GriffinJourneyRedux.ui")(ctx)

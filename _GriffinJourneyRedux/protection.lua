@@ -25,11 +25,10 @@ passengers.container_actor=function(container)
     -- Exact captured container only. Never walk parent/shared containers or match IDs.
     return passengers.each_controlled(function(a) if a.generate_container==container then return a end end)
 end
-passengers.capture_probe_refs=function(a)
+passengers.capture_identity=function(a)
     local info=a.player:get_field("<GenerateInfo>k__BackingField")
     a.generate_info=info
     a.generate_container=info and info:call("get_Container()") or nil
-    if debug_tools and debug_tools.enabled then a.brine=a.player:get_field("<BrineProcessor>k__BackingField") end
 end
 passengers.install_protection=function()
     if passengers.protection.installed then return end
@@ -60,7 +59,7 @@ passengers.install_protection=function()
             local info=sdk.to_managed_object(args[3])
             local a=passengers.receiver(info and info["<DamageGameObject>k__BackingField"])
             if a then
-                passengers.record_protection(a,signature,passengers.protection.damage)
+                if passengers.on_protection then passengers.on_protection(a,signature,passengers.protection.damage) end
                 if passengers.protection.damage then return sdk.PreHookResult.SKIP_ORIGINAL end
             end
         end,signature=="damageProc(app.HitController.DamageInfo)")
@@ -70,7 +69,7 @@ passengers.install_protection=function()
         if not active then return end
         local a=passengers.component_actor(sdk.to_managed_object(args[2]))
         if a then
-            passengers.record_protection(a,"updateDamageHp",passengers.protection.damage)
+            if passengers.on_protection then passengers.on_protection(a,"updateDamageHp",passengers.protection.damage) end
             if passengers.protection.damage then return sdk.PreHookResult.SKIP_ORIGINAL end
         end
     end)
@@ -80,7 +79,7 @@ passengers.install_protection=function()
             if not active then return end
             local a=passengers.controlled(sdk.to_managed_object(args[3]))
             if a and a.group=="pawns" then
-                passengers.record_protection(a,signature,passengers.protection.relocation)
+                if passengers.on_protection then passengers.on_protection(a,signature,passengers.protection.relocation) end
                 if passengers.protection.relocation then return sdk.PreHookResult.SKIP_ORIGINAL end
             end
         end)
@@ -90,31 +89,12 @@ passengers.install_protection=function()
         local info=sdk.to_managed_object(args[3])
         local a=passengers.container_actor(info and info["<Container>k__BackingField"])
         if a and a.group=="pawns" then
-            passengers.record_protection(a,"pawnLost.InstanceInfo",passengers.protection.relocation,info)
+            if passengers.on_protection then passengers.on_protection(a,"pawnLost.InstanceInfo",passengers.protection.relocation,info) end
             if passengers.protection.relocation then return sdk.PreHookResult.SKIP_ORIGINAL end
         end
     end)
-    -- Character and CharacterID overloads share their native address in this dump.
-    -- Compare the raw pointer first; never cast an unknown CharacterID argument to Character.
-    hook("app.PawnManager","onLostCheck(app.Character)",function(args)
-        if not active then return end
-        for ch,a in pairs(active.passengers or {}) do
-            if a.group=="pawns" and args[3]==sdk.to_ptr(ch:get_address()) and passengers.controlled(ch) then
-                passengers.record_protection(a,"onLostCheck.Character",passengers.protection.lost_check)
-                if passengers.protection.lost_check then return sdk.PreHookResult.SKIP_ORIGINAL end
-                return
-            end
-        end
-    end)
-    hook("app.GenerateManager","requestDestroy(app.GenerateInfo.GenerateInfoContainer, System.Boolean, System.Boolean, System.Boolean, System.Boolean, System.Boolean)",function(args)
-        if not active then return end
-        local a=passengers.container_actor(sdk.to_managed_object(args[3]))
-        if a and a.group then
-            passengers.record_protection(a,"requestDestroy.exactContainer",passengers.protection.destroy)
-            if passengers.protection.destroy then return sdk.PreHookResult.SKIP_ORIGINAL end
-        end
-    end,true)
+    if passengers.extra_protection then passengers.extra_protection(hook) end
     passengers.protection.status=#errors==0 and "驾驶角色扣血／随从丢失保护已安装" or "部分保护不可用："..table.concat(errors,"; ")
-    event("passenger_protection_installed",{errors=errors})
+    if event then event("passenger_protection_installed",{errors=errors}) end
 end
 end

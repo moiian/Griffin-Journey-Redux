@@ -36,7 +36,7 @@ function hover_motion:release(d)
         m.context:call("setPosRot(via.Position, via.Quaternion)",p,q)
         m.controller:call("warp()")
     end
-    if hover_collision then hover_collision:record("hover_released",{position=m.position,yaw=m.yaw},true) end
+    if hover_collision then if hover_collision.on_event then hover_collision:record("hover_released",{position=m.position,yaw=m.yaw},true) end end
     d.hover_motion=nil
 end
 local function write_pose(d,m)
@@ -151,7 +151,7 @@ function hover_motion:after_behavior()
     m.pending_pose=nil;m.write_phase="post_behavior"
     local ok,err=pcall(write_pose,d,m)
     if not ok then
-        if hover_collision then hover_collision:record("pose_write_error",tostring(err),true) end
+        if hover_collision then if hover_collision.on_event then hover_collision:record("pose_write_error",tostring(err),true) end end
         stop_driver("慢速悬浮同步失败");failed("慢速悬浮同步失败",err) end
 end
 end

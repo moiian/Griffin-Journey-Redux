@@ -1,9 +1,9 @@
 -- Griffin Journey Redux: session
 return function(ctx)
 local _ENV=ctx
--- Griffin Flight Beta 0.3.34. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.3.35. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-VERSION = "0.3.34"
+VERSION = "0.3.35"
 state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 _G.GriffinJourneyReduxState = state
@@ -24,9 +24,7 @@ controls,menu,passengers = {},{},{}
 menu.block_cross_phase=true -- Session-only; ordinary action phase guard is on without Debug.
 passengers.frame=0
 -- Session-only independent experiments; never persisted in player settings.
-passengers.fall_experiment={reset=false,ground=false}
-passengers.griffin_fall={reset=false,status="狮鹫跌落实验：关闭"}
-passengers.protection={damage=true,relocation=true,lost_check=false,destroy=false,counts={}}
+passengers.protection={damage=true,relocation=true}
 masks = nil
 input = {x = 0, y = 0, buttons = 0}
 settings = {distance = 30, fov = 90, freeze_player = true, rider_anim="", rider_lookX=0, rider_lookZ=1, rider_tilt_follow=1, rider_pitch_offset=0, rider_anchor="head", rider_neck_joint="", rider_height=1.0, rider_forward=0, rider_side=0, navigation_radius=2.914, steering_yaw=49.406, steering_pitch=22, navigation_height=1.038, bumper_pitch=59, controls_revision=1, camera_auto_yaw=true, camera_yaw_speed=129.414, camera_manual_threshold=0.55, sprint_stop_tau=1.286, hover_accel_tau=0.611, hover_decel_tau=1.01, hover_reverse_tau=0.617, hover_forward_speed=12, hover_backward_speed=6.226, hover_climb_speed=7.642, hover_descend_speed=12, hover_up_accel_tau=0.604, hover_up_decel_tau=0.206, hover_down_accel_tau=0.212, hover_down_decel_tau=0.617, hover_turn_speed=75.991, hover_camera_yaw_speed=120, boarding_distance=20}
@@ -67,14 +65,12 @@ function vector(v)
     return {x = v.x, y = v.y, z = v.z}
 end
 function flush()
-    return debug_tools and debug_tools:flush() or false
+    return false
 end
-function event(name,detail,defer_flush)
-    if debug_tools then debug_tools:event(name,detail,defer_flush) end
-end
+event=nil
 function failed(label, err)
     status = label .. "：" .. tostring(err)
-    event("error", status)
+    if event then event("error", status) end
     -- Runtime errors remain visible in the menu; diagnostic output requires opt-in.
 end
 if type(json.load_file) == "function" then
@@ -182,21 +178,24 @@ function validate_spawn(r,visual_only)
         and result.chara:call("get_GameObject()") == result.go, "Griffin reference mismatch")
     assert(r.friend and aggro_clear(), "Friend override unavailable")
     assert(r.owner:get_Valid(), "Player no longer valid")
-    local unavailable = 0
-    for _, member in ipairs(r.party) do
-        -- A distant pawn may leave the loaded scene. Never pass an invalid reference
-        -- to native relationship calls, and do not end the player's flight for it.
-        if member:get_Valid() then
-            assert(result.chara:call("getBattleRelationshipTo(app.Character)", member) == friend_value
-                and member:call("getBattleRelationshipTo(app.Character)", result.chara) == friend_value,
-                "Party relationship changed")
-        else
-            unavailable = unavailable + 1
+    if not validation_epoch or r.relationship_epoch~=validation_epoch or r.relationship_party~=r.party then
+        local unavailable = 0
+        for _, member in ipairs(r.party) do
+            -- A distant pawn may leave the loaded scene. Never pass an invalid reference
+            -- to native relationship calls, and do not end the player's flight for it.
+            if member:get_Valid() then
+                assert(result.chara:call("getBattleRelationshipTo(app.Character)", member) == friend_value
+                    and member:call("getBattleRelationshipTo(app.Character)", result.chara) == friend_value,
+                    "Party relationship changed")
+            else
+                unavailable = unavailable + 1
+            end
         end
-    end
-    if unavailable ~= (r.unavailable_party or 0) then
-        r.unavailable_party = unavailable
-        event("party_reference_availability", {unavailable=unavailable, ignored_for_driver=true})
+        if unavailable ~= (r.unavailable_party or 0) then
+            r.unavailable_party = unavailable
+            if event then event("party_reference_availability", {unavailable=unavailable, ignored_for_driver=true}) end
+        end
+        r.relationship_epoch=validation_epoch;r.relationship_party=r.party
     end
     return result.chara
 end
@@ -215,15 +214,4 @@ function player_fsm(player)
     return manager and manager.Fsm
 end
 
--- Optional developer module can be omitted from player distributions.
-passengers.apply_fall_experiment=function() end
-passengers.griffin_fall_tick=function() end
-passengers.record_protection=function() end
-passengers.record_release_context=function() end
-passengers.snapshot=function(value)
-    if type(value)~="table" then return value end
-    local result={};for key,item in pairs(value) do result[key]=passengers.snapshot(item) end;return result
-end
-settings.anti_jitter=not loaded_settings or loaded_settings.anti_jitter~=false
-settings.griffin_anti_jitter=loaded_settings and loaded_settings.griffin_anti_jitter==true or false
 end

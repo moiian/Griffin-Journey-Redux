@@ -14,7 +14,7 @@ function restore_follow()
             s.main:call("set_TargetJoint(via.Joint)",s.original_joint)
         end
     end)
-    if ok then follow_state=nil else event("camera_follow_restore_error",tostring(err)) end
+    if ok then follow_state=nil else if event then event("camera_follow_restore_error",tostring(err)) end end
     return ok,err
 end
 -- Head binding checks are action-triggered plus a 2 Hz fallback. Healthy
@@ -33,7 +33,7 @@ function change_camera_mode(key)
         local ok,err=restore_follow()
         if not ok then camera_follow_status="镜头恢复未完成："..tostring(err);return end
         camera_follow_status=key=="original" and "镜头跟随：游戏默认" or "镜头跟随已选择，驾驶期间生效。"
-        event("camera_follow_mode",key)
+        if event then event("camera_follow_mode",key) end
     end)
 end
 function tick_camera_follow()
@@ -89,7 +89,7 @@ function tick_camera_follow()
         -- Native cutscenes/collision/controller transitions may temporarily replace
         -- the camera. Keep the requested mode and retry, without writing user settings.
         camera_follow_status="头部镜头等待恢复："..tostring(err)
-        if d.camera_follow_error~=tostring(err) then event("camera_follow_wait",tostring(err)) end
+        if d.camera_follow_error~=tostring(err) then if event then event("camera_follow_wait",tostring(err)) end end
         d.camera_follow_error=tostring(err)
     end
 end
@@ -104,7 +104,7 @@ function yaw_failed(err)
     yaw_state=nil
     settings.camera_auto_yaw=false
     yaw_status="自动跟随已停用："..tostring(err)
-    event("camera_yaw_error",tostring(err))
+    if event then event("camera_yaw_error",tostring(err)) end
 end
 -- Shared follow policy: native-unit calibration, manual blend/override, hysteresis,
 -- 0.8s recovery delay, shortest-arc easing and exact-controller scope.
@@ -141,7 +141,7 @@ local function update_camera_yaw(d,s,controller,low,steering,speed)
                 scale=scale,offset=wrap_yaw(angle.y/scale-math.atan(dx,dz)),
                 manual_yaw=0,previous_yaw=angle.y/scale}
             if low then hover_yaw_state=y else yaw_state=y end
-            event(low and "hover_camera_yaw_bound" or "camera_yaw_bound",{scale=scale,offset=y.offset,original_yaw=angle.y})
+            if event then event(low and "hover_camera_yaw_bound" or "camera_yaw_bound",{scale=scale,offset=y.offset,original_yaw=angle.y}) end
         end
         local dt=math.max(0,math.min(0.1,t-y.last_time));y.last_time=t
         local magnitude=math.min(1,math.sqrt(input.rx*input.rx+input.ry*input.ry))
@@ -156,8 +156,6 @@ local function update_camera_yaw(d,s,controller,low,steering,speed)
         if not steering or paused then
             y.previous_yaw=current
             yaw_status=not steering and (low and "狮鹫停止转向：自动跟随暂停" or "左摇杆回中：自动跟随暂停") or "右摇杆接管；释放后延迟恢复"
-            if d.trace then d.trace.camera_yaw={manual=paused,steering=steering,current=angle.y,pitch=angle.x,
-                right_magnitude=magnitude,threshold=threshold,weight=0,scale=y.scale} end
             return
         end
         -- Original manual input has already updated Angle. Carry its actual delta into
@@ -178,9 +176,6 @@ local function update_camera_yaw(d,s,controller,low,steering,speed)
         if dt>0 and math.abs(step)>0.00001 then controller:call("setYaw(System.Single)",output*y.scale) end
         y.previous_yaw=output
         yaw_status=(low and "1档" or "2档").."转向跟随；右摇杆小幅叠加、大幅接管"
-        if d.trace then d.trace.camera_yaw={manual=false,steering=true,current=angle.y,requested=output*y.scale,target=desired*y.scale,
-            right_magnitude=magnitude,threshold=threshold,weight=weight,
-            manual_yaw=y.manual_yaw,speed=speed,scale=y.scale,dt=dt} end
 
 end
 function tick_hover_camera_yaw(controller)
@@ -199,7 +194,7 @@ function tick_hover_camera_yaw(controller)
     end)
     if not ok then
         hover_yaw_state=nil
-        if d.hover_camera_error~=tostring(err) then event("hover_camera_follow_error",tostring(err)) end
+        if d.hover_camera_error~=tostring(err) then if event then event("hover_camera_follow_error",tostring(err)) end end
         d.hover_camera_error=tostring(err)
     end
 end
@@ -258,21 +253,6 @@ function install_yaw_hook()
     if not ok then yaw_failed(err) end
     return ok
 end
-function read_camera_follow()
-    if not debug_tools or not debug_tools:recording() then return end
-    local d,s=active,follow_state
-    if not d or not s then return end
-    local ok,probe=pcall(function()
-        return {mode=camera_mode,target=vector(s.main:call("get_TargetPosition()")),
-            base_offset=vector(s.main:call("get_BaseOffset()")),
-            selected=s.joint and vector(s.joint:call("get_Position()")) or nil,
-            readback_matches=not s.joint or s.main:call("get_TargetJoint()")==s.joint,
-            player=vector(d.transform:call("get_Position()")),
-            hip=d.hip_joint and vector(d.hip_joint:call("get_Position()")) or nil,
-            griffin=vector(d.spawn.result.chara:call("get_Transform()"):call("get_Position()"))}
-    end)
-    if d.trace then d.trace.camera_follow=ok and probe or {mode=camera_mode,error=tostring(probe)} end
-end
 function restore_camera()
     restore_follow()
     camera_mode="original"
@@ -290,6 +270,6 @@ function restore_camera()
             s.camera:call("set_FOV", s.fov)
         end
     end)
-    if not ok then event("camera_restore_error", tostring(err)) end
+    if not ok then if event then event("camera_restore_error", tostring(err)) end end
 end
 end

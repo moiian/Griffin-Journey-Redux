@@ -4,6 +4,7 @@ local _ENV=ctx
 re.on_draw_ui(function()
     if not imgui.tree_node("Griffin Journey Redux###GriffinJourneyRedux") then return end
     imgui.text("v"..VERSION)
+    menu.editor()
     if menu.save_error then imgui.text(menu.save_error) end
     if imgui.tree_node("一般设置") then
         if beta_button("一键生成狮鹫###BetaSpawn") then spawn() end
@@ -16,7 +17,8 @@ re.on_draw_ui(function()
             imgui.tree_pop()
         end
         imgui.text(summon.status)
-        item_integration:draw()
+        if shop_item then imgui.text(shop_item.status) end
+        if consumables then imgui.text(consumables.status) end
         if beta_button("开始驾驶###BetaStart") then start_driver() end
         menu.slider("boarding_distance","热键开始驾驶距离（严格小于／米）",1,50)
         if beta_button("结束驾驶###BetaStop") then menu.stop() end
@@ -27,27 +29,12 @@ re.on_draw_ui(function()
     end
     if imgui.tree_node("飞行设置") then
         hover_collision:draw()
-        local ai_changed,ai_value=menu.toggle("方向6：禁用狮鹫决策组件（实验）",ai_takeover.enabled)
-        if ai_changed then ai_takeover:set_enabled(ai_value) end
-        if ai_takeover.enabled or ai_takeover.held or ai_takeover.errors>0 then imgui.text(ai_takeover.status) end
-        local changed,value=menu.toggle("玩家与乘客防抖",settings.anti_jitter)
-        if changed then settings.anti_jitter=value;anti_jitter.fall_stop:set_enabled(value);controls.save() end
+        menu.edit_toggle("anti_jitter","玩家与乘客防抖")
         if settings.anti_jitter and not anti_jitter.fall_stop.enabled then imgui.text(anti_jitter.fall_stop.status) end
-        changed,value=menu.toggle("狮鹫防抖",settings.griffin_anti_jitter)
-        if changed then settings.griffin_anti_jitter=value;anti_jitter.griffin_stop:set_enabled(value);controls.save() end
-        if settings.griffin_anti_jitter and not anti_jitter.griffin_stop.enabled then imgui.text(anti_jitter.griffin_stop.status) end
         imgui.text("1档：A 上移／Y 下移；RS 两档原生降落；左杆前后移动、左右转向；LT 惯性悬停")
         imgui.text("RT 冲刺；RB 俯冲／LB 爬升（1档按下即进入2档）；A 仅在地面触发起飞")
         imgui.text("起飞至少播放1.89秒后才切悬停／冲刺；1档玩家实体跟随预设[1]，2档启用球面导航。")
         menu.slider("sprint_stop_tau","2档切悬停惯性时间常数（秒）",0,3)
-        if active and active.sprint_speed then
-            local speed=active.sprint_speed
-            imgui.text(string.format("2档实测总速度：%.2f 米／秒%s",speed.total,speed.ready and "" or "（采样中）"))
-            imgui.text(string.format("水平：%.2f 米／秒",speed.horizontal))
-            imgui.text(string.format("竖直：%+.2f 米／秒",speed.vertical))
-        end
-        if active and active.sprint_status then imgui.text(active.sprint_status) end
-        if active and active.sprint_handoff_speed then imgui.text(string.format("最近LT继承速度：%.2f 米／秒",active.sprint_handoff_speed)) end
         menu.slider("hover_forward_speed","1档前进速度（米／秒）",0,12)
         menu.slider("hover_backward_speed","1档后退速度（米／秒）",0,12)
         menu.slider("hover_climb_speed","1档垂直爬升速度（米／秒）",0,12)
@@ -66,21 +53,16 @@ re.on_draw_ui(function()
         menu.slider("steering_pitch","摇杆上下微调（最大角度）",1,80)
         menu.slider("bumper_pitch","RB／LB 升降角度（最高59°）",1,59)
         menu.slider("navigation_radius","头部导航半径（米）",2,130)
-        menu.slider("navigation_height","球面回中高度（米）",-settings.navigation_radius*0.9,settings.navigation_radius*0.9)
+        menu.slider("navigation_height","球面回中高度（米）",-menu.draft.navigation_radius*0.9,menu.draft.navigation_radius*0.9)
         imgui.tree_pop()
     end
     if imgui.tree_node("镜头设置") then
         menu.slider("distance","相机距离偏移",0,80)
         menu.slider("fov","FOV",40,120)
         imgui.text("全局镜头配置；切换座位预设不改变距离和FOV。")
-        local changed,value=menu.toggle("镜头跟随狮鹫头部",settings.head_camera)
-        if changed then settings.head_camera=value;change_camera_mode(value and "griffin" or "original");controls.save() end
-        changed,value=menu.toggle("2档转向时跟随镜头###BetaCameraYaw",settings.camera_auto_yaw)
-        if changed then
-            settings.camera_auto_yaw=value;yaw_state=nil
-            if value and install_yaw_hook() then settings.head_camera=true;change_camera_mode("griffin") end
-            controls.save()
-        end
+        menu.edit_toggle("head_camera","镜头跟随狮鹫头部")
+        local changed,value=menu.edit_toggle("camera_auto_yaw","2档转向时跟随镜头###BetaCameraYaw")
+        if changed and value then menu.draft.head_camera=true end
         imgui.text("1档仅转向时跟随；两档共用右摇杆接管阈值与恢复延迟")
         menu.slider("hover_camera_yaw_speed","1档镜头跟随速度（度／秒）",0,360)
         if active and active.hover_camera_error then imgui.text("1档镜头跟随暂不可用") end
@@ -93,7 +75,6 @@ re.on_draw_ui(function()
         imgui.tree_pop()
     end
     if imgui.tree_node("按键设置") then menu.bindings();imgui.tree_pop() end
-    if debug_tools then debug_tools:draw() end
     imgui.tree_pop()
 end)
 end

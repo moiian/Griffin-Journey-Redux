@@ -4,14 +4,11 @@ local _ENV=ctx
 consumables={id=58995,script_id=67608115,heal=50,status="榴莲味披萨：待使用"}
 local pizza=consumables
 local grant_signature="getItem(System.Int32, System.Int32, app.CharacterID)"
-pizza.log_path="GriffinJourneyRedux_PizzaGrant.json"
 local function method(td,signature)
     return td and (td:get_method(signature) or td:get_method((signature:gsub(", ",","))))
 end
 local function save_record()
-    if not pizza.last_grant then return end
-    local ok,err=pcall(json.dump_file,pizza.log_path,pizza.last_grant)
-    if not ok or err==false then pizza.log_error=tostring(err) end
+    if pizza.on_grant_record then pizza.on_grant_record(pizza.last_grant) end
 end
 local function count(manager,reader,id,player_id)
     if not reader then return nil,"getStorageData重载不可用" end
@@ -59,7 +56,7 @@ function pizza:grant(owner)
         record.stage="requested"
         self.verification={owner=owner,manager=manager,reader=reader,player_id=player_id,due=os.clock()+1,record=record}
         self.status="榴莲味披萨：已调用玩家ID发放重载，等待背包数量确认"
-        event("pizza_grant_requested",{item=self.id,count=1,player_id=player_id})
+        if event then event("pizza_grant_requested",{item=self.id,count=1,player_id=player_id}) end
     end)
     if not ok then record.stage="failed";record.error=tostring(err);self.status="披萨发放失败："..tostring(err) end
     save_record()
@@ -111,7 +108,7 @@ function pizza:tick()
                 local hit=assert(request.owner:call("get_Hit()"),"回血接口未就绪")
                 hit:call("recoverHp(System.Single,System.Boolean,System.Int32,System.Boolean)",self.heal,false,0,false)
             end)
-            if not heal_ok then request.heal_error=tostring(heal_err);event("pizza_heal_failed",request.heal_error) end
+            if not heal_ok then request.heal_error=tostring(heal_err);if event then event("pizza_heal_failed",request.heal_error) end end
             if summon then summon:cancel("使用榴莲味披萨") end
             operation=nil;queued=false
             stop_driver("使用榴莲味披萨",true)

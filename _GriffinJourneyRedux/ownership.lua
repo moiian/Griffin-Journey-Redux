@@ -30,10 +30,7 @@ anti_jitter=AntiJitter.new({driver=function() return active end,
                 local c=core();local p=c and c.properties or {}
                 return {nick_delta=p.deltaTime,nick_frame=p.frame,log_sequence=menu.log_io and menu.log_io.sequence or 0}
             end,
-            diagnostics=function()
-                return debug_tools and debug_tools:diagnostics() or {}
-            end,
             bind=function(d) return menu.route_bind(d) end})
 anti_jitter.fall_stop:set_enabled(settings.anti_jitter)
-anti_jitter.griffin_stop:set_enabled(settings.griffin_anti_jitter)
+settings.griffin_anti_jitter=false
 end

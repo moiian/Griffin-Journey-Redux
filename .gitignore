@@ -95,7 +95,6 @@
 
 !/AI_021_TARGET_RESELECT.md
 
-!/_GriffinJourneyRedux/ai_takeover.lua
 !/AI_022_COMPONENT_TAKEOVER.md
 
 !/_GriffinJourneyRedux/hover_motion.lua
@@ -191,3 +190,19 @@
 !/DEPARTURE_0333_GROUND_WIND.md
 
 !/EXIT_0334_SEATS_HEIGHT.md
+
+# 0.3.35 explicit runtime editor and optional developer add-on whitelist
+!/_GriffinJourneyRedux/settings_editor.lua
+!/RELEASE_0335_RUNTIME_EDITOR.md
+!/_GriffinJourneyReduxDebug/addon.lua
+!/_GriffinJourneyReduxDebug/ai_takeover.lua
+!/_GriffinJourneyReduxDebug/anchor_mode.lua
+!/_GriffinJourneyReduxDebug/camera_probe.lua
+!/_GriffinJourneyReduxDebug/collision_policy.lua
+!/_GriffinJourneyReduxDebug/extra_protection.lua
+!/_GriffinJourneyReduxDebug/fall_snapshot.lua
+!/_GriffinJourneyReduxDebug/freeze.lua
+!/_GriffinJourneyReduxDebug/griffin_fall.lua
+!/_GriffinJourneyReduxDebug/input_menu.lua
+!/_GriffinJourneyReduxDebug/item_menu.lua
+!/_GriffinJourneyReduxDebug/speed_menu.lua

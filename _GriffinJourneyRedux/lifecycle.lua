@@ -6,24 +6,20 @@ stop_driver = function(reason,suppress_landing,voluntary)
     if voluntary and departing then
         departing.voluntary_exit=true
         local ok,err=pcall(capture_exit_seats,departing)
-        if not ok then event("exit_seat_capture_failed",tostring(err)) end
+        if not ok then if event then event("exit_seat_capture_failed",tostring(err)) end end
     end
     if summon then summon:cancel(reason) end
     local early_errors={}
     local anti_ok,anti_err=pcall(anti_jitter.stop,anti_jitter)
     if not anti_ok then early_errors[#early_errors+1]="防抖释放 "..tostring(anti_err) end
-    if debug_tools then
-        local ok,err=pcall(debug_tools.stop,debug_tools)
-        if not ok then early_errors[#early_errors+1]="调试释放 "..tostring(err) end
-    end
     operation = nil
     queued = false
-    local ai_call_ok,ai_ok,ai_err=pcall(ai_takeover.release,ai_takeover)
+    local ai_call_ok,ai_ok,ai_err=true,true,nil
+    if driver_extension then ai_call_ok,ai_ok,ai_err=pcall(driver_extension.release,driver_extension) end
     if not ai_call_ok then ai_err=ai_ok;ai_ok=false end
     local d = active or state.recovery
     if d and not suppress_landing and request_exit_landing then pcall(request_exit_landing,d) end
     active = nil
-    passengers.griffin_fall.actor=nil
     input = {x = 0, y = 0, buttons = 0}
     local camera_ok,camera_err=pcall(restore_camera)
     if not camera_ok then early_errors[#early_errors+1]="镜头恢复 "..tostring(camera_err) end
@@ -70,7 +66,7 @@ stop_driver = function(reason,suppress_landing,voluntary)
     state.recovery = (#errors > 0) and d or nil
     status = #errors > 0 and ("驾驶已停止，请再点结束驾驶恢复：" .. table.concat(errors, "; "))
         or "驾驶已结束，玩家和乘客已在当前位置释放。"
-    event("driver_stopped", {reason = reason, errors = errors,release_mode=d.voluntary_exit and "current_preset_seats" or "current_physical_position",player_position=d.release_position})
+    if event then event("driver_stopped", {reason = reason, errors = errors,release_mode=d.voluntary_exit and "current_preset_seats" or "current_physical_position",player_position=d.release_position}) end
     return #errors == 0
 end
 end

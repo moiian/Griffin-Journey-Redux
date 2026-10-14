@@ -10,7 +10,7 @@ end
 function sync_player(d,reset_fall)
     local pos = d.transform:call("get_UniversalPosition()")
     d.context:call("setPos(via.Position)", pos)
-    -- Normal fall reset is attach/preset/release only; the explicit DEBUG experiment runs after anchoring.
+    -- Normal fall reset is attach/preset/release only.
     if reset_fall or d.fall_reset_pending then passengers.reset_fall(d) end
     d.controller:call("warp()")
 end
@@ -24,7 +24,7 @@ function capture_exit_seats(d)
             return rider_seat(a,config)
         end)
         if ok then a.exit_seat=vector(target)
-        else event("exit_seat_capture_failed",{group=a.group or "player",slot=a.slot,error=tostring(target)}) end
+        else if event then event("exit_seat_capture_failed",{group=a.group or "player",slot=a.slot,error=tostring(target)}) end end
     end
     capture(d,passengers.player_config())
     for _,a in pairs(d.passengers or {}) do capture(a,passengers.visual_seat(a.group,a.slot)) end
@@ -37,16 +37,12 @@ function apply_exit_seat(a)
     -- Read UniversalPosition after the local Transform write (floating origin).
     sync_player(a,true)
     a.exit_seat_applied=true
-    event("exit_seat_applied",{group=a.group or "player",slot=a.slot,position=p})
+    if event then event("exit_seat_applied",{group=a.group or "player",slot=a.slot,position=p}) end
     return true
 end
 -- All layers follow a neutral Griffin anchor; only the selected layer gets stick offset.
 -- Engine coupling is observed through readback, not assumed away.
 anchor_mode="rider"
-anchor_modes={
-    {key="full",label="完整同步"},
-    {key="rider",label="仅Hip头顶"},
-}
 
 function close_position(a,b)
     return math.abs(a.x-b.x)+math.abs(a.y-b.y)+math.abs(a.z-b.z)<0.001
@@ -85,7 +81,7 @@ function discover_joints(d)
             end
         end
     end
-    event("anchor_joint_inventory",{root=d.root_name,hip=d.hip_name,display_roots=#d.display_roots})
+    if event then event("anchor_joint_inventory",{root=d.root_name,hip=d.hip_name,display_roots=#d.display_roots}) end
 end
 function prepare_rider(d)
     discover_joints(d)
@@ -117,8 +113,8 @@ function prepare_rider(d)
     end
     table.sort(d.rider_necks,function(a,b) return a.name<b.name end)
     local neck_names={};for _,entry in ipairs(d.rider_necks) do neck_names[#neck_names+1]=entry.name end
-    event("rider_head_binding",{head=d.rider_head_name,candidates=candidates,neck_candidates=neck_names,
-        fallback=not d.rider_head and "Griffin root + forward 3m / up 4m" or nil})
+    if event then event("rider_head_binding",{head=d.rider_head_name,candidates=candidates,neck_candidates=neck_names,
+        fallback=not d.rider_head and "Griffin root + forward 3m / up 4m" or nil}) end
 end
 function prepare_anchor_mode(d,key)
     assert(key=="rider" or key=="full","Unsupported display mode")
@@ -129,36 +125,10 @@ function write_anchor(d,target,neutral)
     d.anchor_target=target;d.neutral_anchor=neutral;d.moved=true
     d.transform:call("set_Position(via.vec3)",Vector3f.new(target.x,target.y,target.z))
     passengers.orient(d,passengers.player_config())
-    if debug_tools then debug_tools:capture("player_transform_written") end
     sync_player(d)
-    if debug_tools then debug_tools:capture("player_synced") end
-    passengers.apply_fall_experiment(d)
+    if passengers.on_anchor then passengers.on_anchor(d) end
     anti_jitter:after_anchor(d)
     d.anchor_plan={transform=target,context=target,controller=target}
 end
 
-function change_anchor_mode(key)
-    local d=active
-    if not d then anchor_mode=key;settings.anchor_mode=key;pcall(json.dump_file,settings_path,settings);event("anchor_mode_selected",key);return end
-    run_once(function()
-        if not alive or active~=d then return end
-        local mutating=false
-        local ok,err=pcall(function()
-            validate_spawn(d.spawn)
-            assert(owned_player(d,true),"Player binding changed")
-            prepare_anchor_mode(d,key)
-            mutating=true
-            restore_bone(d)
-            -- Normalize layers to the current player Transform once, at the boundary.
-            sync_player(d)
-            d.anchor_mode=key;anchor_mode=key;settings.anchor_mode=key;pcall(json.dump_file,settings_path,settings);d.anchor_target=nil;d.neutral_anchor=nil;d.anchor_plan=nil;d.target_probe_failed=nil
-            event("anchor_mode_changed",{mode=key,baseline=anchor_positions(d)})
-        end)
-        if not ok then
-            if mutating then stop_driver("位置实验切换未完成") end
-            failed("位置实验切换失败",err)
-        end
-    end)
-end
--- Head-joint camera follow; independent of navigation.
 end

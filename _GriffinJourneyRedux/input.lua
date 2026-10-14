@@ -19,16 +19,8 @@ controls.rows={
 controls.enums={keyboard={},gamepad={}}
 controls.choices={keyboard={"None"},gamepad={"None"}}
 controls.previous={}
-controls.save=function()
-    local ok,result=pcall(json.dump_file,settings_path,settings)
-    if not ok or result==false then
-        menu.save_error="设置保存失败，当前修改尚未写入文件："..tostring(result)
-        status=menu.save_error
-        return false
-    end
-    menu.save_error=nil
-    return true
-end
+-- The settings editor installs explicit persistence after loading/migration.
+controls.save=function() return true end
 controls.enum=function(type_name,target,prefix)
     local def=sdk.find_type_definition(type_name)
     if not def then return end
@@ -72,9 +64,11 @@ for _,row in ipairs(controls.rows) do
     end
 end
 masks={a=1,rt=2,lt=4,rb=8,lb=16,hover_up=32,hover_down=64,landing=128,ground_wind_start=256,ground_wind_end=512} -- Logical actions; physical enum values remain runtime-resolved above.
+local device_types={}
 controls.device=function(singleton_name,type_name,method)
     local singleton=sdk.get_native_singleton(singleton_name)
-    local def=sdk.find_type_definition(type_name)
+    local def=device_types[type_name]
+    if not def then def=sdk.find_type_definition(type_name);device_types[type_name]=def end
     return singleton and def and sdk.call_native_func(singleton,def,method)
 end
 function read_pad()
@@ -102,8 +96,8 @@ function read_pad()
         if capture.previous then
             for _,name in ipairs(controls.choices[capture.device]) do
                 if pressed[name] and not capture.previous[name] then
-                    settings.bindings[capture.action][capture.device]=name
-                    controls.capture=nil;controls.release_gate=true;controls.save();break
+                    menu.draft.bindings[capture.action][capture.device]=name
+                    controls.capture=nil;controls.release_gate=true;menu.changed();break
                 end
             end
         end
@@ -214,16 +208,16 @@ function dispatch(d)
             assert(owned_player(d, true) and player_fsm(d.player) == d.fsm, "Player binding changed")
             local manager = ch:call("get_ActionManager()")
             assert(manager and manager:call("get_GameObject()") == d.spawn.result.go, "ActionManager mismatch")
-            event("action_request", {node = intent.node, mode = intent.mode})
+            if event then event("action_request", {node = intent.node, mode = intent.mode}) end
             d.last_request = now()
             d.action_transition={node=intent.node,from=d.native_action,at=d.last_request}
-            assert(ai_takeover:tick(d),"方向6组件恢复失败")
+            if driver_extension then assert(driver_extension:tick(d),"附加组件恢复失败") end
             manager:call("requestActionCore(app.ActionManager.Priority, System.String, System.UInt32)", 10, intent.node, 0)
             request_camera_follow_check()
             d.mode = intent.mode
             d.intent = nil
             if d.mode == "taking_off" then d.takeoff_at = now(); d.saw_takeoff = false; d.auto_hover = intent.auto_hover;d.takeoff_play_started=false;d.takeoff_elapsed=0;d.takeoff_timer_last=now();d.takeoff_choice=nil;d.takeoff_stop_requested=nil end
-            event("action_returned", intent.node)
+            if event then event("action_returned", intent.node) end
         end)
         d.pending = false
         if not ok then stop_driver("Action request failed"); failed("动作请求失败", err) end
@@ -241,28 +235,7 @@ function apply_player_freeze(d, freeze)
     end
     assert(d.fsm:call("get_Enabled()") == desired, "Player FSM mode readback mismatch")
     d.freeze_requested = freeze
-    event("player_fsm_mode", {freeze_requested=freeze, enabled=desired, original_enabled=d.original_fsm})
+    if event then event("player_fsm_mode", {freeze_requested=freeze, enabled=desired, original_enabled=d.original_fsm}) end
 end
-freeze_revision = 0
-function change_player_freeze(freeze)
-    freeze_revision = freeze_revision + 1
-    local revision, d = freeze_revision, active
-    if not d then
-        settings.freeze_player = freeze
-        pcall(json.dump_file, settings_path, settings)
-        return
-    end
-    run_once(function()
-        if not alive or active ~= d or revision ~= freeze_revision then return end
-        local ok, err = pcall(function()
-            validate_spawn(d.spawn)
-            apply_player_freeze(d, freeze)
-            settings.freeze_player = freeze
-            pcall(json.dump_file, settings_path, settings)
-        end)
-        if not ok then stop_driver("FSM 对照切换失败"); failed("FSM 对照切换失败", err) end
-    end)
-end
-
 -- Bound to the retained spawn reference; free-player observations do not move the player.
 end
