@@ -3,7 +3,7 @@ return function(ctx)
 local _ENV=ctx
 -- Independent HID mapping, following OJR's capture/release-gate layout (no OJR/Hotkeys dependency).
 controls.rows={
-    {"spawn","召唤狮鹫","None","None"},{"start","开始驾驶（长按1秒，10米内）","F","RRight"},
+    {"spawn","召唤狮鹫","None","None"},{"start","开始驾驶（长按1秒）","F","RRight"},
     {"stop","结束驾驶（长按1秒）","X","None"},{"delete","删除狮鹫","None","None"},
     {"a","起飞","Space","RDown"},
     {"rt","冲刺／2档","LShift","RTrigBottom"},{"lt","悬停／1档","LControl","LTrigBottom"},
@@ -91,6 +91,7 @@ function read_pad()
         return kb and kb:call("isDown",code)==true or false
     end
     local current={}
+    local pad_down={start=down("gamepad",settings.bindings.start.gamepad),stop=down("gamepad",settings.bindings.stop.gamepad)}
     for name,binding in pairs(settings.bindings) do current[name]=down("keyboard",binding.keyboard) or down("gamepad",binding.gamepad) end
     local suppressed=false
     if controls.capture then
@@ -139,7 +140,7 @@ function read_pad()
         if ok and right and finite(right.x) and finite(right.y) then rx,ry=right.x,right.y else right_error="右摇杆读取失败" end
     end
     if suppressed then rx,ry,right_error=0,0,nil end
-    return {x=x,y=y,hover_x=hover_x,buttons=logical,rx=rx,ry=ry,right_error=right_error,edges=edges,down=current}
+    return {x=x,y=y,hover_x=hover_x,buttons=logical,rx=rx,ry=ry,right_error=right_error,edges=edges,down=current,pad_down=pad_down,pad_bits=bits}
 end
 
 -- Fresh press, continuous unpaused hold, one attempt until release (including rejection).
@@ -147,12 +148,17 @@ controls.holds={}
 function controls.hold_actions(result,blocked)
     local fired
     local t=now()
+    local driving=active~=nil or state.recovery~=nil or queued==true
+    local busy=driving or summon and summon.current~=nil
+    controls.hold_status=blocked and "暂停/录入/输入不可用：松开后重新长按" or "等待长按（1秒）"
     for _,name in ipairs({"stop","start"}) do
         local h=controls.holds[name] or {};controls.holds[name]=h
         if blocked or not finite(t) then
             h.started=nil;h.consumed=true
         elseif not result.down[name] then
             h.started=nil;h.consumed=false
+        elseif (name=="start" and busy) or (name=="stop" and not busy) then
+            h.started=nil;h.consumed=true
         elseif result.edges[name] then
             h.started=t;h.consumed=false
         elseif h.started and not h.consumed then
@@ -161,7 +167,8 @@ function controls.hold_actions(result,blocked)
         end
     end
     if fired then
-        -- Shared bindings must not start and stop with the same physical hold.
+        controls.hold_status=(fired=="start" and "开始驾驶" or "结束驾驶").."：本次长按已触发，松开后重新计时"
+        -- Shared bindings use the state at the fresh press, never switch mid-hold.
         for _,name in ipairs({"stop","start"}) do
             if result.down[name] then controls.holds[name].consumed=true end
         end

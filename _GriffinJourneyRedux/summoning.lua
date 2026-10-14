@@ -2,7 +2,7 @@
 return function(ctx)
 local _ENV=ctx
 summon={status="召唤演出：未运行"}
-for key,default in pairs({summon_height=10,summon_forward=5,summon_delay=5}) do
+for key,default in pairs({summon_height=25.2,summon_forward=10.094,summon_delay=4.1}) do
     local value=loaded_settings and loaded_settings[key]
     settings[key]=finite(value) and math.max(0,math.min(key=="summon_delay" and 30 or 50,value)) or default
 end

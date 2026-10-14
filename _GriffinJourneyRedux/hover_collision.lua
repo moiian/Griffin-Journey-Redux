@@ -1,8 +1,8 @@
 -- Fixed directional look-ahead guard. Own native queries; accepted poses only.
 return function(ctx)
 local _ENV=ctx
-hover_collision={enabled=false,return_to_safe=false,radius=4,height=4,span=8,lateral=0,margin=0.15,center_margin=0,center_distance=3,end_distance=3,side_distance=3,
-    auto_land=false,land_distance=2,land_grace=3,ground_status="近地降落：关闭",
+hover_collision={enabled=true,return_to_safe=false,radius=4,height=4,span=8,lateral=0,margin=0.15,center_margin=0,center_distance=6,end_distance=3,side_distance=3,
+    auto_land=true,land_distance=3.662,land_grace=3,ground_status="近地降落：关闭",
     casts=0,blocks=0,contacts=0,cost=0,status="1档防穿模：关闭"}
 local guard=hover_collision
 local config_numbers={

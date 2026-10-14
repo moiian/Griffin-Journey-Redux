@@ -32,8 +32,9 @@ function hotkey_start_driver()
         return math.sqrt(x*x+y*y+z*z)
     end)
     if not ok then failed("无法开始驾驶",distance);return end
-    event("boarding_distance_check",{distance=distance,limit=10,allowed=distance<10})
-    if distance>=10 then status=string.format("距离狮鹫根节点 %.2f 米，需小于10米；请靠近后松开重按。",distance);return end
+    local limit=settings.boarding_distance
+    event("boarding_distance_check",{distance=distance,limit=limit,allowed=distance<limit})
+    if distance>=limit then status=string.format("距离狮鹫根节点 %.2f 米，需小于 %.2f 米；请靠近后松开重按。",distance,limit);return end
     start_driver(r)
 end
 
