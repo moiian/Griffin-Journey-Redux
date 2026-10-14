@@ -25,6 +25,7 @@ re.on_draw_ui(function()
         imgui.tree_pop()
     end
     if imgui.tree_node("飞行设置") then
+        hover_collision:draw()
         local ai_changed,ai_value=menu.toggle("方向6：禁用狮鹫决策组件（实验）",ai_takeover.enabled)
         if ai_changed then ai_takeover:set_enabled(ai_value) end
         if ai_takeover.enabled or ai_takeover.held or ai_takeover.errors>0 then imgui.text(ai_takeover.status) end

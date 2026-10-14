@@ -41,6 +41,7 @@ end
 local function write_pose(d,m)
     binding(d,m) -- Never write retained components after an instance/controller change.
     local p=m.transform:call("get_UniversalPosition()")
+    if hover_collision then hover_collision:constrain(d,m,p) end
     p.x=m.position.x;p.y=m.position.y;p.z=m.position.z
     local q=Quaternion.new(math.cos(m.yaw/2),0,math.sin(m.yaw/2),0)
     m.dirty=true
