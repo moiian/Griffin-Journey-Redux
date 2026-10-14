@@ -118,6 +118,7 @@ function adapter:draw()
     end
     if self.test_result then imgui.text("接口测试："..self.test_result) end
     if item_probe then item_probe:draw() end
+    if shop_item then imgui.text(shop_item.status) end
     imgui.text(self.status)
     imgui.text(string.format("道具 %d / 脚本 %d；使用检查 %d；最近放行 %s",self.id,self.script_id,self.use_checks,tostring(self.last_allowed)))
     imgui.text(string.format("Common检查 %d；最近改写 %s",self.common_checks or 0,tostring(self.common_override)))

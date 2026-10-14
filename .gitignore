@@ -172,3 +172,7 @@
 !/_GriffinJourneyReduxDebug/item_probe.lua
 !/ITEM_0327_USE_GATE_PROBE.md
 !/ITEM_0328_COMMON_GATE.md
+
+!/SHOP_0329_NATIVE_PRODUCT.md
+
+!/_GriffinJourneyRedux/shop_item.lua

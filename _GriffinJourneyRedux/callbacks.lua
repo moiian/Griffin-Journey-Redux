@@ -5,6 +5,7 @@ re.on_frame(function()
     if not alive then return end
     if collision_debug then collision_debug:tick() end
     if item_probe then item_probe:tick() end
+    shop_item:tick()
     if debug_tools then debug_tools:capture("frame_before_beta_tick");debug_tools:tick() end
     anti_jitter:tick()
     local c = core()
@@ -277,6 +278,7 @@ _G.GriffinFlightBetaBridge = bridge
 _G.GriffinJourneyReduxBridge = bridge
 
 re.on_script_reset(function()
+    shop_item:shutdown()
     if item_probe then item_probe:set_enabled(false) end    if collision_debug then collision_debug:record("script_reset",{},true);collision_debug:flush(true) end
     summon:cancel("脚本重置")
     stop_driver("脚本重置")

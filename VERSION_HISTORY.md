@@ -646,3 +646,7 @@ All 23 Lua54 modules and relevant full offline regressions pass with/without opt
 ## Griffin Journey Redux 0.3.28
 
 Recorded item eligibility fails in Common before Sub. Add exact-item post override with loaded-script/player/busy guards, compact full-signature fallback, and native/effective probe results. Existing 13 offline suites plus new Common tests passed. User settings and bundle untouched. Gameplay use remains pending verification; main unchanged.
+
+## Griffin Journey Redux 0.3.29
+
+Register chocolate natively in Shop 5 at array position 2, stock 19 / daily 9; preserve other goods and reuse existing entry. Remove bundle shop_buy and Shop Editor runtime dependency. Original Content Editor still loads item and script. Offline regressions passed; UI position and replenishment await game verification. User confirmed 0.3.28 item use and previous shop listing work.
