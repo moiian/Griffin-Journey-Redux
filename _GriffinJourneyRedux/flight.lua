@@ -126,6 +126,15 @@ function navigation_anchor(d,ch,tr,fx,fz)
         requested_distance=math.min(length,radius),head_joint=d.rider_head_name,
         neutral_height=height,neutral_pitch_degrees=neutral_pitch*180/math.pi}
 end
+-- Shared by RS and the scoped near-ground experiment.
+function request_hover_landing(d,source)
+    assert(d==active and d.controls_active and not d.external_control,"Landing ownership changed")
+    hover_motion:release(d)
+    d.gear=1;d.manual_hold="landing";d.wait_center=true
+    d.auto_landing_hold=source=="near_ground" or nil
+    d.control_node=nil;d.intent=nil;d.auto_hover=false
+    event("hover_landing_requested",{source=source})
+end
 function tick_driver()
     local d = active
     if not d or not alive then return end
@@ -187,7 +196,7 @@ function tick_driver()
         local function resume(gear)
             local keep_hover=gear==1 and not d.external_control and d.control_node=="Ch253HoverWaitHoHomingHeight"
             d.gear=gear; d.controls_active=true; d.external_control=false
-            d.manual_hold=nil; d.control_node=keep_hover and "Ch253HoverWaitHoHomingHeight" or nil; d.auto_hover=false
+            d.manual_hold=nil;d.auto_landing_hold=nil; d.control_node=keep_hover and "Ch253HoverWaitHoHomingHeight" or nil; d.auto_hover=false
             if not keep_hover then d.intent=nil end
             d.mode=keep_hover and "hover" or "control"
             d.hover_wait_center=nil;d.takeoff_choice=nil;d.takeoff_stop_requested=nil
@@ -230,7 +239,7 @@ function tick_driver()
             resume(1);hover_motion:release(d);d.mode="taking_off"
             set_intent(d,"Ch253TakeoffBackJump","taking_off");d.intent.auto_hover=true
         elseif held(pressed,masks.landing) then
-            resume(1);hover_motion:release(d);d.manual_hold="landing";d.wait_center=true
+            resume(1);request_hover_landing(d,"manual")
         elseif d.gear==1 and flying and not ground and (held(pressed,masks.rb) or held(pressed,masks.lb)) then
             resume(2)
         end
@@ -249,8 +258,11 @@ function tick_driver()
                 d.mode="ground";d.controls_active=false
             end
         end
+        if hover_collision then hover_collision:observe(d,ch,tr,flying,ground,action_name) end
         if d.manual_hold=="landing" then
-            if not moving then d.wait_center=false
+            if d.auto_landing_hold then
+                if ground and not flying then d.auto_landing_hold=nil end
+            elseif not moving then d.wait_center=false
             elseif not d.wait_center then d.manual_hold=nil;d.control_node=nil end
         end
         if d.controls_active and not d.external_control and d.mode~="taking_off" then
@@ -276,6 +288,8 @@ function tick_driver()
         passengers.tick(d)
         if d.trace then d.trace.passenger_protection=passengers.protection.counts;d.trace.seat_orientation=d.orientation_trace end
     end)
-    if not ok then stop_driver("驾驶检查或位置同步失败"); failed("驾驶已停止", err) end
+    if not ok then
+        if hover_collision then hover_collision:record("driver_error",tostring(err),true) end
+        stop_driver("驾驶检查或位置同步失败"); failed("驾驶已停止", err) end
 end
 end
