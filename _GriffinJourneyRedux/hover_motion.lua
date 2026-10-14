@@ -99,7 +99,7 @@ function hover_motion:tick(d,ch,tr,fx,fz,flying,ground,action)
         d.hover_motion=m
     end
     binding(d,m)
-    if hover_collision and hover_collision.enabled and not hover_collision:prepare(d,m) then
+    if hover_collision and hover_collision.enabled and not hover_collision:prepare(d,m,true) then
         m.pending_pose=nil;return
     end
     local t=now()

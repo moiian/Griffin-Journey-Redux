@@ -1,7 +1,7 @@
 -- Experimental preflight guard. Own native queries; accepted poses only.
 return function(ctx)
 local _ENV=ctx
-hover_collision={enabled=false,radius=1.5,height=2.5,span=2,margin=0.15,
+hover_collision={enabled=false,return_to_safe=false,radius=1.5,height=2.5,span=2,margin=0.15,
     auto_land=false,land_distance=2,land_grace=3,ground_status="近地降落：关闭",
     casts=0,blocks=0,contacts=0,cost=0,status="1档防穿模：关闭"}
 local guard=hover_collision
@@ -48,9 +48,16 @@ local function yaw_of(m)
     local x,y,z,w=q.x/norm,q.y/norm,q.z/norm,q.w/norm
     return math.atan(2*(x*z+w*y),1-2*(x*x+y*y))
 end
-local function freeze(m)
+local function freeze(m,current)
     local safe=m.collision_safe
-    if safe then m.position=plain(safe.position);m.yaw=safe.yaw end
+    if guard.return_to_safe then
+        if safe then m.position=plain(safe.position);m.yaw=safe.yaw end
+        m.rebase_after_block=nil
+    else
+        m.position=plain(current)
+        m.yaw=m.collision_actual_yaw or m.yaw
+        m.rebase_after_block=true
+    end
     m.vx=0;m.vy=0;m.vz=0;m.turn=0;m.coast=nil
 end
 function guard:record(name,detail,urgent)
@@ -65,7 +72,7 @@ function guard:set_enabled(value)
             assert(validate_spawn(d.spawn)==m.character,"Collision binding changed")
             m.position=vector(m.transform:call("get_UniversalPosition()"));m.yaw=yaw_of(m)
             m.vx=0;m.vy=0;m.vz=0;m.turn=0;m.coast=nil
-            m.collision_safe=nil;m.pending_pose=nil;m.last_time=now()
+            m.collision_safe=nil;m.pending_pose=nil;m.rebase_after_block=nil;m.last_time=now()
             d.heading={x=math.sin(m.yaw),z=math.cos(m.yaw)}
         end)
         if not ok then self.status="切换位置同步失败："..tostring(err);self:record("toggle_error",tostring(err),true);return end
@@ -74,7 +81,14 @@ function guard:set_enabled(value)
     self.status=self.enabled and "1档防穿模：等待位移" or "1档防穿模：关闭"
     self:record("collision_toggle",{enabled=self.enabled},true)
 end
-function guard:prepare(d,m)
+function guard:set_return_to_safe(value)
+    -- Reset both A/B choices at the current native pose; never revive a stale target.
+    local previous=self.return_to_safe
+    self.return_to_safe=value==true
+    self:set_enabled(self.enabled)
+    self:record("return_to_safe_toggle",{previous=previous,enabled=self.return_to_safe},true)
+end
+function guard:prepare(d,m,planning)
     if not self.enabled then return true end
     if not alive or state.generation~=generation or active~=d or d.gear~=1 or not d.controls_active
         or d.external_control or d.mode=="taking_off" or d.manual_hold=="landing"
@@ -84,10 +98,15 @@ function guard:prepare(d,m)
         m.collision_safe={position=plain(m.position),yaw=m.yaw};m.collision_epoch=self.epoch
         self:record("hover_reference",{position=plain(m.position),yaw=m.yaw},true)
     end
+    if planning and m.rebase_after_block and not self.return_to_safe then
+        -- Keep following the actual native pose while rejected; releasing input
+        -- must not revive the pre-collision absolute target on a later frame.
+        m.position=vector(m.transform:call("get_UniversalPosition()"));m.yaw=yaw_of(m)
+    end
     return true
 end
 function guard:accepted(m)
-    if self.enabled then m.collision_safe={position=plain(m.position),yaw=m.yaw};self.writes=(self.writes or 0)+1 end
+    if self.enabled then m.collision_safe={position=plain(m.position),yaw=m.yaw};self.writes=(self.writes or 0)+1;m.rebase_after_block=nil end
 end
 function guard:constrain(d,m,current)
     if not self.enabled then return true end
@@ -103,6 +122,7 @@ function guard:constrain(d,m,current)
         local delta={x=m.position.x-current.x,y=m.position.y-current.y,z=m.position.z-current.z}
         vector(delta)
         local yaw=yaw_of(m)
+        m.collision_actual_yaw=yaw
         local angle=(m.yaw-yaw+math.pi)%(2*math.pi)-math.pi
         self.request={x=delta.x,y=delta.y,z=delta.z,yaw=angle}
         self.actual=plain(current);self.target=plain(m.position)
@@ -113,7 +133,7 @@ function guard:constrain(d,m,current)
         if dot(delta,delta)<1e-18 and math.abs(angle)<1e-9 then
             probe.result="idle";self.status="1档防穿模：等待位移";return
         end
-        if self.retry_at and now()<self.retry_at then probe.result="retry_wait";freeze(m);return end
+        if self.retry_at and now()<self.retry_at then probe.result="retry_wait";freeze(m,current);return end
         local local_p=m.transform:call("get_Position()");vector(local_p)
         local oldx,oldz,newx,newz=math.sin(yaw),math.cos(yaw),math.sin(m.yaw),math.cos(m.yaw)
         for _,offset in ipairs({0,self.span,-self.span}) do
@@ -126,7 +146,7 @@ function guard:constrain(d,m,current)
                 local hit=cast(start,finish,radius)
                 if not hit then self.last_direction="reverse";hit=cast(finish,start,radius) end
                 if hit then
-                    probe.result="blocked";freeze(m);self.blocks=self.blocks+1
+                    probe.result="blocked";freeze(m,current);self.blocks=self.blocks+1
                     self.status="1档防穿模：环境接触，已拒绝位移"
                     return
                 end
@@ -136,7 +156,7 @@ function guard:constrain(d,m,current)
     end)
     self.cost=self.cost+math.max(0,os.clock()-started)
     if not ok then
-        freeze(m);self.retry_at=now()+0.5
+        freeze(m,current);self.retry_at=now()+0.5
         self.status="1档防穿模检测失败，已暂停代码移动："..tostring(err)
         self:record("query_error",tostring(err),true)
     end
@@ -201,6 +221,9 @@ function guard:draw()
     if not imgui.tree_node("1档防穿模测试") then return end
     local changed,value=menu.toggle("启用1档防穿模（实验）",self.enabled)
     if changed then self:set_enabled(value) end
+    changed,value=menu.toggle("受阻后拉回最后安全位置（对照）",self.return_to_safe)
+    if changed then self:set_return_to_safe(value) end
+    imgui.text(self.return_to_safe and "受阻拉回：开启（0.3.17旧逻辑）" or "受阻拉回：关闭（受阻后按实际位置重新计算）")
     changed,value=menu.toggle("启用1档近地自动降落（实验）",self.auto_land)
     if changed then self:set_auto_land(value) end
     local edit,distance=imgui.slider_float("近地降落距离（根节点到下方表面/米）",self.land_distance,0.25,15)
