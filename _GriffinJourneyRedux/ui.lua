@@ -7,7 +7,7 @@ re.on_draw_ui(function()
     if menu.save_error then imgui.text(menu.save_error) end
     if imgui.tree_node("一般设置") then
         if beta_button("一键生成狮鹫###BetaSpawn") then spawn() end
-        if beta_button("召唤演出测试###BetaSummonPerformance") then summon:request() end
+        if beta_button("狮鹫召唤演出###BetaSummonPerformance") then bridge.summon_performance() end
         if imgui.tree_node("召唤演出设置") then
             menu.slider("summon_delay","生成时间（演出开始后秒数）",0,30)
             menu.slider("summon_height","生成上方距离（米）",0,50)
@@ -19,7 +19,6 @@ re.on_draw_ui(function()
         if beta_button("开始驾驶###BetaStart") then start_driver() end
         if beta_button("结束驾驶###BetaStop") then menu.stop() end
         if beta_button("删除狮鹫###BetaDelete") then menu.delete() end
-        if beta_button("让狮鹫听话###BetaSelectPlayerTarget") then menu.listen() end
         imgui.text(status)
         if active then imgui.text("当前档位："..active.gear.."档") end
         imgui.tree_pop()

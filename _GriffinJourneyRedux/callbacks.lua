@@ -55,27 +55,32 @@ re.on_application_entry("UpdateHID",function()
     if not alive then return end
     local ok,result=pcall(read_pad)
     if not ok then
+        controls.hold_actions({},true)
         if core() and menu.gameplay_paused() then return end
         if active then stop_driver("输入读取失败");failed("输入读取失败",result) end
         return
     end
     input=result
     if core() and menu.gameplay_paused() then
+        controls.hold_actions(result,true)
         if active then active.previous_buttons=result.buttons end
         return -- menu navigation must not invoke gameplay hotkeys
     end
     if active and active.menu_paused then
+        controls.hold_actions(result,true)
         active.previous_buttons=result.buttons
         return -- seed menu-held inputs before the first resumed behavior update
     end
+    local hold_action=controls.hold_actions(result,not core() or controls.capture or controls.release_gate)
     if controls.capture or controls.release_gate then return end
-    for _,name in ipairs({"stop","delete","spawn","start","listen","preset_next"}) do
+    if hold_action then
+        if hold_action=="start" then hotkey_start_driver() else menu.stop() end
+        return
+    end
+    for _,name in ipairs({"delete","spawn","preset_next"}) do
         if result.edges[name] then
             if name=="spawn" then spawn()
-            elseif name=="start" then start_driver()
-            elseif name=="stop" then menu.stop()
             elseif name=="delete" then menu.delete()
-            elseif name=="listen" then menu.listen()
             elseif name=="preset_next" then menu.next_preset() end
             break
         end
@@ -212,6 +217,11 @@ function bridge.get_instance()
     if not alive or state.generation ~= generation then return nil end
     local r = active and active.spawn or state.spawns[#state.spawns]
     if r and r.ready and not r.delete_requested then return r.result end
+end
+-- Public item-use API: snapshot the current menu settings through the same request path.
+function bridge.summon_performance()
+    if not alive or state.generation~=generation then return false,"脚本已重载" end
+    return summon:request()
 end
 function bridge.set_skip_think(enabled) return set_skip_think(enabled) end
 function bridge.get_skip_think() return skip_think_enabled,skip_think_status end

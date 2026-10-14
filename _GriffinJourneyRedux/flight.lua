@@ -18,7 +18,26 @@ local function horizontal_heading(d,qx,qy,qz,qw)
     if right>0.000001 then return -rz/right,rx/right,length end
     return 0,1,length
 end
-function start_driver()
+function hotkey_start_driver()
+    if active or state.recovery or queued then return end
+    local r=state.spawns[#state.spawns]
+    local ok,distance=pcall(function()
+        assert(r and r.ready and not r.deleted and not r.delete_requested,"请先生成狮鹫并等待就绪")
+        local ch=validate_spawn(r)
+        local pt=assert(r.owner:call("get_Transform()"),"玩家根节点不可用")
+        local gt=assert(ch:call("get_Transform()"),"狮鹫根节点不可用")
+        local a=vector(pt:call("get_UniversalPosition()"))
+        local b=vector(gt:call("get_UniversalPosition()"))
+        local x,y,z=a.x-b.x,a.y-b.y,a.z-b.z
+        return math.sqrt(x*x+y*y+z*z)
+    end)
+    if not ok then failed("无法开始驾驶",distance);return end
+    event("boarding_distance_check",{distance=distance,limit=10,allowed=distance<10})
+    if distance>=10 then status=string.format("距离狮鹫根节点 %.2f 米，需小于10米；请靠近后松开重按。",distance);return end
+    start_driver(r)
+end
+
+function start_driver(expected_spawn)
     if summon and summon.current then status="请等待召唤演出结束。";return end
     local experiment = rawget(_G, "GriffinMountExperimentControl")
     if experiment and experiment.is_driving() then status = "请先结束实验工具的玩家固定。"; return end
@@ -26,6 +45,7 @@ function start_driver()
     if not core() then status = "等待 NickCore 加载。"; return end
     local r = state.spawns[#state.spawns]
     if not r then status = "请先生成狮鹫。"; return end
+    if expected_spawn and r~=expected_spawn then status="狮鹫实例已变化，请松开后重试。";return end
     local token = {}
     operation = token
     queued = true
@@ -35,6 +55,7 @@ function start_driver()
         queued = false
         if not alive then return end
         local ok, err = pcall(function()
+            if expected_spawn then assert(state.spawns[#state.spawns]==expected_spawn,"狮鹫实例已变化") end
             local c = assert(core(), "等待 NickCore 加载")
             r.party = capture_party(c, r.owner)
             passengers.refresh(true)

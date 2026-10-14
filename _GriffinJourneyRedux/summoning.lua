@@ -41,9 +41,9 @@ function summon:cancel(reason)
     self.status="召唤演出已取消："..tostring(reason)
 end
 function summon:request()
-    if self.current then return false end
+    if self.current then return false,"召唤演出正在运行" end
     local ok,owner,tr,flow=pcall(can_start)
-    if not ok then self.status="召唤演出未启动："..tostring(owner);return false end
+    if not ok then self.status="召唤演出未启动："..tostring(owner);return false,self.status end
     local request={owner=owner,transform=tr,flow=flow,stage="queued",elapsed=0,
         height=settings.summon_height,forward=settings.summon_forward,delay=settings.summon_delay}
     self.current=request;self.status="召唤演出：等待开始"
@@ -59,7 +59,7 @@ function summon:request()
         end)
         if not started then self:cancel(err) end
     end)
-    return true
+    return true,"召唤演出请求已接受"
 end
 function summon:tick()
     local request=self.current

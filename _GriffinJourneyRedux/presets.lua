@@ -307,15 +307,6 @@ menu.delete=function()
         for _,r in ipairs(state.spawns) do r.delete_requested=true;delete_one(r) end
     end)
 end
-menu.listen=function()
-    local r=active and active.spawn or state.spawns[#state.spawns]
-    if not r or not r.ready or r.delete_requested then status="请先召唤狮鹫。";return end
-    run_once(function()
-        if not alive or r.deleted or r.delete_requested then return end
-        local ok,err=pcall(select_player_target,r)
-        if ok then status="狮鹫已重新锁定玩家。" else failed("未能重新锁定玩家",err) end
-    end)
-end
 menu.slider=function(key,label,low,high)
     if type(imgui.slider_float)~="function" then return end
     local changed,value=imgui.slider_float(label,math.max(low,math.min(high,settings[key])),low,high)

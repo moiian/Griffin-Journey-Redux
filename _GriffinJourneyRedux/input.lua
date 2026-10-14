@@ -3,15 +3,15 @@ return function(ctx)
 local _ENV=ctx
 -- Independent HID mapping, following OJR's capture/release-gate layout (no OJR/Hotkeys dependency).
 controls.rows={
-    {"spawn","召唤狮鹫","None","None"},{"start","开始驾驶","F","None"},
-    {"stop","结束驾驶","X","None"},{"delete","删除狮鹫","None","None"},
-    {"listen","让狮鹫听话","H","None"},{"a","起飞","Space","RDown"},
+    {"spawn","召唤狮鹫","None","None"},{"start","开始驾驶（长按1秒，10米内）","F","RRight"},
+    {"stop","结束驾驶（长按1秒）","X","None"},{"delete","删除狮鹫","None","None"},
+    {"a","起飞","Space","RDown"},
     {"rt","冲刺／2档","LShift","RTrigBottom"},{"lt","悬停／1档","LControl","LTrigBottom"},
     {"hover_up","1档上移","E","RDown"},{"hover_down","1档下移","Q","RUp"},
     {"landing","原生降落（1／2档）","G","RStickPush"},
     {"rb","冲刺爬升／2档","R","LTrigTop"},{"lb","冲刺俯冲／2档","C","RTrigTop"},
     {"left","向左","A","None"},{"right","向右","D","None"},
-    {"up","向上／前","W","None"},{"down","向下／后","S","None"},
+    {"up","向前","W","None"},{"down","向后","S","None"},
     {"preset_next","切换座位预设","None","None"},
 }
 controls.enums={keyboard={},gamepad={}}
@@ -56,12 +56,15 @@ settings.bindings={}
 local migrate_bindings=not loaded_settings or loaded_settings.flight_bindings_revision~=1
 local old_defaults={rb={keyboard="E",gamepad="RTrigTop"},lb={keyboard="Q",gamepad="LTrigTop"}}
 settings.flight_bindings_revision=1
+settings.boarding_bindings_revision=1
 for _,row in ipairs(controls.rows) do
     settings.bindings[row[1]]={}
     for i,device in ipairs({"keyboard","gamepad"}) do
         local stored=loaded_settings and loaded_settings.bindings and loaded_settings.bindings[row[1]]
         stored=type(stored)=="table" and stored[device]
-        -- Upgrade only former defaults once; retain custom bindings and explicit None.
+        -- First upgrade enables the requested B binding only when no custom pad key exists.
+        if row[1]=="start" and device=="gamepad" and (not loaded_settings or loaded_settings.boarding_bindings_revision~=1) and stored=="None" then stored=nil end
+        -- Retain other custom bindings and explicit None.
         if migrate_bindings and old_defaults[row[1]] and stored==old_defaults[row[1]][device] then stored=nil end
         settings.bindings[row[1]][device]=(stored=="None" or controls.enums[device][stored]) and stored or row[i+2]
     end
@@ -136,7 +139,34 @@ function read_pad()
         if ok and right and finite(right.x) and finite(right.y) then rx,ry=right.x,right.y else right_error="右摇杆读取失败" end
     end
     if suppressed then rx,ry,right_error=0,0,nil end
-    return {x=x,y=y,hover_x=hover_x,buttons=logical,rx=rx,ry=ry,right_error=right_error,edges=edges}
+    return {x=x,y=y,hover_x=hover_x,buttons=logical,rx=rx,ry=ry,right_error=right_error,edges=edges,down=current}
+end
+
+-- Fresh press, continuous unpaused hold, one attempt until release (including rejection).
+controls.holds={}
+function controls.hold_actions(result,blocked)
+    local fired
+    local t=now()
+    for _,name in ipairs({"stop","start"}) do
+        local h=controls.holds[name] or {};controls.holds[name]=h
+        if blocked or not finite(t) then
+            h.started=nil;h.consumed=true
+        elseif not result.down[name] then
+            h.started=nil;h.consumed=false
+        elseif result.edges[name] then
+            h.started=t;h.consumed=false
+        elseif h.started and not h.consumed then
+            if t<h.started then h.started=nil;h.consumed=true
+            elseif t-h.started>=1 then h.consumed=true;fired=fired or name end
+        end
+    end
+    if fired then
+        -- Shared bindings must not start and stop with the same physical hold.
+        for _,name in ipairs({"stop","start"}) do
+            if result.down[name] then controls.holds[name].consumed=true end
+        end
+    end
+    return fired
 end
 
 function held(bits, mask) return (bits & mask) == mask end
