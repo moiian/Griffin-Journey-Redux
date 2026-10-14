@@ -96,7 +96,7 @@ function start_driver(expected_spawn)
                 d.controls_active=true; d.control_node="Ch253HoverWaitHoHomingHeight"
                 set_intent(d, "Ch253HoverWaitHoHomingHeight", "hover")
             end
-            status = "驾驶中：A 地面起飞／1档上移；Y 下移；RS 降落；RB 俯冲／LB 爬升进入2档；LT 惯性悬停；左摇杆前后移动、左右转向；1档镜头仅转向时跟随，右摇杆可打断。"
+            status = "驾驶中：地面RB翼风攻击／LB结束；A 地面起飞／1档上移；Y 下移；RS 降落；RB 俯冲／LB 爬升进入2档；LT 惯性悬停；左摇杆前后移动、左右转向；1档镜头仅转向时跟随，右摇杆可打断。"
             event("driver_started", {freeze_player = d.freeze_requested,anchor_mode=d.anchor_mode,navigation_radius=settings.navigation_radius,steering_yaw=settings.steering_yaw,steering_pitch=settings.steering_pitch})
         end)
         if not ok then
@@ -285,6 +285,11 @@ function tick_driver()
             elseif held(pressed,masks.lt) then
                 d.takeoff_choice="hover";d.takeoff_stop_requested=true
             end
+        elseif ground and not flying and not d.external_control and d.mode~="taking_off"
+            and (held(pressed,masks.ground_wind_start) or held(pressed,masks.ground_wind_end)) then
+            local node=held(pressed,masks.ground_wind_end) and "Ch253WingWindAttackEnd" or "Ch253WingWindAttackStartLoop"
+            hover_motion:release(d);d.controls_active=false;d.control_node=nil;d.manual_hold=nil;d.auto_hover=false
+            set_intent(d,node,"ground_wind")
         elseif held(pressed,masks.rt) then
             resume(2)
         elseif held(pressed,masks.lt) then

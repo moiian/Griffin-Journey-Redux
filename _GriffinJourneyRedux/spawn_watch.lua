@@ -108,7 +108,7 @@ local function sample(r,t)
         local b=vector(ch:call("get_Transform()"):call("get_UniversalPosition()"))
         local dx,dy,dz=a.x-b.x,a.y-b.y,a.z-b.z
         r.player_distance=math.sqrt(dx*dx+dy*dy+dz*dz)
-        if r.player_distance>30 then retire(r,"玩家离狮鹫超过30米") end
+        if r.player_distance>43 then retire(r,"玩家离狮鹫超过43米") end
     end
 end
 function watch:tick()

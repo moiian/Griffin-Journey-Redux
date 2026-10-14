@@ -37,6 +37,31 @@ function spawn(options)
     end)
     return true
 end
+function tick_cleanup_departures()
+    local t=now()
+    for _,r in ipairs(state.spawns) do
+        local departure=r.departure
+        if departure then
+            local dt=t-departure.last;departure.last=t
+            if not menu.gameplay_paused() and finite(dt) and dt>=0 then departure.elapsed=departure.elapsed+dt end
+        end
+    end
+end
+local function native_flag(ch,name)
+    local ok,value=pcall(ch.call,ch,name.."()")
+    if ok and type(value)=="boolean" then return value end
+end
+local function departure_action(r,ch,go,node)
+    local ok,err=pcall(function()
+        assert(ch:get_Valid() and go:get_Valid() and ch:call("get_GameObject()")==go,"离场实例已变化")
+        local manager=ch:call("get_ActionManager()")
+        assert(manager and manager:call("get_GameObject()")==go,"离场动作管理器归属不符")
+        manager:call("requestActionCore(app.ActionManager.Priority, System.String, System.UInt32)",10,node,0)
+        event("cleanup_departure_action",{node=node,elapsed=r.departure and r.departure.elapsed})
+    end)
+    if not ok then event("cleanup_departure_action_failed",tostring(err)) end
+    return ok
+end
 delete_one = function(r)
     if r.destroy_queued then return end
     local result = r.result
@@ -45,13 +70,35 @@ delete_one = function(r)
     local go = result.go
     run_once(function()
         if not alive then r.destroy_queued = false; return end
+        if menu.gameplay_paused() then r.destroy_queued=false;return end
         local ok, err = pcall(function()
             assert(not (active and active.spawn==r) and not (state.recovery and state.recovery.spawn==r), "End this Griffin driving before deletion")
             assert(r.result == result and result.go == go, "Spawn reference changed")
             if go:get_Valid() then
                 if result.chara and result.chara:get_Valid() then
-                    assert(result.chara:call("get_GameObject()") == go
-                        and result.chara:get_CharaIDString() == "ch253000_00", "Spawn identity mismatch")
+                    local ch=result.chara
+                    assert(ch:call("get_GameObject()") == go
+                        and ch:get_CharaIDString() == "ch253000_00", "Spawn identity mismatch")
+                    local healthy=not r.sinking and native_flag(ch,"get_IsDead")==false
+                        and native_flag(ch,"get_IsFallDead")==false and native_flag(ch,"get_IsDown")==false
+                    if r.ready and healthy and not r.departure_skip then
+                        if not r.departure and native_flag(ch,"get_IsGround")==true and native_flag(ch,"get_IsFlight")==false then
+                            r.departure={elapsed=0,last=now(),go=go,ch=ch}
+                            if not departure_action(r,ch,go,"Ch253TakeoffBackJump") then r.departure_skip=true;r.departure=nil end
+                        end
+                        local departure=r.departure
+                        if departure then
+                            assert(departure.go==go and departure.ch==ch,"离场归属已变化")
+                            if departure.elapsed>=3 and not departure.flight_sent then
+                                departure.flight_sent=true
+                                departure_action(r,ch,go,"FlightTarget")
+                            end
+                            if departure.elapsed<4.2 then
+                                status=string.format("狮鹫离场演出：%.2f / 4.20秒",departure.elapsed)
+                                return
+                            end
+                        end
+                    end
                 end
                 event("delete_requested", "Only this Beta's returned GameObject")
                 go:destroy(go) -- same native destruction form as installed NickCore; never destroy_spawns()

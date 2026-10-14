@@ -3,6 +3,7 @@ return function(ctx)
 local _ENV=ctx
 re.on_frame(function()
     if not alive then return end
+    tick_cleanup_departures()
     if collision_debug then collision_debug:tick() end
     if item_probe then item_probe:tick() end
     shop_item:tick()

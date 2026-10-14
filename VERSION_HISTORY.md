@@ -662,3 +662,7 @@ Normal airborne driver exit requests native landing once after successful rider 
 ## Griffin Journey Redux 0.3.32
 
 User did not receive pizza in 0.3.31; herb observations are inconclusive. Pin native getItem(Int32,Int32,CharacterID) method definition and player enum, validate native item dictionary, and read player stack before/after. Add independent one-item grant test and transaction JSON; Void return is not proof of inventory success and unconfirmed calls never auto-retry. Existing 17 suites plus new grant tests passed offline; in-game result pending. Settings and bundle untouched.
+
+## Griffin Journey Redux 0.3.33
+
+Grounded healthy owned Griffin cleanup now requests takeoff, FlightTarget at 3s, and exact-object destruction at 4.2s of unpaused time after rider release. Idle cleanup distance is >43m. Add independently rebindable ground wing start/end on physical RB/LB (C/R), preserving air bumper controls and enforcing ground again at dispatch. Existing 18 suites plus departure/wing tests passed offline. User confirms pizza receipt, mounted use/exit and cleanup; do not request repeated acceptance for those. Settings and bundle unchanged.

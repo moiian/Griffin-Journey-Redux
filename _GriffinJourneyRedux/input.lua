@@ -10,6 +10,8 @@ controls.rows={
     {"hover_up","1档上移","E","RDown"},{"hover_down","1档下移","Q","RUp"},
     {"landing","原生降落（1／2档）","G","RStickPush"},
     {"rb","冲刺爬升／2档","R","LTrigTop"},{"lb","冲刺俯冲／2档","C","RTrigTop"},
+    {"ground_wind_start","地面翼风攻击开始／循环","C","RTrigTop"},
+    {"ground_wind_end","地面翼风攻击结束","R","LTrigTop"},
     {"left","向左","A","None"},{"right","向右","D","None"},
     {"up","向前","W","None"},{"down","向后","S","None"},
     {"preset_next","切换座位预设","None","None"},
@@ -69,7 +71,7 @@ for _,row in ipairs(controls.rows) do
         settings.bindings[row[1]][device]=(stored=="None" or controls.enums[device][stored]) and stored or row[i+2]
     end
 end
-masks={a=1,rt=2,lt=4,rb=8,lb=16,hover_up=32,hover_down=64,landing=128} -- Logical actions; physical enum values remain runtime-resolved above.
+masks={a=1,rt=2,lt=4,rb=8,lb=16,hover_up=32,hover_down=64,landing=128,ground_wind_start=256,ground_wind_end=512} -- Logical actions; physical enum values remain runtime-resolved above.
 controls.device=function(singleton_name,type_name,method)
     local singleton=sdk.get_native_singleton(singleton_name)
     local def=sdk.find_type_definition(type_name)
@@ -183,7 +185,7 @@ function action_phase_allowed(phase,flying,ground)
         or phase=="ground" and ground and not flying
 end
 function set_intent(d, node, mode)
-    local phase=mode=="taking_off" and "ground"
+    local phase=(mode=="taking_off" or mode=="ground_wind") and "ground"
         or (mode=="hover" or mode=="dash" or mode=="landing") and "air" or nil
     d.intent = {node = node, mode = mode,phase=phase}
 end
@@ -199,6 +201,7 @@ function dispatch(d)
         local ok, err = pcall(function()
             local ch = validate_spawn(d.spawn)
             -- Recheck at native submission: the phase may change while queued.
+            if intent.mode=="ground_wind" and (not ch:call("get_IsGround()") or ch:call("get_IsFlight()")) then d.intent=nil;return end
             if intent.phase and menu.block_cross_phase and not action_phase_allowed(intent.phase,
                 ch:call("get_IsFlight()"),ch:call("get_IsGround()")) then
                 d.intent=nil
