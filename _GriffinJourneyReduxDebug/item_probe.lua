@@ -40,6 +40,21 @@ function probe:effect_check(from,to,data)
     self.last[label]=now()
     self:add(label,{param=fields(data),actors=self:actor_info(from,to)})
 end
+-- Common already has an exact-item adapter hook; observe there without a second hook.
+function probe:common_check(from,to,native,result,override)
+    if not scoped() then return end
+    local label="isUseEnableNoLockCommon(app.ItemDefine.StorageData, app.Character, app.Character, System.Boolean)"
+    self.counts[label]=(self.counts[label] or 0)+1;self.dirty=true
+    if self.last[label] and now()-self.last[label]<.25 then return end
+    self.last[label]=now()
+    local record=self:actor_info(from,to)
+    local function boolean(v) if type(v)=="boolean" then return v end;return (sdk.to_int64(v)&0xff)~=0 end
+    local ok,value=pcall(boolean,native)
+    record.native_result=ok and value or false;record.return_readable=ok
+    local valid,effective=pcall(boolean,result)
+    record.effective_result=valid and effective or false;record.override=override
+    self:add(label,record)
+end
 function probe:install()
     if self.installed then return end
     self.installed=true
@@ -48,8 +63,7 @@ function probe:install()
         {"isUseEnable(System.Int32, app.Character, app.Character)",false},
         {"isUseEnable(app.ItemDefine.StorageData, app.Character, app.Character)",true},
         {"isUseEnableNoLock(System.Int32, app.Character, app.Character)",false},
-        {"isUseEnableNoLockBase(app.ItemDefine.StorageData, app.Character, app.Character)",true},
-        {"isUseEnableNoLockCommon(app.ItemDefine.StorageData, app.Character, app.Character, System.Boolean)",true}}
+        {"isUseEnableNoLockBase(app.ItemDefine.StorageData, app.Character, app.Character)",true}}
     for index,spec in ipairs(signatures) do
         local label,storage_arg=spec[1],spec[2]
         local method=td and td:get_method(label)

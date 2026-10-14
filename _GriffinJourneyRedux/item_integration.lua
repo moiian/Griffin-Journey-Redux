@@ -14,11 +14,11 @@ local function entities()
     local script=db.get_entity("custom_script",adapter.script_id)
     return item,script
 end
-local function allow_use(from,to,data)
-    if item_probe then item_probe:effect_check(from,to,data) end
+local function allow_use(from,to,data,outer)
+    if item_probe and not outer then item_probe:effect_check(from,to,data) end
     if not current_generation() or not data or data._Id~=adapter.id or data._UseEffect~=adapter.script_id then return nil end
     local c=core()
-    if not c or from~=c.properties.player or (to~=nil and to~=c.properties.player) then return nil end
+    if not c or not c.properties.player or from~=c.properties.player or (to~=nil and to~=c.properties.player) then return nil end
     local item,script=entities()
     if not item or not script or type(script.script_func)~="function" then return nil end
     adapter.use_checks=adapter.use_checks+1
@@ -29,7 +29,7 @@ local function allow_use(from,to,data)
 end
 local function install(type_name,signature,pre,post)
     local td=sdk.find_type_definition(type_name)
-    local method=td and td:get_method(signature)
+    local method=td and (td:get_method(signature) or td:get_method((signature:gsub(", ",","))))
     if not method then adapter.status="召唤道具：缺少接口 "..signature;adapter.errors=adapter.errors+1;return end
     sdk.hook(method,pre,post)
 end
@@ -46,6 +46,34 @@ end,function(ret)
     local s=thread.get_hook_storage();local value=s.griffin_item_use;s.griffin_item_use=nil
     if value~=nil and current_generation() then return sdk.to_ptr(value) end
     return ret
+end)
+-- The recorded inventory path rejects in Common before reaching Sub.
+-- Run native Common first, then override only this loaded script item for its player.
+install("app.ItemManager","isUseEnableNoLockCommon(app.ItemDefine.StorageData, app.Character, app.Character, System.Boolean)",function(args)
+    local s=thread.get_hook_storage();s.griffin_item_common=nil
+    if not current_generation() then return end
+    local ok,record=pcall(function()
+        local storage=sdk.to_valuetype(args[3],"app.ItemDefine.StorageData")
+        if not storage or storage._ItemId~=adapter.id then return end
+        local manager=sdk.to_managed_object(args[2])
+        local dict=manager and manager._ItemDataDict
+        local data=dict and dict[adapter.id]
+        return {from=sdk.to_managed_object(args[4]),to=sdk.to_managed_object(args[5]),data=data}
+    end)
+    if ok then s.griffin_item_common=record
+    else adapter.errors=adapter.errors+1;adapter.status="召唤道具：Common读取失败 "..tostring(record) end
+end,function(ret)
+    local s=thread.get_hook_storage();local record=s.griffin_item_common;s.griffin_item_common=nil
+    if not record or not current_generation() then return ret end
+    local ok,value=pcall(allow_use,record.from,record.to,record.data,true)
+    if not ok then adapter.errors=adapter.errors+1;adapter.status="召唤道具：Common检查失败 "..tostring(value);return ret end
+    local result=ret
+    if value~=nil then result=sdk.to_ptr(value) end
+    adapter.common_checks=(adapter.common_checks or 0)+1
+    adapter.common_override=value
+    adapter.status="召唤道具：Common入口已调用"
+    if item_probe then item_probe:common_check(record.from,record.to,ret,result,value) end
+    return result
 end)
 -- Correct the final details widget, after Content Editor's generic message/name hooks.
 -- All readers match a declared native argument type; never probe arbitrary pointers.
@@ -92,6 +120,7 @@ function adapter:draw()
     if item_probe then item_probe:draw() end
     imgui.text(self.status)
     imgui.text(string.format("道具 %d / 脚本 %d；使用检查 %d；最近放行 %s",self.id,self.script_id,self.use_checks,tostring(self.last_allowed)))
+    imgui.text(string.format("Common检查 %d；最近改写 %s",self.common_checks or 0,tostring(self.common_override)))
     imgui.text(string.format("描述修正 %d；接口错误 %d",self.description_writes,self.errors))
     imgui.tree_pop()
 end

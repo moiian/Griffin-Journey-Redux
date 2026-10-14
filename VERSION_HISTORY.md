@@ -642,3 +642,7 @@ Neither the tested native speed entry nor either additive-position insertion poi
 Restore the clean runtime after archiving failed sprint-speed experiments on `archive/failed-sprint-speed-0.3.11`. Remove speed_test/timing/overlay modules, their UI switches, update/render/lifecycle callbacks, native speed-member inspection and obsolete active test instructions. Keep ordinary sprint behavior and measured-world-velocity LT handoff/coasting; preserve existing controls, camera, seats, phase guard and settings.
 
 All 23 Lua54 modules and relevant full offline regressions pass with/without optional Debug. Retained sprint sampling performs no retired FlightControl speed-field reads/writes; removed controls/modules/late callback are absent. LT transition/coasting, pause, rejected samples, lifecycle, 30/120Hz, zero/save and previous gameplay checks pass. Removal does not establish new in-game acceptance of the failed feature; that feature remains shelved. See SPRINT_SPEED_EXPERIMENTS_SHELVED.md.
+
+## Griffin Journey Redux 0.3.28
+
+Recorded item eligibility fails in Common before Sub. Add exact-item post override with loaded-script/player/busy guards, compact full-signature fallback, and native/effective probe results. Existing 13 offline suites plus new Common tests passed. User settings and bundle untouched. Gameplay use remains pending verification; main unchanged.
