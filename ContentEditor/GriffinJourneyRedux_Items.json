@@ -36,7 +36,7 @@
                 "_Weight": 1,
                 "_Worth": 0
             },
-            "description": "Wind-dried chocolate. Tempting and deadly.",
+            "description": "Wind-dried chocolate. \nTempting and deadly.",
             "id": 58990,
             "label": "Griffin's Chocolate",
             "name": "Griffin's Chocolate",
@@ -48,6 +48,29 @@
             "label": "67608110 custom_script",
             "script": "local api = rawget(_G, \"GriffinJourneyReduxBridge\")\nif not api or type(api.summon_performance_from_item) ~= \"function\" then return end\nlocal accepted, reason = api.summon_performance_from_item(input[2] and input[2].from)\nif not accepted then log.info(\"[Griffin item] \" .. tostring(reason)) end",
             "type": "custom_script"
+        },
+        {
+            "_is_partial": true,
+            "data": [
+                {
+                    "_AddStockDays": 1,
+                    "_AddStockNum": 9,
+                    "_IsCheckJob": false,
+                    "_ItemId": 58990,
+                    "_PriceRateList": null,
+                    "_QuestResultNo": -1,
+                    "_ReleaseFlag": 0,
+                    "_ReleaseQuestId": -1,
+                    "_ReleaseSentimentRankBit": 1,
+                    "_ReleaseTotalPay": 0,
+                    "_Stock": 19
+                }
+            ],
+            "id": 875224,
+            "label": "875224 shop_buy",
+            "parent_id": 5,
+            "parent_type": "shop",
+            "type": "shop_buy"
         }
     ],
     "description": "",
@@ -55,9 +78,10 @@
     "game_version": "4.0.0.0",
     "initial_insert_ids": {
         "custom_script": 67608110,
-        "item_data": 58990
+        "item_data": 58990,
+        "shop_buy": 875224
     },
     "name": "GriffinJourneyRedux_Items",
-    "updated_at": "2026-10-14 12:48:53 UTC",
-    "updated_at_time": 1791982133
+    "updated_at": "2026-10-14 14:15:19 UTC",
+    "updated_at_time": 1791987319
 }
