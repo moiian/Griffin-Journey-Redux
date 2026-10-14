@@ -3,9 +3,12 @@ return function(ctx)
 local _ENV=ctx
 re.on_draw_ui(function()
     if not imgui.tree_node("Griffin Journey Redux###GriffinJourneyRedux") then return end
+    local aligned=type(imgui.indent)=="function" and type(imgui.unindent)=="function"
+    if aligned then imgui.indent(0) end
     imgui.text("v"..VERSION)
     menu.editor()
     if menu.save_error then imgui.text(menu.save_error) end
+    if aligned then imgui.unindent(0) end
     if imgui.tree_node("镜头设置") then
         menu.slider("distance","相机距离",0,80)
         menu.slider("fov","FOV",40,120)

@@ -149,14 +149,19 @@ menu.edit_toggle=function(key,label)
     return changed,value
 end
 menu.editor=function()
-    local changed,value=menu.toggle("实时应用修改（仅预览）###GriffinLiveApply",menu.realtime)
-    if changed then
-        menu.realtime=value
-        if value and menu.edit_dirty then menu.queue_edits(false) end
+    local highlight=menu.edit_dirty and (menu.edit_revision~=menu.applied_revision or menu.save_error~=nil)
+    local styled=highlight and type(imgui.push_style_color)=="function" and type(imgui.pop_style_color)=="function"
+    if styled then
+        imgui.push_style_color(21,0xff98652b)
+        imgui.push_style_color(22,0xffb77d38)
+        imgui.push_style_color(23,0xff86551e)
+        imgui.push_style_color(0,0xffe8f5ff)
     end
-    if beta_button("应用并保存###GriffinApplySave") and menu.edit_dirty then menu.queue_edits(true) end
+    local save=beta_button("应用并保存###GriffinApplySave")
+    if styled then imgui.pop_style_color(4) end
+    if save and menu.edit_dirty then menu.queue_edits(true) end
     if imgui.same_line then imgui.same_line() end
-    if beta_button("撤销未保存修改###GriffinDiscardEdits") then
+    if beta_button("恢复未修改###GriffinDiscardEdits") then
         menu.pending_save=nil;menu.pending_edit=nil
         menu.draft=menu.clone(menu.saved)
         menu.selected_index=menu.draft.seat_index
@@ -166,6 +171,17 @@ menu.editor=function()
         menu.pending_edit.discard=true
         menu.edit_dirty=false
         menu.edit_status="未保存修改已撤销"
+    end
+    if imgui.same_line then imgui.same_line() end
+    local changed,value=menu.toggle("实时应用修改###GriffinLiveApply",menu.realtime)
+    if changed then
+        menu.realtime=value
+        if value and menu.edit_dirty then menu.queue_edits(false) end
+    end
+    if imgui.same_line then imgui.same_line() end
+    imgui.text("[?]")
+    if type(imgui.is_item_hovered)=="function" and type(imgui.set_tooltip)=="function" and imgui.is_item_hovered() then
+        imgui.set_tooltip("方便调试参数，开启后实时应用配置。默认关闭可节省性能。")
     end
     if menu.edit_dirty then imgui.text("有未保存修改；拖动参数不会写入配置文件。") end
     if menu.pending_save then imgui.text("保存已排队，继续游戏或进入照片模式后应用。") end
