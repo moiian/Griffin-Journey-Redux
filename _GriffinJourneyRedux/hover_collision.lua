@@ -1,10 +1,37 @@
--- Experimental preflight guard. Own native queries; accepted poses only.
+-- Fixed directional look-ahead guard. Own native queries; accepted poses only.
 return function(ctx)
 local _ENV=ctx
-hover_collision={enabled=false,return_to_safe=false,radius=1.5,height=2.5,span=2,lateral=0,margin=0.15,center_margin=0,
+hover_collision={enabled=false,return_to_safe=false,radius=4,height=4,span=8,lateral=0,margin=0.15,center_margin=0,center_distance=3,end_distance=3,side_distance=3,
     auto_land=false,land_distance=2,land_grace=3,ground_status="近地降落：关闭",
     casts=0,blocks=0,contacts=0,cost=0,status="1档防穿模：关闭"}
 local guard=hover_collision
+local config_numbers={
+    {"radius",0.25,20},{"height",-15,20},{"span",0,30},{"lateral",0,30},{"margin",0.02,1},
+    {"center_margin",0,20},{"center_distance",0.25,50},{"end_distance",0.25,50},{"side_distance",0.25,50},{"land_distance",0.25,15},{"land_grace",0,10}}
+local config_flags={"enabled","return_to_safe","auto_land"}
+local saved_config=loaded_settings and loaded_settings.hover_collision_config
+if type(saved_config)=="table" then
+    for _,spec in ipairs(config_numbers) do
+        local v=saved_config[spec[1]]
+        if finite(v) then guard[spec[1]]=math.max(spec[2],math.min(spec[3],v)) end
+    end
+    for _,key in ipairs(config_flags) do if type(saved_config[key])=="boolean" then guard[key]=saved_config[key] end end
+end
+function guard:configuration()
+    local out={version=2,mode="fixed_directional"}
+    for _,spec in ipairs(config_numbers) do out[spec[1]]=self[spec[1]] end
+    for _,key in ipairs(config_flags) do out[key]=self[key] end
+    return out
+end
+settings.hover_collision_config=guard:configuration()
+guard.status=guard.enabled and "1档防穿模：等待位移" or "1档防穿模：关闭"
+guard.ground_status=guard.auto_land and "近地降落：等待1档悬停" or "近地降落：关闭"
+function guard:persist()
+    settings.hover_collision_config=self:configuration()
+    local ok=controls.save()
+    self.config_status=ok and "检测配置：已保存" or "检测配置：保存失败，请查看菜单错误"
+    return ok
+end
 local adapter=nil
 local function plain(v) return {x=v.x,y=v.y,z=v.z} end
 local function dot(a,b) return a.x*b.x+a.y*b.y+a.z*b.z end
@@ -38,7 +65,8 @@ local function cast(start,finish,radius)
     assert(finite(count) and count>=0 and count<=64,"Too many or invalid collision contacts")
     guard.contacts=guard.contacts+count
     -- Deliberately avoid dereferencing native contact/collider pointers.
-    return count>0
+    guard.last_query.contacts=count
+    return count>0,count
 end
 local function yaw_of(m)
     local q=m.transform:call("get_Rotation()")
@@ -86,6 +114,7 @@ function guard:set_enabled(value)
     self.enabled=value==true;self.epoch=(self.epoch or 0)+1;self.retry_at=nil
     self.status=self.enabled and "1档防穿模：等待位移" or "1档防穿模：关闭"
     self:record("collision_toggle",{enabled=self.enabled},true)
+    self:persist()
 end
 function guard:set_return_to_safe(value)
     -- Reset both A/B choices at the current native pose; never revive a stale target.
@@ -104,11 +133,7 @@ function guard:hold_input(d,m)
     local locked=m.input_lock
     if not self.enabled or self.return_to_safe or not locked then return false end
     local c=command()
-    local neutral=locked.vertical==0 and locked.longitudinal==0 and locked.turn==0
-    local same=(locked.vertical~=0 and locked.vertical==c.vertical)
-        or (locked.longitudinal~=0 and locked.longitudinal==c.longitudinal)
-        or (locked.turn~=0 and locked.turn==c.turn)
-        or (neutral and c.vertical==0 and c.longitudinal==0 and c.turn==0)
+    local same=locked.vertical==c.vertical and locked.longitudinal==c.longitudinal and locked.turn==c.turn
     m.vx=0;m.vy=0;m.vz=0;m.turn=0;m.coast=nil;m.pending_pose=nil
     if not same then
         m.input_lock=nil;m.rebase_after_block=true;m.collision_resume_pending=true
@@ -127,7 +152,7 @@ function guard:hold_input(d,m)
     self.probes=self.probes or {}
     self.probes.pre_behavior={time=now(),actual=plain(m.position),target=plain(m.position),
         request={x=0,y=0,z=0},drift=self.drift,result="held_block",command=c}
-    self.status="1档防穿模：同向输入已阻断，请松开或反向后重试"
+    self.status="1档防穿模：同向输入已阻断，请松开或改变方向后重试"
     d.heading={x=math.sin(m.yaw),z=math.cos(m.yaw)}
     return true
 end
@@ -179,9 +204,9 @@ function guard:constrain(d,m,current)
         self.actual=plain(current);self.target=plain(m.position)
         self.last_phase=m.write_phase
         self.probes=self.probes or {}
-        local probe={time=now(),actual=plain(current),target=plain(m.position),request=plain(delta),drift=self.drift,result="checking"}
+        local probe={time=now(),actual=plain(current),target=plain(m.position),request=plain(delta),drift=self.drift,result="checking",balls={}}
         self.probes[m.write_phase or "direct"]=probe
-        if dot(delta,delta)<1e-10 and math.abs(angle)<1e-9 then
+        if dot(delta,delta)<1e-10 and math.abs(angle)<1e-5 then
             probe.result="idle";self.status="1档防穿模：等待位移";return
         end
         if self.retry_at and now()<self.retry_at then probe.result="retry_wait";freeze(m,current);return end
@@ -195,16 +220,41 @@ function guard:constrain(d,m,current)
         for _,point in ipairs(offsets) do
             local offset,side=point.forward,point.right
             local start={x=local_p.x+oldx*offset+oldz*side,y=local_p.y+self.height,z=local_p.z+oldz*offset-oldx*side}
-            local finish={x=local_p.x+delta.x+newx*offset+newz*side,y=local_p.y+delta.y+self.height,z=local_p.z+delta.z+newz*offset-newx*side}
-            local move={x=finish.x-start.x,y=finish.y-start.y,z=finish.z-start.z}
-            if dot(move,move)>1e-18 then
+            local actual_finish={x=local_p.x+delta.x+newx*offset+newz*side,y=local_p.y+delta.y+self.height,z=local_p.z+delta.z+newz*offset-newx*side}
+            local move={x=actual_finish.x-start.x,y=actual_finish.y-start.y,z=actual_finish.z-start.z}
+            local length=math.sqrt(dot(move,move))
+            if length>=0.00001 then
+                local distance=point.center and self.center_distance or (side~=0 and self.side_distance or self.end_distance)
+                local ball={time=now(),center=point.center==true,forward=offset,right=side,
+                    distance=distance,requested_step=length}
+                probe.balls[#probe.balls+1]=ball
+                if length>distance+0.00001 then
+                    ball.result="step_exceeds_fixed_distance";probe.result=ball.result
+                    self.actual=plain(current);self.target=plain(m.position);self.last_query=nil
+                    freeze(m,current);self:latch(m,ball.result);self.blocks=self.blocks+1
+                    self.status="1档防穿模：本次位移超过固定探测距离，请调大距离"
+                    return
+                end
+                -- Direction follows the pose request; look-ahead length never
+                -- follows step length. Rotation keeps the existing arc margin.
+                local direction={x=move.x/length,y=move.y/length,z=move.z/length}
+                local finish={x=start.x+direction.x*distance,y=start.y+direction.y*distance,z=start.z+direction.z*distance}
                 local radius=self.radius+self.margin+(point.center and self.center_margin or 0)+math.sqrt(offset*offset+side*side)*(1-math.cos(math.abs(angle)/2))
+                ball.radius=radius;ball.direction=direction;ball.result="checking"
                 self.last_center=point.center==true;self.last_ball=offset;self.last_lateral=side;self.last_direction="forward"
-                local hit=cast(start,finish,radius)
-                if not hit then self.last_direction="reverse";hit=cast(finish,start,radius) end
+                local hit,count=cast(start,finish,radius)
+                ball.forward_hits=count
+                if not hit then
+                    -- Reverse traverses the SAME forward segment, so a thin mesh
+                    -- facing the opposite way can still be found; no rearward probe.
+                    self.last_direction="reverse"
+                    hit,count=cast(finish,start,radius);ball.reverse_hits=count
+                end
+                ball.result=hit and "blocked" or "clear"
+                if point.center then self.center_probe=ball end
                 if hit then
-                    probe.result="blocked";freeze(m,current);self:latch(m,"environment_contact");self.blocks=self.blocks+1
-                    self.status="1档防穿模：环境接触，已拒绝位移"
+                    probe.result="blocked";freeze(m,current);self:latch(m,"fixed_probe_contact");self.blocks=self.blocks+1
+                    self.status="1档防穿模：固定距离内有障碍，已拒绝位移"
                     return
                 end
             end
@@ -223,6 +273,7 @@ function guard:set_auto_land(value)
     self.auto_land=value==true;self.land_driver=nil;self.land_since=nil;self.land_hits=0;self.land_next=nil
     self.ground_status=self.auto_land and "近地降落：等待1档悬停" or "近地降落：关闭"
     self:record("auto_land_toggle",{enabled=self.auto_land,distance=self.land_distance},true)
+    self:persist()
 end
 function guard:observe(d,ch,tr,flying,ground,action)
     if not self.enabled and not self.auto_land and not (collision_debug and collision_debug.enabled) then return end
@@ -280,25 +331,29 @@ function guard:draw()
     if changed then self:set_enabled(value) end
     changed,value=menu.toggle("受阻后拉回最后安全位置（对照）",self.return_to_safe)
     if changed then self:set_return_to_safe(value) end
-    imgui.text("拉回关闭时：受阻同向输入保持阻断，松开或反向才重新检测。")
+    imgui.text("拉回关闭时：受阻同向输入保持阻断，松开或改变方向才重新检测。")
     imgui.text(self.return_to_safe and "受阻拉回：开启（0.3.17旧逻辑）" or "受阻拉回：关闭（受阻后按实际位置重新计算）")
     changed,value=menu.toggle("启用1档近地自动降落（实验）",self.auto_land)
     if changed then self:set_auto_land(value) end
     local edit,distance=imgui.slider_float("近地降落距离（根节点到下方表面/米）",self.land_distance,0.25,15)
-    if edit and finite(distance) then self.land_distance=math.max(0.25,math.min(15,distance));self.land_hits=0;self.land_next=nil end
+    if edit and finite(distance) then self.land_distance=math.max(0.25,math.min(15,distance));self.land_hits=0;self.land_next=nil;self:persist() end
     local grace_edit,grace=imgui.slider_float("起飞/切入悬停保护时间（秒）",self.land_grace,0,10)
-    if grace_edit and finite(grace) then self.land_grace=math.max(0,math.min(10,grace));self.land_hits=0;self.land_since=now() end
-    for _,spec in ipairs({{"radius","检测球半径（米）",0.25,20},{"height","检测球中心高度（米）",-15,20},
+    if grace_edit and finite(grace) then self.land_grace=math.max(0,math.min(10,grace));self.land_hits=0;self.land_since=now();self:persist() end
+    imgui.text("球半径表示身体体积；固定探测距离表示沿请求方向额外探测多远。")
+    for _,spec in ipairs({{"center_distance","中心球固定探测距离（米）",0.25,50},
+        {"end_distance","前后球固定探测距离（米）",0.25,50},{"side_distance","左右球固定探测距离（米）",0.25,50},
+        {"radius","检测球半径（米）",0.25,20},{"height","检测球中心高度（米）",-15,20},
         {"span","前后检测球偏移（米）",0,30},{"lateral","左右检测球偏移（米；0关闭两侧球）",0,30},{"margin","额外安全余量（米）",0.02,1},{"center_margin","中心球额外安全余量（米）",0,20}}) do
         local edit,result=imgui.slider_float(spec[2],self[spec[1]],spec[3],spec[4])
-        if edit and finite(result) then self[spec[1]]=math.max(spec[3],math.min(spec[4],result));self.retry_at=nil end
+        if edit and finite(result) then self[spec[1]]=math.max(spec[3],math.min(spec[4],result));self.retry_at=nil;self:persist() end
     end
+    imgui.text(self.config_status or "检测配置：已加载；改动自动保存")
     imgui.text(self.status)
     imgui.text(self.ground_status)
     if collision_debug then collision_debug:draw() end
     imgui.text(string.format("球体查询：%d；拦截：%d；接触点：%d",self.casts,self.blocks,self.contacts))
     if self.casts>0 then imgui.text(string.format("粗略Lua计时／查询：%.3f 毫秒",self.cost*1000/self.casts)) end
-    imgui.text("仅1档；2档不查询。会话测试参数，重载后关闭。")
+    imgui.text("仅1档；2档不查询。检测参数与功能开关自动保存；LOG录制重载关闭。")
     imgui.tree_pop()
 end
 end

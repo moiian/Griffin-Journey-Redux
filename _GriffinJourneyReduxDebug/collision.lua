@@ -49,8 +49,8 @@ function dbg:tick()
         self.last_sample=t
         local g=hover_collision;local d=active;local m=d and d.hover_motion
         self:record("sample",{driver=g.driver_state,collision={enabled=g.enabled,return_to_safe=g.return_to_safe,status=g.status,phase=g.last_phase,
-            radius=g.radius,height=g.height,span=g.span,lateral=g.lateral,margin=g.margin,center_margin=g.center_margin,drift=g.drift,max_drift=g.max_drift,
-            request=g.request,actual=g.actual,target=g.target,probes=g.probes,last_query=g.last_query,casts=g.casts,blocks=g.blocks,held_blocks=g.held_blocks,contacts=g.contacts,
+            mode="fixed_directional",center_distance=g.center_distance,end_distance=g.end_distance,side_distance=g.side_distance,radius=g.radius,height=g.height,span=g.span,lateral=g.lateral,margin=g.margin,center_margin=g.center_margin,drift=g.drift,max_drift=g.max_drift,
+            center_probe=g.center_probe,request=g.request,actual=g.actual,target=g.target,probes=g.probes,last_query=g.last_query,casts=g.casts,blocks=g.blocks,held_blocks=g.held_blocks,contacts=g.contacts,
             ball=g.last_ball,center_ball=g.last_center,lateral_ball=g.last_lateral,direction=g.last_direction,writes=g.writes},
             landing={enabled=g.auto_land,status=g.ground_status,distance=g.land_distance,grace=g.land_grace,
                 hits=g.land_hits,within=g.ground_within,checked_at=g.ground_checked_at},
@@ -78,6 +78,10 @@ function dbg:draw()
     if s then imgui.text(string.format("左摇杆：%.3f, %.3f；上移/下移：%s / %s",s.stick.x or 0,s.stick.y or 0,tostring(s.up),tostring(s.down))) end
     imgui.text("当前观测位置（Universal）："..pos(s and s.position))
     imgui.text(string.format("中心球有效半径：%.3f米（基础+通用余量+中心余量）",g.radius+g.margin+g.center_margin))
+    if g.center_probe then
+        local p=g.center_probe
+        imgui.text(string.format("最后中心球查询：t=%.3f；球半径/固定距离 %.3f / %.3f米；正/反命中 %s / %s",p.time,p.radius,p.distance,tostring(p.forward_hits),tostring(p.reverse_hits)))
+    end
     imgui.text("通过检测后的原生位置写入次数："..tostring(g.writes or 0))
     imgui.text("同向输入阻断："..tostring(m and m.input_lock~=nil or false).."；保持次数："..tostring(g.held_blocks or 0))
     imgui.text("受阻后跟随实际位置："..tostring(m and m.rebase_after_block or false))
