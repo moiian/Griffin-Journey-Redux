@@ -650,3 +650,7 @@ Recorded item eligibility fails in Common before Sub. Add exact-item post overri
 ## Griffin Journey Redux 0.3.29
 
 Register chocolate natively in Shop 5 at array position 2, stock 19 / daily 9; preserve other goods and reuse existing entry. Remove bundle shop_buy and Shop Editor runtime dependency. Original Content Editor still loads item and script. Offline regressions passed; UI position and replenishment await game verification. User confirmed 0.3.28 item use and previous shop listing work.
+
+## Griffin Journey Redux 0.3.30
+
+Add exact-instance lifecycle checks: native death/sink exits and cleanup, knockdown exits without treating ordinary damage as knockdown, stale record reaping for item reuse, idle >30m cleanup after 10s grace, recovery retry, and 45s async spawn timeout with late-result cleanup. Keep duplicate summon guards. Isolate release failures so player FSM restoration is still attempted. Existing 15 offline suites plus boundary suite passed; native death/down/sink and release behavior await game verification. No new pizza item yet; user Settings and item bundle unchanged.

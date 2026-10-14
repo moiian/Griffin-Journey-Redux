@@ -176,3 +176,7 @@
 !/SHOP_0329_NATIVE_PRODUCT.md
 
 !/_GriffinJourneyRedux/shop_item.lua
+
+!/LIFECYCLE_0330_BOUNDARIES.md
+
+!/_GriffinJourneyRedux/spawn_watch.lua

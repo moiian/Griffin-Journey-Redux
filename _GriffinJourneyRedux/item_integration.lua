@@ -22,7 +22,8 @@ local function allow_use(from,to,data,outer)
     local item,script=entities()
     if not item or not script or type(script.script_func)~="function" then return nil end
     adapter.use_checks=adapter.use_checks+1
-    local allowed=not active and not state.recovery and not queued and #state.spawns==0
+    if spawn_watch then spawn_watch:reap_invalid() end
+    local allowed=(not state.pending_cleanup or #state.pending_cleanup<4) and not active and not state.recovery and not queued and #state.spawns==0
         and not summon.current and not menu.photo_active()
     adapter.last_allowed=allowed
     return allowed
@@ -119,6 +120,11 @@ function adapter:draw()
     if self.test_result then imgui.text("接口测试："..self.test_result) end
     if item_probe then item_probe:draw() end
     if shop_item then imgui.text(shop_item.status) end
+    if spawn_watch then
+        imgui.text(spawn_watch.status)
+        imgui.text(string.format("生命周期回收 %d；沉水Hook %s；检查错误 %d；迟到生成 %d",spawn_watch.removed,tostring(spawn_watch.sink_hook),spawn_watch.errors,#state.pending_cleanup))
+        imgui.text(string.format("状态接口可读：IsDead %s／IsDown %s",tostring(spawn_watch.reads.get_IsDead),tostring(spawn_watch.reads.get_IsDown)))
+    end
     imgui.text(self.status)
     imgui.text(string.format("道具 %d / 脚本 %d；使用检查 %d；最近放行 %s",self.id,self.script_id,self.use_checks,tostring(self.last_allowed)))
     imgui.text(string.format("Common检查 %d；最近改写 %s",self.common_checks or 0,tostring(self.common_override)))

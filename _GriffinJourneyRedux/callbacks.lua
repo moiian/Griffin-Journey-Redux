@@ -90,6 +90,7 @@ re.on_application_entry("UpdateHID",function()
 end)
 
 re.on_pre_application_entry("UpdateBehavior",function()
+    spawn_watch:tick()
     if debug_tools then debug_tools:capture("behavior_before_anchor") end
     passengers.frame=passengers.frame+1
     if menu.apply_pending_preset then menu.apply_pending_preset() end

@@ -14,6 +14,8 @@ local function flow_instance()
     return flow
 end
 local function can_start(allow_paused)
+    if spawn_watch then spawn_watch:reap_invalid() end
+    assert(not state.pending_cleanup or #state.pending_cleanup<4,"迟到生成请求仍待清理，请等待原生返回")
     local c=assert(core(),"等待 NickCore 加载")
     assert(alive and state.generation==generation,"脚本已重载")
     assert(not active and not state.recovery and not queued and #state.spawns==0,"请先结束驾驶并删除已有狮鹫")

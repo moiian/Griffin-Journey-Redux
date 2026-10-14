@@ -2,6 +2,8 @@
 return function(ctx)
 local _ENV=ctx
 function spawn(options)
+    if spawn_watch then spawn_watch:reap_invalid() end
+    if state.pending_cleanup and #state.pending_cleanup>=4 then status="迟到生成请求仍待清理，请等待原生返回。";return false end
     if summon and summon.current and (not options or options.session~=summon.current) then return false end
     if queued or #state.spawns > 0 or state.recovery then return false end
     settings.freeze_player=true;block_player_fall=true
@@ -21,7 +23,7 @@ function spawn(options)
             assert(c.properties.player and not menu.gameplay_paused(), "请进入游戏")
             if options then assert(c.properties.player==options.owner,"Summon player changed") end
             install_hooks()
-            local r = {owner = c.properties.player, party = capture_party(c,c.properties.player), friend = true}
+            local r = {owner = c.properties.player, party = capture_party(c,c.properties.player), friend = true,spawn_wait_started=now()}
             if options then r.summon_facing=options.facing end
             -- NickCore returns a mutable instance-reference table; never search by Character ID.
             r.result = c.enemySpawner.spawn_enemy("Griffin", options and options.position or nil, true)
@@ -43,7 +45,7 @@ delete_one = function(r)
     run_once(function()
         if not alive then r.destroy_queued = false; return end
         local ok, err = pcall(function()
-            assert(not active and not state.recovery, "End driving before deletion")
+            assert(not (active and active.spawn==r) and not (state.recovery and state.recovery.spawn==r), "End this Griffin driving before deletion")
             assert(r.result == result and result.go == go, "Spawn reference changed")
             if go:get_Valid() then
                 if result.chara and result.chara:get_Valid() then
