@@ -160,3 +160,9 @@
 !/CONTROLS_0323_ITEM_API_HOLD.md
 
 !/CONTROLS_0324_DEFAULTS_GAMEPAD.md
+
+!/_GriffinJourneyRedux/item_integration.lua
+!/ITEM_0325_CONTENT_EDITOR.md
+!/ContentEditor/
+/ContentEditor/*
+!/ContentEditor/GriffinJourneyRedux_Items.json

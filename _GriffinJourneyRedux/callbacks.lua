@@ -223,6 +223,13 @@ function bridge.summon_performance()
     if not alive or state.generation~=generation then return false,"脚本已重载" end
     return summon:request()
 end
+-- Only native item-use callers supply the exact current player; the menu API stays unchanged.
+function bridge.summon_performance_from_item(user)
+    local c=core()
+    if not alive or state.generation~=generation then return false,"脚本已重载" end
+    if not c or not user or user~=c.properties.player then return false,"召唤道具仅允许当前玩家使用" end
+    return summon:request(true)
+end
 function bridge.set_skip_think(enabled) return set_skip_think(enabled) end
 function bridge.get_skip_think() return skip_think_enabled,skip_think_status end
 function bridge.is_driving() return alive and (active ~= nil or state.recovery ~= nil or queued) end

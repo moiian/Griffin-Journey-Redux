@@ -13,11 +13,12 @@ local function flow_instance()
     assert(flow:get_type_definition():get_full_name()=="app.FerrystoneFlowController","飞石控制器类型不符")
     return flow
 end
-local function can_start()
+local function can_start(allow_paused)
     local c=assert(core(),"等待 NickCore 加载")
     assert(alive and state.generation==generation,"脚本已重载")
     assert(not active and not state.recovery and not queued and #state.spawns==0,"请先结束驾驶并删除已有狮鹫")
-    assert(not menu.gameplay_paused(),"请关闭暂停或照片模式")
+    assert(not menu.photo_active(),"请关闭照片模式")
+    assert(allow_paused or not menu.gameplay_paused(),"请关闭暂停或照片模式")
     local main=sdk.get_managed_singleton("app.MainFlowManager")
     assert(main and main:call("get_IsInGamePhase()"),"请进入游戏")
     local experiment=rawget(_G,"GriffinMountExperimentControl")
@@ -40,34 +41,51 @@ function summon:cancel(reason)
     self.current=nil
     self.status="召唤演出已取消："..tostring(reason)
 end
-function summon:request()
-    if self.current then return false,"召唤演出正在运行" end
-    local ok,owner,tr,flow=pcall(can_start)
-    if not ok then self.status="召唤演出未启动："..tostring(owner);return false,self.status end
-    local request={owner=owner,transform=tr,flow=flow,stage="queued",elapsed=0,
-        height=settings.summon_height,forward=settings.summon_forward,delay=settings.summon_delay}
-    self.current=request;self.status="召唤演出：等待开始"
+local function begin_request(request)
     run_once(function()
-        if not alive or state.generation~=generation or self.current~=request then return end
+        if not alive or state.generation~=generation or summon.current~=request then return end
         local started,err=pcall(function()
             local player,transform,controller=can_start()
-            assert(player==owner and transform==tr and controller==flow,"玩家或演出控制器已变化")
-            flow:call("startForgery()")
+            assert(player==request.owner and transform==request.transform and controller==request.flow,"玩家或演出控制器已变化")
+            request.flow:call("startForgery()")
             request.last=now();request.stage="playing"
-            assert(flow:call("get_IsActive()")==true and flow:get_field("Routine")==7,"赝品演出未进入运行状态")
-            self.status=string.format("召唤演出：开始后 %.2f 秒生成狮鹫",request.delay)
+            assert(request.flow:call("get_IsActive()")==true and request.flow:get_field("Routine")==7,"赝品演出未进入运行状态")
+            summon.status=string.format("召唤演出：开始后 %.2f 秒生成狮鹫",request.delay)
         end)
-        if not started then self:cancel(err) end
+        if not started then summon:cancel(err) end
     end)
+end
+function summon:request(wait_for_resume)
+    wait_for_resume=wait_for_resume==true
+    if self.current then return false,"召唤演出正在运行" end
+    local ok,owner,tr,flow=pcall(can_start,wait_for_resume==true)
+    if not ok then self.status="召唤演出未启动："..tostring(owner);return false,self.status end
+    local request={owner=owner,transform=tr,flow=flow,stage=wait_for_resume and "waiting_resume" or "queued",elapsed=0,
+        height=settings.summon_height,forward=settings.summon_forward,delay=settings.summon_delay}
+    self.current=request
+    if wait_for_resume then
+        request.wait_deadline=os.time()+30
+        self.status="召唤道具：请求已接收，请关闭物品菜单后播放演出"
+    else
+        self.status="召唤演出：等待开始"
+        begin_request(request)
+    end
     return true,"召唤演出请求已接受"
 end
 function summon:tick()
     local request=self.current
-    if not request or request.stage~="playing" then return end
+    if not request or (request.stage~="playing" and request.stage~="waiting_resume") then return end
     if not alive or state.generation~=generation then self:cancel("脚本已重载");return end
     local c=core()
     if not c or c.properties.player~=request.owner or not request.owner:get_Valid()
         or c.properties.transform~=request.transform or active or state.recovery then self:cancel("玩家或控制状态已变化");return end
+    if request.stage=="waiting_resume" then
+        if os.time()>request.wait_deadline then self:cancel("等待关闭物品菜单超时");return end
+        if menu.gameplay_paused() then return end
+        request.stage="queued"
+        begin_request(request)
+        return
+    end
     local t=now()
     if menu.gameplay_paused() then request.last=t;return end
     local ok,err=pcall(function()

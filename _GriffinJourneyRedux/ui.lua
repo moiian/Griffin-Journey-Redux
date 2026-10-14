@@ -16,6 +16,7 @@ re.on_draw_ui(function()
             imgui.tree_pop()
         end
         imgui.text(summon.status)
+        item_integration:draw()
         if beta_button("开始驾驶###BetaStart") then start_driver() end
         menu.slider("boarding_distance","热键开始驾驶距离（严格小于／米）",1,50)
         if beta_button("结束驾驶###BetaStop") then menu.stop() end

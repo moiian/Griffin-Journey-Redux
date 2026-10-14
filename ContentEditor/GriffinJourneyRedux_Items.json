@@ -1,0 +1,63 @@
+{
+    "author": "Aelinore",
+    "created_at": "2026-10-13 19:43:14 UTC",
+    "data": [
+        {
+            "data": {
+                "$type": "app.ItemDataParam",
+                "_AddStatus": 0,
+                "_Attr": 11,
+                "_AutoSellPrio": 100,
+                "_BuyPrice": 500,
+                "_Category": 0,
+                "_Decay": 0,
+                "_DecayedItemId": 0,
+                "_FakeItemId": 0,
+                "_FakePrice": 0,
+                "_Favor": 1,
+                "_FavoriteAttr": 0,
+                "_FieldModelId": 21,
+                "_HealBlackHp": 0,
+                "_HealStamina": 0,
+                "_HealWhiteHp": 0,
+                "_IconNo": 80,
+                "_Id": 58990,
+                "_ItemDropId": 4,
+                "_Material": 0,
+                "_ModelId": 21,
+                "_RemoveStatus": 0,
+                "_SellPrice": 250,
+                "_SortNo": 30,
+                "_StackNum": 99,
+                "_StolenPrio": 0,
+                "_SubCategory": 3,
+                "_UseAttr": 0,
+                "_UseEffect": 67608110,
+                "_Weight": 1,
+                "_Worth": 0
+            },
+            "description": "Wind-dried chocolate. Tempting and deadly.",
+            "id": 58990,
+            "label": "Griffin's Chocolate",
+            "name": "Griffin's Chocolate",
+            "type": "item_data"
+        },
+        {
+            "hook_type": "",
+            "id": 67608110,
+            "label": "67608110 custom_script",
+            "script": "local api = rawget(_G, \"GriffinJourneyReduxBridge\")\nif not api or type(api.summon_performance_from_item) ~= \"function\" then return end\nlocal accepted, reason = api.summon_performance_from_item(input[2] and input[2].from)\nif not accepted then log.info(\"[Griffin item] \" .. tostring(reason)) end",
+            "type": "custom_script"
+        }
+    ],
+    "description": "",
+    "enums": null,
+    "game_version": "4.0.0.0",
+    "initial_insert_ids": {
+        "custom_script": 67608110,
+        "item_data": 58990
+    },
+    "name": "GriffinJourneyRedux_Items",
+    "updated_at": "2026-10-14 12:48:53 UTC",
+    "updated_at_time": 1791982133
+}
