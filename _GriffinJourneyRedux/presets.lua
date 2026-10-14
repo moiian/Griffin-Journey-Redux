@@ -81,7 +81,7 @@ menu.selected_index=settings.seat_index
 menu.last_normal=settings.seat_index
 menu.reindex=function()
     for i,preset in ipairs(settings.seat_presets) do
-        preset.name="["..i.."] "..preset.name:gsub("^%[%d+%]%s*","")
+        preset.name="["..(i-1).."] "..preset.name:gsub("^%[%d+%]%s*","")
         preset.enabled=true
         if type(preset.pawns)~="table" then preset.pawns={} end
         if type(preset.companions)~="table" then preset.companions={} end
@@ -271,7 +271,7 @@ menu.presets=function()
             local changed,name=imgui.input_text("预设名称###BetaPresetName",preset.name)
             if changed and type(name)=="string" and name:match("%S") then preset.name=name:sub(1,120);menu.persist_preset(preset) end
         end
-    else imgui.text("调试[1]：各随从／同伴的实体与当前Hip使用各自参数；玩家参数只控制玩家Hip。") end
+    else imgui.text("调试[0]：各随从／同伴的实体与当前Hip使用各自参数；玩家参数只控制玩家Hip。") end
     finish_header()
     if imgui.tree_node("玩家参数###BetaPlayerParameters") then
         menu.edit_seat(preset.player,"BetaPlayerSeat",preset)
