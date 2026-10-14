@@ -53,6 +53,10 @@ for device,values in pairs(controls.enums) do
     for name in pairs(values) do controls.choices[device][#controls.choices[device]+1]=name end
     table.sort(controls.choices[device],function(a,b) if a==b then return false end;if a=="None" then return true end;if b=="None" then return false end;return a<b end)
 end
+menu.default_seed.bindings={}
+for _,row in ipairs(controls.rows) do menu.default_seed.bindings[row[1]]={keyboard=row[3],gamepad=row[4]} end
+menu.default_seed.flight_bindings_revision=1
+menu.default_seed.boarding_bindings_revision=1
 settings.bindings={}
 local migrate_bindings=not loaded_settings or loaded_settings.flight_bindings_revision~=1
 local old_defaults={rb={keyboard="E",gamepad="RTrigTop"},lb={keyboard="Q",gamepad="LTrigTop"}}

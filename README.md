@@ -1,6 +1,6 @@
 # Griffin Journey Redux
 
-Version **0.3.42** · Author **aelinore**
+Version **0.3.43** · Author **aelinore**
 
 Fly a friendly Griffin with configurable controls, a head-following camera, and individual seats for the player, pawns, and accompanying NPCs. Requires the installed **NickCore**, its EnemySpawner, and `run_once`. Only the exact Griffin created by this mod is controlled.
 
@@ -19,6 +19,7 @@ Open **Griffin Journey Redux** in REFramework. The controls at the top apply to 
 - **实时应用修改**: off at script startup. With it off, edits stay in a draft and the current configuration remains active. With it on, edits preview in memory without saving to disk.
 - **应用并保存**: applies the draft and writes the settings file once. Repeated slider changes never write the file. A failed save keeps the draft and displays an error for retry.
 - **恢复未修改**: restores the last saved configuration and cancels a queued save. Script resets discard unsaved drafts and previews.
+- **恢复默认配置**: rebuilds the complete default draft, including camera, flight, summoning, bindings and default seat layouts. Preview is turned off and previous queued edits are canceled. Use **应用并保存** to apply and persist it, or **恢复未修改** to return to your saved configuration. Optional developer switches return to startup defaults when this draft is applied; normal pause defers native changes.
 
 Choose **编辑布局（应用后生效）** to edit a layout. Normal presets start at [2]. Clone, rename, and delete layouts in the draft, then apply them. Player and passenger seats have independent position, facing, tilt, and action settings. Ordinary bystanders are not seated. Physical calibration layout [1] is available through the Debug Addon only.
 

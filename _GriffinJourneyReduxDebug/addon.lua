@@ -136,6 +136,30 @@ re.on_script_reset(function()
     item_probe:set_enabled(false);collision_debug:flush(true);debug_tools:shutdown()
     anti_jitter.griffin_stop:set_enabled(false);ai_takeover.enabled=false
 end)
+-- Called only by explicit default application, after gameplay resumes.
+menu.reset_debug_defaults=function()
+    ai_takeover:set_enabled(false)
+    local ok,err=ai_takeover:release();assert(ok,err)
+    anti_jitter.griffin_stop:set_enabled(false)
+    hover_collision:set_return_to_safe(false)
+    item_probe:set_enabled(false)
+    collision_debug:set_enabled(false)
+    debug_tools:set_enabled(false)
+    debug_tools.fine:stop("恢复默认配置")
+    passengers.set_fall_experiment("reset",false)
+    passengers.set_fall_experiment("ground",false)
+    passengers.set_griffin_fall(false)
+    passengers.protection.damage=true;passengers.protection.relocation=true
+    passengers.protection.lost_check=false;passengers.protection.destroy=false
+    local d=active
+    if d and d.anchor_mode~="rider" then
+        validate_spawn(d.spawn)
+        assert(owned_player(d,true),"Player binding changed")
+        prepare_anchor_mode(d,"rider");restore_bone(d);sync_player(d)
+        d.anchor_mode="rider";d.anchor_target=nil;d.neutral_anchor=nil;d.anchor_plan=nil;d.target_probe_failed=nil
+    end
+    anchor_mode="rider"
+end
 re.on_draw_ui(function()
     if not alive or not imgui.tree_node("Griffin Journey Redux · Debug 附加组件") then return end
     imgui.text("连接正式版 v"..VERSION.."；所有实验默认关闭，设置不自动启用。")

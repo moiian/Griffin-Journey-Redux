@@ -9,6 +9,9 @@ local config_numbers={
     {"radius",0.25,20},{"height",-15,20},{"span",0,30},{"lateral",0,30},{"margin",0.02,1},
     {"center_margin",0,20},{"center_distance",0.25,50},{"end_distance",0.25,50},{"side_distance",0.25,50},{"land_distance",0.25,15},{"land_grace",0,10}}
 local config_flags={"enabled","auto_land"}
+menu.default_seed.hover_collision_config={version=2,mode="fixed_directional",return_to_safe=false}
+for _,spec in ipairs(config_numbers) do menu.default_seed.hover_collision_config[spec[1]]=guard[spec[1]] end
+for _,key in ipairs(config_flags) do menu.default_seed.hover_collision_config[key]=guard[key] end
 local saved_config=loaded_settings and loaded_settings.hover_collision_config
 if type(saved_config)=="table" then
     for _,spec in ipairs(config_numbers) do

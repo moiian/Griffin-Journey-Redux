@@ -221,6 +221,29 @@ menu.passenger_seats=function(preset)
         end
     end
 end
+-- Rebuild the same two layouts as a clean installation, using product defaults only.
+menu.build_defaults=function()
+    local config=menu.clone(menu.default_seed)
+    config.anchor_mode="rider";config.head_camera=true;config.griffin_anti_jitter=false
+    config.camera_global_revision=1;config.preset_store_revision=1;config.physical_seat_revision=1
+    config.seat_index=2
+    local player={}
+    for key,value in pairs(config) do
+        local field=key:match("^rider_(.+)$")
+        if field then player[field]=value end
+    end
+    local physical={schema=5,name="[0] 实体位置校正",enabled=true,player=menu.clone(player),pawns={},companions={}}
+    local normal={schema=5,name="[1] 默认乘坐座位",enabled=true,player=menu.clone(player),pawns={},companions={}}
+    for i=1,3 do
+        local seat={enabled=true,anim=""}
+        for _,field in ipairs({"anchor","neck_joint","height","forward","side","tilt_follow","pitch_offset"}) do seat[field]=player[field] end
+        physical.pawns[i]=seat
+    end
+    config.seat_presets={physical,normal}
+    config.pawn_seats=normal.pawns;config.companion_seats=normal.companions
+    return config
+end
+
 menu.presets=function()
     local settings=menu.draft
     local aligned=type(imgui.indent)=="function" and type(imgui.unindent)=="function"

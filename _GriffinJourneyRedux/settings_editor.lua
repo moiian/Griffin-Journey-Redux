@@ -29,6 +29,7 @@ end
 normalize(menu.draft)
 normalize(settings)
 local native_pending=false
+local reset_session_pending=false
 local function equal(a,b)
     if a==b then return true end
     if type(a)~="table" or type(b)~="table" then return false end
@@ -37,6 +38,14 @@ local function equal(a,b)
     return true
 end
 local function native_options()
+    if reset_session_pending then
+        if menu.reset_debug_defaults then menu.reset_debug_defaults() end
+        menu.block_cross_phase=true;block_player_fall=true
+        if active then apply_player_freeze(active,settings.freeze_player) end
+        local r=active and active.spawn or state.spawns[#state.spawns]
+        if r and r.ready and not r.delete_requested then set_skip_think(true) end
+        reset_session_pending=false
+    end
     local cfg=settings.hover_collision_config
     if hover_collision.enabled~=cfg.enabled then
         hover_collision:set_enabled(cfg.enabled)
@@ -77,7 +86,7 @@ controls.save=function()
 end
 menu.queue_edits=function(save,snapshot)
     if not current() then return end
-    local ticket={config=menu.clone(snapshot or menu.draft),save=save==true,revision=menu.edit_revision}
+    local ticket={config=menu.clone(snapshot or menu.draft),save=save==true,revision=menu.edit_revision,replace_seats=menu.defaults_draft==true}
     if save then menu.pending_save=ticket else menu.pending_edit=ticket end
     if type(run_once)=="function" then run_once(function() if current() then menu.apply_edits() end end) end
 end
@@ -100,8 +109,10 @@ menu.apply_edits=function(visual)
         local previous=settings.seat_presets[old_index]
         local old_physical=settings.seat_presets[1]
         local next_config=ticket.config
-        retain_generated_seats(next_config)
-        retain_generated_seats(menu.draft)
+        if not ticket.replace_seats then
+            retain_generated_seats(next_config)
+            retain_generated_seats(menu.draft)
+        end
         normalize(next_config)
         settings=next_config
         menu.pending_preset=nil
@@ -109,6 +120,7 @@ menu.apply_edits=function(visual)
         menu.reindex();menu.pull_values(settings.seat_index)
         menu.applying_edits=false
         native_pending=true
+        if ticket.replace_seats then reset_session_pending=true end
         local selected=settings.seat_presets[settings.seat_index]
         local seat_changed=old_index~=settings.seat_index or not equal(old_physical.player,settings.seat_presets[1].player)
             or not equal(previous.player,selected.player)
@@ -132,6 +144,7 @@ menu.apply_edits=function(visual)
                 menu.saved=menu.clone(settings)
                 menu.edit_dirty=menu.edit_revision~=ticket.revision
                 menu.save_error=nil
+                if not menu.edit_dirty then menu.defaults_draft=false end
                 menu.edit_status="设置已应用并保存"
             else
                 menu.edit_dirty=true
@@ -148,6 +161,18 @@ menu.edit_toggle=function(key,label)
     if changed then menu.draft[key]=value;menu.changed() end
     return changed,value
 end
+-- Reset the editable configuration; disk writes still require explicit save.
+menu.restore_defaults=function()
+    menu.pending_save=nil;menu.pending_edit=nil;menu.pending_preset=nil
+    menu.draft=menu.build_defaults()
+    menu.defaults_draft=true
+    menu.realtime=false;menu.show_physical=false
+    menu.selected_index=2;menu.last_normal=2;menu.confirm_delete=nil
+    controls.capture=nil;controls.release_gate=true;controls.previous={}
+    menu.save_error=nil
+    menu.changed()
+    menu.edit_status="默认配置已恢复到草稿，点击应用并保存后生效。"
+end
 menu.editor=function()
     local highlight=menu.edit_dirty and (menu.edit_revision~=menu.applied_revision or menu.save_error~=nil)
     local styled=highlight and type(imgui.push_style_color)=="function" and type(imgui.pop_style_color)=="function"
@@ -163,6 +188,7 @@ menu.editor=function()
     if imgui.same_line then imgui.same_line() end
     if beta_button("恢复未修改###GriffinDiscardEdits") then
         menu.pending_save=nil;menu.pending_edit=nil
+        menu.defaults_draft=false;reset_session_pending=false
         menu.draft=menu.clone(menu.saved)
         menu.selected_index=menu.draft.seat_index
         menu.confirm_delete=nil
@@ -183,6 +209,8 @@ menu.editor=function()
     if type(imgui.is_item_hovered)=="function" and type(imgui.set_tooltip)=="function" and imgui.is_item_hovered() then
         imgui.set_tooltip("方便调试参数，开启后实时应用配置。默认关闭可节省性能。")
     end
+    if imgui.same_line then imgui.same_line() end
+    if beta_button("恢复默认配置###GriffinRestoreDefaults") then menu.restore_defaults() end
     if menu.edit_dirty then imgui.text("有未保存修改；拖动参数不会写入配置文件。") end
     if menu.pending_save then imgui.text("保存已排队，继续游戏或进入照片模式后应用。") end
     if menu.edit_status then imgui.text(menu.edit_status) end
