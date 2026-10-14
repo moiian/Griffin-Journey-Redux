@@ -1,7 +1,7 @@
 -- Experimental preflight guard. Own native queries; accepted poses only.
 return function(ctx)
 local _ENV=ctx
-hover_collision={enabled=false,return_to_safe=false,radius=1.5,height=2.5,span=2,lateral=0,margin=0.15,
+hover_collision={enabled=false,return_to_safe=false,radius=1.5,height=2.5,span=2,lateral=0,margin=0.15,center_margin=0,
     auto_land=false,land_distance=2,land_grace=3,ground_status="近地降落：关闭",
     casts=0,blocks=0,contacts=0,cost=0,status="1档防穿模：关闭"}
 local guard=hover_collision
@@ -187,7 +187,7 @@ function guard:constrain(d,m,current)
         if self.retry_at and now()<self.retry_at then probe.result="retry_wait";freeze(m,current);return end
         local local_p=m.transform:call("get_Position()");vector(local_p)
         local oldx,oldz,newx,newz=math.sin(yaw),math.cos(yaw),math.sin(m.yaw),math.cos(m.yaw)
-        local offsets={{forward=0,right=0},{forward=self.span,right=0},{forward=-self.span,right=0}}
+        local offsets={{forward=0,right=0,center=true},{forward=self.span,right=0},{forward=-self.span,right=0}}
         if self.lateral>0 then
             offsets[#offsets+1]={forward=0,right=self.lateral}
             offsets[#offsets+1]={forward=0,right=-self.lateral}
@@ -198,8 +198,8 @@ function guard:constrain(d,m,current)
             local finish={x=local_p.x+delta.x+newx*offset+newz*side,y=local_p.y+delta.y+self.height,z=local_p.z+delta.z+newz*offset-newx*side}
             local move={x=finish.x-start.x,y=finish.y-start.y,z=finish.z-start.z}
             if dot(move,move)>1e-18 then
-                local radius=self.radius+self.margin+math.sqrt(offset*offset+side*side)*(1-math.cos(math.abs(angle)/2))
-                self.last_ball=offset;self.last_lateral=side;self.last_direction="forward"
+                local radius=self.radius+self.margin+(point.center and self.center_margin or 0)+math.sqrt(offset*offset+side*side)*(1-math.cos(math.abs(angle)/2))
+                self.last_center=point.center==true;self.last_ball=offset;self.last_lateral=side;self.last_direction="forward"
                 local hit=cast(start,finish,radius)
                 if not hit then self.last_direction="reverse";hit=cast(finish,start,radius) end
                 if hit then
@@ -289,7 +289,7 @@ function guard:draw()
     local grace_edit,grace=imgui.slider_float("起飞/切入悬停保护时间（秒）",self.land_grace,0,10)
     if grace_edit and finite(grace) then self.land_grace=math.max(0,math.min(10,grace));self.land_hits=0;self.land_since=now() end
     for _,spec in ipairs({{"radius","检测球半径（米）",0.25,20},{"height","检测球中心高度（米）",-15,20},
-        {"span","前后检测球偏移（米）",0,30},{"lateral","左右检测球偏移（米；0关闭两侧球）",0,30},{"margin","额外安全余量（米）",0.02,1}}) do
+        {"span","前后检测球偏移（米）",0,30},{"lateral","左右检测球偏移（米；0关闭两侧球）",0,30},{"margin","额外安全余量（米）",0.02,1},{"center_margin","中心球额外安全余量（米）",0,20}}) do
         local edit,result=imgui.slider_float(spec[2],self[spec[1]],spec[3],spec[4])
         if edit and finite(result) then self[spec[1]]=math.max(spec[3],math.min(spec[4],result));self.retry_at=nil end
     end

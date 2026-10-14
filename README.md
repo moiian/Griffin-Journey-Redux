@@ -2,7 +2,7 @@
 
 Fly a friendly Griffin with configurable controls, a head-following camera, and separate seats for the player, pawns, and accompanying NPCs.
 
-Version: **0.3.19**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
+Version: **0.3.20**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
 
 ## Install or upgrade
 
@@ -14,17 +14,19 @@ The manual **召唤演出测试** button plays the native forgery-Ferrystone per
 
 When the controlled Griffin naturally enters the stationary hover action in flight, gear 1 controls activate without pressing LT. LT still requests hover manually and retains its existing inertia and input-centering behavior.
 
-The optional **飞行设置 → 1档防穿模测试** experiment checks each gear 1 pose write against three swept body volumes in both directions. A blocked request clears movement inertia and skips every pose setter and warp. Version 0.3.19 restores the original pre/post behavior timing; native drift is displayed and logged instead of locking controls at 5 cm. Switching the guard captures the current native pose, discarding stale targets. Radius, height, spacing and margin are session controls. The guard defaults off after reload; gear 2 has no queries.
+The optional **飞行设置 → 1档防穿模测试** experiment checks each gear 1 pose write against three swept body volumes in both directions. A blocked request clears movement inertia and skips every pose setter and warp. Version 0.3.20 restores the original pre/post behavior timing; native drift is displayed and logged instead of locking controls at 5 cm. Switching the guard captures the current native pose, discarding stale targets. Radius, height, spacing and margin are session controls. The guard defaults off after reload; gear 2 has no queries.
 
-Version 0.3.19 adds **受阻后拉回最后安全位置（对照）**, default off and session-only. With it off, rejected movement clears velocity and rebases subsequent requests to the current native pose, preventing later writes to the old collision target. With it on, the 0.3.17 retained-target behavior is available for comparison. Switching either way discards pending targets at the current pose. Obstacle scans remain active; this does not stop native motion. The dedicated journal records the selected mode and rebase state.
+Version 0.3.20 adds **受阻后拉回最后安全位置（对照）**, default off and session-only. With it off, rejected movement clears velocity and rebases subsequent requests to the current native pose, preventing later writes to the old collision target. With it on, the 0.3.17 retained-target behavior is available for comparison. Switching either way discards pending targets at the current pose. Obstacle scans remain active; this does not stop native motion. The dedicated journal records the selected mode and rebase state.
 
 Version 0.3.19 prevents intermittent retry while a rejected direction stays held with return-to-safe off. After the first hit, the rejected input keeps code pose writes blocked until it is released or reversed. Idle/native correction hits wait for a fresh input. Release starts at the actual pose; no old-point return. Native motion still runs. Tiny position differences below 0.00001 m do not trigger collision queries or correction writes.
 
 Body sizing now supports radius 0.25–20 m, center height -15–20 m, front/rear offset 0–30 m and independent left/right offset 0–30 m. Left/right offset defaults to zero, retaining three spheres; a positive offset adds two side spheres. Defaults and session-only storage are otherwise unchanged. The user reported improved ground behavior with radius 6, height 0 and front/rear offset 6; this remains a test observation, not an accepted default. See [0.3.19 held-input and volume update](COLLISION_0319_HELD_INPUT_VOLUME.md).
 
+Version 0.3.20 adds **中心球额外安全余量（米）**, default 0, range 0–20 m. It expands only the central sphere on top of the common radius and margin; front, rear and side spheres retain their existing sizing. This is session-only and is included in the dedicated journal. See [center sphere padding](COLLISION_0320_CENTER_MARGIN.md).
+
 An independent **启用1档近地自动降落（实验）** switch checks for a surface beneath the Griffin root, then uses the same native landing action as RS. The distance defaults to 2 m (0.25–15); the stable-hover grace defaults to 3 seconds (0–10). Three hits at 0.2-second intervals confirm proximity. Taking off, grounded, ascending input, external control, outgoing actions and gear 2 do not trigger it. Roofs also count as surfaces. The readout shows a threshold range, not exact foot clearance. Both experiments are session-only and require in-game validation.
 
-The optional developer folder adds **位移与降落 DEBUG** and **记录防穿模/近地降落专属LOG** in that panel. Logging defaults off; samples are collected about 4 times per second and saved every second to `reframework/data/GriffinJourneyRedux_Collision_Log.json`. Toggle logging off or use **立即保存专属LOG** after the test. The journal retains 1,200 chronological records; restarting recording replaces the previous session. It works separately from the general diagnostics switch. See [0.3.19 diagnostics and landing](COLLISION_0317_DEBUG_LANDING.md).
+The optional developer folder adds **位移与降落 DEBUG** and **记录防穿模/近地降落专属LOG** in that panel. Logging defaults off; samples are collected about 4 times per second and saved every second to `reframework/data/GriffinJourneyRedux_Collision_Log.json`. Toggle logging off or use **立即保存专属LOG** after the test. The journal retains 1,200 chronological records; restarting recording replaces the previous session. It works separately from the general diagnostics switch. See [0.3.20 diagnostics and landing](COLLISION_0317_DEBUG_LANDING.md).
 
 ## Controls
 
