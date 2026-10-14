@@ -102,6 +102,7 @@ function hover_motion:tick(d,ch,tr,fx,fz,flying,ground,action)
     if hover_collision and hover_collision.enabled and not hover_collision:prepare(d,m,true) then
         m.pending_pose=nil;return
     end
+    if hover_collision and hover_collision:hold_input(d,m) then return end
     local t=now()
     local dt=math.max(0,math.min(0.1,t-m.last_time));m.last_time=t
     local x,y=input.hover_x or input.x,input.y
@@ -146,7 +147,7 @@ function hover_motion:after_behavior()
     local d=active
     if not eligible(d) or not d.hover_motion then return end
     local m=d.hover_motion
-    if hover_collision and hover_collision.enabled and not m.pending_pose then return end
+    if hover_collision and hover_collision.enabled and not m.pending_pose then hover_collision:skip_post(m);return end
     m.pending_pose=nil;m.write_phase="post_behavior"
     local ok,err=pcall(write_pose,d,m)
     if not ok then

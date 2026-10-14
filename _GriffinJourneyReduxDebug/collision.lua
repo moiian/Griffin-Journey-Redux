@@ -49,13 +49,13 @@ function dbg:tick()
         self.last_sample=t
         local g=hover_collision;local d=active;local m=d and d.hover_motion
         self:record("sample",{driver=g.driver_state,collision={enabled=g.enabled,return_to_safe=g.return_to_safe,status=g.status,phase=g.last_phase,
-            radius=g.radius,height=g.height,span=g.span,margin=g.margin,drift=g.drift,max_drift=g.max_drift,
-            request=g.request,actual=g.actual,target=g.target,probes=g.probes,last_query=g.last_query,casts=g.casts,blocks=g.blocks,contacts=g.contacts,
-            ball=g.last_ball,direction=g.last_direction,writes=g.writes},
+            radius=g.radius,height=g.height,span=g.span,lateral=g.lateral,margin=g.margin,drift=g.drift,max_drift=g.max_drift,
+            request=g.request,actual=g.actual,target=g.target,probes=g.probes,last_query=g.last_query,casts=g.casts,blocks=g.blocks,held_blocks=g.held_blocks,contacts=g.contacts,
+            ball=g.last_ball,lateral_ball=g.last_lateral,direction=g.last_direction,writes=g.writes},
             landing={enabled=g.auto_land,status=g.ground_status,distance=g.land_distance,grace=g.land_grace,
                 hits=g.land_hits,within=g.ground_within,checked_at=g.ground_checked_at},
             motion=m and {position=m.position,yaw=m.yaw,vx=m.vx,vy=m.vy,vz=m.vz,turn=m.turn,coast=m.coast,
-                pending=m.pending_pose,rebase_after_block=m.rebase_after_block,dirty=m.dirty,accepted=m.collision_safe},
+                pending=m.pending_pose,input_lock=m.input_lock,rebase_after_block=m.rebase_after_block,dirty=m.dirty,accepted=m.collision_safe},
             inertia={horizontal_accel=settings.hover_accel_tau,horizontal_stop=settings.hover_decel_tau,
                 up_accel=settings.hover_up_accel_tau,up_stop=settings.hover_up_decel_tau,
                 down_accel=settings.hover_down_accel_tau,down_stop=settings.hover_down_decel_tau,sprint_stop=settings.sprint_stop_tau}})
@@ -78,6 +78,7 @@ function dbg:draw()
     if s then imgui.text(string.format("左摇杆：%.3f, %.3f；上移/下移：%s / %s",s.stick.x or 0,s.stick.y or 0,tostring(s.up),tostring(s.down))) end
     imgui.text("当前观测位置（Universal）："..pos(s and s.position))
     imgui.text("通过检测后的原生位置写入次数："..tostring(g.writes or 0))
+    imgui.text("同向输入阻断："..tostring(m and m.input_lock~=nil or false).."；保持次数："..tostring(g.held_blocks or 0))
     imgui.text("受阻后跟随实际位置："..tostring(m and m.rebase_after_block or false))
     imgui.text("最后检测实际位置（Universal）："..pos(g.actual))
     imgui.text("最后检测目标位置（Universal）："..pos(g.target))
@@ -86,7 +87,7 @@ function dbg:draw()
     imgui.text("行为前位移/结果："..pos(pre and pre.request).." / "..tostring(pre and pre.result))
     imgui.text("行为后修正/结果："..pos(post and post.request).." / "..tostring(post and post.result))
     imgui.text(string.format("最后原生偏移：%.4f米；最大：%.4f米（仅记录，不锁输入）",g.drift or 0,g.max_drift or 0))
-    imgui.text("检测阶段/球偏移/方向："..tostring(g.last_phase).." / "..tostring(g.last_ball).." / "..tostring(g.last_direction))
+    imgui.text("检测阶段/球前后与左右偏移/方向："..tostring(g.last_phase).." / "..tostring(g.last_ball)..", "..tostring(g.last_lateral or 0).." / "..tostring(g.last_direction))
     if m then imgui.text(string.format("速度 XYZ：%.3f, %.3f, %.3f；转速：%.3f",m.vx,m.vy,m.vz,m.turn)) end
     imgui.text("近地结果采样时间："..tostring(g.ground_checked_at).."；确认次数："..tostring(g.land_hits or 0))
     imgui.text("近地检查：根节点直下细球扫掠，显示阈值范围；屋顶也算下方表面。")
