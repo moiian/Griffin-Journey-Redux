@@ -64,6 +64,7 @@ re.on_draw_ui(function()
         end
         imgui.tree_pop()
     end
+    hud:draw()
     if imgui.tree_node("测试按钮") then
         if beta_button("一键生成狮鹫###BetaSpawn") then spawn() end
         if beta_button("狮鹫召唤演出###BetaSummonPerformance") then bridge.summon_performance() end

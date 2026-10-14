@@ -199,6 +199,8 @@ menu.editor=function()
         menu.edit_status="未保存修改已撤销"
     end
     if imgui.same_line then imgui.same_line() end
+    if beta_button("恢复默认配置###GriffinRestoreDefaults") then menu.restore_defaults() end
+    if imgui.same_line then imgui.same_line() end
     local changed,value=menu.toggle("实时应用修改###GriffinLiveApply",menu.realtime)
     if changed then
         menu.realtime=value
@@ -209,8 +211,6 @@ menu.editor=function()
     if type(imgui.is_item_hovered)=="function" and type(imgui.set_tooltip)=="function" and imgui.is_item_hovered() then
         imgui.set_tooltip("方便调试参数，开启后实时应用配置。默认关闭可节省性能。")
     end
-    if imgui.same_line then imgui.same_line() end
-    if beta_button("恢复默认配置###GriffinRestoreDefaults") then menu.restore_defaults() end
     if menu.edit_dirty then imgui.text("有未保存修改；拖动参数不会写入配置文件。") end
     if menu.pending_save then imgui.text("保存已排队，继续游戏或进入照片模式后应用。") end
     if menu.edit_status then imgui.text(menu.edit_status) end

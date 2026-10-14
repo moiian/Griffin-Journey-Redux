@@ -42,6 +42,7 @@ local function can_start(allow_paused)
 end
 function summon:cancel(reason)
     if not self.current then return end
+    if hud then hud:cancel_summon(self.current) end
     self.current=nil
     self.status="召唤演出已取消："..tostring(reason)
 end
@@ -72,6 +73,7 @@ function summon:request(wait_for_resume)
     local request={owner=owner,transform=tr,flow=flow,stage=wait_for_resume and "waiting_resume" or "queued",elapsed=0,
         height=settings.summon_height,forward=settings.summon_forward,delay=settings.summon_delay}
     self.current=request
+    if hud then hud:notify_summon(owner,request) end
     if wait_for_resume then
         request.wait_deadline=os.time()+30
         self.status="召唤道具：请求已接收，请关闭物品菜单后播放演出"

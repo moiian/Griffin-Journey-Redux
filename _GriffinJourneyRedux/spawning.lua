@@ -14,7 +14,10 @@ function spawn(options)
     operation = token
     queued = true
     run_once(function()
-        if operation ~= token then return end
+        if operation ~= token then
+            if hud and not options then hud:cancel_summon(token) end
+            return
+        end
         operation = nil
         queued = false
         if not alive then return end
@@ -33,8 +36,12 @@ function spawn(options)
             status = "正在生成狮鹫并设置友方……"
             if event then event("spawn_requested", "NickCore Griffin; ThinkStop requested; exact returned reference") end
         end)
-        if not ok then failed("生成失败", err) end
+        if not ok then
+            if hud and not options then hud:cancel_summon(token) end
+            failed("生成失败", err)
+        end
     end)
+    if hud and not options then hud:notify_summon(core().properties.player,token) end
     return true
 end
 function tick_cleanup_departures()

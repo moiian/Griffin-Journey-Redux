@@ -2,6 +2,7 @@
 return function(ctx)
 local _ENV=ctx
 stop_driver = function(reason,suppress_landing,voluntary)
+    local exiting=active
     local departing=active or state.recovery
     if voluntary and departing then
         departing.voluntary_exit=true
@@ -20,6 +21,7 @@ stop_driver = function(reason,suppress_landing,voluntary)
     local d = active or state.recovery
     if d and not suppress_landing and request_exit_landing then pcall(request_exit_landing,d) end
     active = nil
+    if exiting and hud then hud:notify_exit(exiting) end
     input = {x = 0, y = 0, buttons = 0}
     local camera_ok,camera_err=pcall(restore_camera)
     if not camera_ok then early_errors[#early_errors+1]="镜头恢复 "..tostring(camera_err) end
