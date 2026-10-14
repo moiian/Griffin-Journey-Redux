@@ -163,6 +163,12 @@ function tick_driver()
         assert(manager and manager:call("get_GameObject()") == d.spawn.result.go, "ActionManager mismatch")
         local info = manager:get_field("CurrentAction")
         local action_name = info and info:get_field("Name")
+        d.native_action=action_name
+        local transition=d.action_transition
+        if transition and (action_name==transition.node or action_name~=transition.from
+            or now()-transition.at>=0.35) then
+            d.action_transition=nil
+        end
         sprint_motion:sample(d,ch,tr,flying,ground,action_name)
         if d.mode=="taking_off" and d.auto_hover then
             local t=now()
@@ -188,6 +194,26 @@ function tick_driver()
             if gear==2 then hover_motion:release(d);sprint_motion:clear(d) end
             event("gear_selected",gear)
         end
+        -- Adopt only the exact stationary hover action, never a name substring or
+        -- target-height/attack/landing action. Actual native state owns idle gear.
+        -- A fresh non-hover command gets the existing submission window to enter.
+        local hover_node="Ch253HoverWaitHoHomingHeight"
+        local outgoing=(d.intent and d.intent.node~=hover_node)
+            or (d.action_transition and d.action_transition.node~=hover_node)
+        if action_name==hover_node and flying and not ground and not d.external_control
+            and d.mode~="taking_off" and d.manual_hold~="landing" and not d.pending and not outgoing then
+            local natural=d.gear~=1
+            if natural or not d.controls_active or d.mode~="hover" or d.control_node~=hover_node then
+                if natural then
+                    hover_motion:release(d);sprint_motion:clear(d)
+                    d.hover_wait_center=nil
+                end
+                d.gear=1;d.controls_active=true;d.mode="hover";d.control_node=hover_node
+                if d.intent and d.intent.node==hover_node then d.intent=nil end
+                event("native_hover_adopted",{natural=natural})
+            end
+        end
+        -- Fresh controls below can still leave an already active native hover.
         if takeoff_locked and not held(pressed,masks.landing) then
             if held(pressed,masks.rt) or held(pressed,masks.rb) or held(pressed,masks.lb) then
                 d.takeoff_choice="dash";d.takeoff_stop_requested=nil

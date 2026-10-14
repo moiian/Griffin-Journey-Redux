@@ -2,9 +2,9 @@
 return function(ctx)
 local _ENV=ctx
 summon={status="召唤演出：未运行"}
-for key,default in pairs({summon_height=10,summon_forward=5}) do
+for key,default in pairs({summon_height=10,summon_forward=5,summon_delay=5}) do
     local value=loaded_settings and loaded_settings[key]
-    settings[key]=finite(value) and math.max(0,math.min(50,value)) or default
+    settings[key]=finite(value) and math.max(0,math.min(key=="summon_delay" and 30 or 50,value)) or default
 end
 local function flow_instance()
     local td=sdk.find_type_definition("app.AppSingleton`1<app.FerrystoneFlowController>")
@@ -45,7 +45,7 @@ function summon:request()
     local ok,owner,tr,flow=pcall(can_start)
     if not ok then self.status="召唤演出未启动："..tostring(owner);return false end
     local request={owner=owner,transform=tr,flow=flow,stage="queued",elapsed=0,
-        height=settings.summon_height,forward=settings.summon_forward}
+        height=settings.summon_height,forward=settings.summon_forward,delay=settings.summon_delay}
     self.current=request;self.status="召唤演出：等待开始"
     run_once(function()
         if not alive or state.generation~=generation or self.current~=request then return end
@@ -55,7 +55,7 @@ function summon:request()
             flow:call("startForgery()")
             request.last=now();request.stage="playing"
             assert(flow:call("get_IsActive()")==true and flow:get_field("Routine")==7,"赝品演出未进入运行状态")
-            self.status="召唤演出：第5秒生成狮鹫"
+            self.status=string.format("召唤演出：开始后 %.2f 秒生成狮鹫",request.delay)
         end)
         if not started then self:cancel(err) end
     end)
@@ -77,15 +77,23 @@ function summon:tick()
         local busy=request.flow:call("get_IsActive()")
         local routine=request.flow:get_field("Routine")
         if not busy and routine==0 then
-            if not request.fired then self:cancel("演出在第5秒前结束")
-            else self.current=nil;self.status="召唤演出已结束，可手动开始驾驶" end
-            return
+            if request.fired then self.current=nil;self.status="召唤演出已结束，可手动开始驾驶";return end
+            local director=request.flow:get_field("<Director>k__BackingField")
+            local count=director and director:get_field("ShotCameraRequestCount")
+            local index=director and director:get_field("ShotCameraIndex")
+            if not request.native_ended then
+                assert(director and director:get_field("Routine")==0 and finite(count) and count>0
+                    and finite(index) and index>=count,"演出未正常完成，召唤已取消")
+                request.native_ended=true
+                self.status=string.format("演出已结束，等待开始后 %.2f 秒生成狮鹫",request.delay)
+            end
+        else
+            assert(not request.native_ended and routine==7,"已切换至其他飞石流程")
         end
-        assert(routine==7,"已切换至其他飞石流程")
         local dt=t-request.last;request.last=t
         assert(finite(dt) and dt>=0 and dt<=2,"演出计时中断")
         request.elapsed=request.elapsed+dt
-        if not request.fired and request.elapsed>=5 then
+        if not request.fired and request.elapsed>=request.delay then
             assert(#state.spawns==0 and not queued,"已有其他生成请求")
             -- via.Position is a value copy returned by the getter; only this copy is edited.
             local p=request.transform:call("get_UniversalPosition()")
@@ -99,7 +107,7 @@ function summon:tick()
             p.x=p.x+fx*request.forward;p.y=p.y+request.height;p.z=p.z+fz*request.forward
             assert(spawn({session=request,owner=request.owner,position=p,facing={x=-fx,z=-fz}}),"生成请求被拒绝")
             request.fired=true
-            self.status="第5秒已提交生成请求，等待 NickCore 实例就绪"
+            self.status=string.format("%.2f 秒已提交生成请求，等待 NickCore 实例就绪",request.delay)
         end
     end)
     if not ok then self:cancel(err) end

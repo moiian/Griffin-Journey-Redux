@@ -2,7 +2,7 @@
 
 Fly a friendly Griffin with configurable controls, a head-following camera, and separate seats for the player, pawns, and accompanying NPCs.
 
-Version: **0.3.13**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
+Version: **0.3.14**. Requires the installed NickCore EnemySpawner and `run_once` utility. This package does not include or modify NickCore.
 
 ## Install or upgrade
 
@@ -10,7 +10,9 @@ Copy `reframework/autorun` from the package into the game folder. When upgrading
 
 Open **Griffin Journey Redux → 一般设置**, spawn a Griffin, and start driving. End driving before resetting scripts. Only the Griffin spawned by this mod is controlled.
 
-The manual **召唤演出测试（第5秒生成狮鹫）** button plays the native forgery-Ferrystone performance and requests a Griffin spawn at five seconds of unpaused gameplay. **召唤演出设置** controls the height and forward distance (defaults: 10 m above the player's position and 5 m forward). The Griffin faces the player horizontally once its returned instance is ready, and uses the same friendly and SkipThink initialization as the ordinary spawn button. Driving remains manual. The native performance can consume a forgery Ferrystone if one is carried.
+The manual **召唤演出测试** button plays the native forgery-Ferrystone performance and requests a Griffin spawn after a configurable delay (default: 5 seconds of unpaused gameplay; range: 0–30 seconds). **召唤演出设置** also controls the height and forward distance (defaults: 10 m above the player's position and 5 m forward). Settings are captured when the button is pressed. If the performance finishes normally before the selected delay, the summon waits until that delay. The Griffin faces the player horizontally once its returned instance is ready, and uses the same friendly and SkipThink initialization as the ordinary spawn button. Driving remains manual. The native performance can consume a forgery Ferrystone if one is carried.
+
+When the controlled Griffin naturally enters the stationary hover action in flight, gear 1 controls activate without pressing LT. LT still requests hover manually and retains its existing inertia and input-centering behavior.
 
 ## Controls
 
