@@ -14,6 +14,32 @@ function sync_player(d,reset_fall)
     if reset_fall or d.fall_reset_pending then passengers.reset_fall(d) end
     d.controller:call("warp()")
 end
+-- Voluntary exit captures all seat points before any actor/bone restoration.
+function capture_exit_seats(d)
+    local function capture(a,config)
+        if a.exit_seat or not a.moved or not a.player:get_Valid() then return end
+        local ok,target=pcall(function()
+            assert(owned_player(a,not a.group),"Exit seat actor changed")
+            if a.group then passengers.prepare_rig(a,d) end
+            return rider_seat(a,config)
+        end)
+        if ok then a.exit_seat=vector(target)
+        else event("exit_seat_capture_failed",{group=a.group or "player",slot=a.slot,error=tostring(target)}) end
+    end
+    capture(d,passengers.player_config())
+    for _,a in pairs(d.passengers or {}) do capture(a,passengers.visual_seat(a.group,a.slot)) end
+end
+function apply_exit_seat(a)
+    if not a.exit_seat or a.exit_seat_applied then return end
+    assert(owned_player(a,not a.group),"Exit seat actor changed")
+    local p=a.exit_seat
+    a.transform:call("set_Position(via.vec3)",Vector3f.new(p.x,p.y,p.z))
+    -- Read UniversalPosition after the local Transform write (floating origin).
+    sync_player(a,true)
+    a.exit_seat_applied=true
+    event("exit_seat_applied",{group=a.group or "player",slot=a.slot,position=p})
+    return true
+end
 -- All layers follow a neutral Griffin anchor; only the selected layer gets stick offset.
 -- Engine coupling is observed through readback, not assumed away.
 anchor_mode="rider"

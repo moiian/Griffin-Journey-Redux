@@ -1,7 +1,13 @@
 -- Griffin Journey Redux: lifecycle
 return function(ctx)
 local _ENV=ctx
-stop_driver = function(reason,suppress_landing)
+stop_driver = function(reason,suppress_landing,voluntary)
+    local departing=active or state.recovery
+    if voluntary and departing then
+        departing.voluntary_exit=true
+        local ok,err=pcall(capture_exit_seats,departing)
+        if not ok then event("exit_seat_capture_failed",tostring(err)) end
+    end
     if summon then summon:cancel(reason) end
     local early_errors={}
     local anti_ok,anti_err=pcall(anti_jitter.stop,anti_jitter)
@@ -41,8 +47,7 @@ stop_driver = function(reason,suppress_landing)
     if d.moved then
         local ok, err = pcall(function()
             if owned_player(d, true) then
-                -- Release at the current physical position; never return to the launch point.
-                sync_player(d,true)
+                if not apply_exit_seat(d) then sync_player(d,true) end
                 d.release_position=vector(d.transform:call("get_Position()"))
             end
             d.moved = false
@@ -65,7 +70,7 @@ stop_driver = function(reason,suppress_landing)
     state.recovery = (#errors > 0) and d or nil
     status = #errors > 0 and ("驾驶已停止，请再点结束驾驶恢复：" .. table.concat(errors, "; "))
         or "驾驶已结束，玩家和乘客已在当前位置释放。"
-    event("driver_stopped", {reason = reason, errors = errors,release_mode="current_physical_position",player_position=d.release_position})
+    event("driver_stopped", {reason = reason, errors = errors,release_mode=d.voluntary_exit and "current_preset_seats" or "current_physical_position",player_position=d.release_position})
     return #errors == 0
 end
 end

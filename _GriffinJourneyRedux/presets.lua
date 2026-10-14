@@ -288,8 +288,8 @@ end
 
 menu.stop=function()
     operation=nil;queued=false
-    if type(run_once)~="function" then stop_driver("手动结束");return end
-    run_once(function() if alive then stop_driver("手动结束") end end)
+    if type(run_once)~="function" then stop_driver("手动结束",false,true);return end
+    run_once(function() if alive then stop_driver("手动结束",false,true) end end)
 end
 menu.delete=function()
     if summon then summon:cancel("手动删除") end

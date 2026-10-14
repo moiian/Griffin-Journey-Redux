@@ -666,3 +666,7 @@ User did not receive pizza in 0.3.31; herb observations are inconclusive. Pin na
 ## Griffin Journey Redux 0.3.33
 
 Grounded healthy owned Griffin cleanup now requests takeoff, FlightTarget at 3s, and exact-object destruction at 4.2s of unpaused time after rider release. Idle cleanup distance is >43m. Add independently rebindable ground wing start/end on physical RB/LB (C/R), preserving air bumper controls and enforcing ground again at dispatch. Existing 18 suites plus departure/wing tests passed offline. User confirms pizza receipt, mounted use/exit and cleanup; do not request repeated acceptance for those. Settings and bundle unchanged.
+
+## Griffin Journey Redux 0.3.34
+
+Voluntary menu/hotkey exit synchronizes each controlled rider real Transform/context/controller to the current selected preset seat before release. Saved targets survive recovery retry. Flying exits query world geometry 25m below the exact Griffin root once; within 25m requests landing, otherwise or query failure requests hover, after release and unpause. Ground and automatic/emergency/deletion policies retained. Lua54 and 20 offline suites pass, including 12 new exit cases. Personal settings and item bundle unchanged; new visual behavior awaits gameplay observation.

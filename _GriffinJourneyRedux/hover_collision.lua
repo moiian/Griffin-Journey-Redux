@@ -68,6 +68,14 @@ local function cast(start,finish,radius)
     guard.last_query.contacts=count
     return count>0,count
 end
+-- One query on voluntary exit, independent of both experimental toggles.
+function guard:ground_within(transform,distance)
+    local p=vector(transform:call("get_Position()"))
+    local radius=0.01
+    -- Bottom of the final sphere is exactly distance below the root.
+    return cast({x=p.x,y=p.y+radius,z=p.z},
+        {x=p.x,y=p.y-distance+radius,z=p.z},radius)
+end
 local function yaw_of(m)
     local q=m.transform:call("get_Rotation()")
     assert(q and finite(q.x) and finite(q.y) and finite(q.z) and finite(q.w),"Collision rotation unavailable")

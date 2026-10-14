@@ -167,9 +167,19 @@ function request_exit_landing(d)
     if not allowed then return end
     local ch=d.spawn.result.chara
     if not ch:call("get_IsFlight()") or ch:call("get_IsGround()") then return end
+    local node="Ch253HoverToLanding"
+    if d.voluntary_exit then
+        local ok,near=pcall(function()
+            assert(validate_spawn(d.spawn,true)==ch,"Exit height instance changed")
+            return hover_collision:ground_within(ch:call("get_Transform()"),25)
+        end)
+        if not ok or not near then node="Ch253HoverWaitHoHomingHeight" end
+        event("exit_ground_check",{threshold=25,query_ok=ok,ground_within_limit=ok and near or false,
+            node=node,error=not ok and tostring(near) or nil})
+    end
     d.exit_landing_requested=true
-    exit_landing={spawn=d.spawn,ch=ch,go=d.spawn.result.go,owner=d.player,deadline=os.time()+30}
-    exit_landing_status="退出降落：等待释放完成并关闭暂停"
+    exit_landing={spawn=d.spawn,ch=ch,go=d.spawn.result.go,owner=d.player,deadline=os.time()+30,node=node,voluntary=d.voluntary_exit==true}
+    exit_landing_status=node=="Ch253HoverToLanding" and "退出降落：等待释放完成并关闭暂停" or "退出悬停：等待释放完成并关闭暂停"
 end
 function tick_exit_landing()
     local ticket=exit_landing
@@ -185,9 +195,9 @@ function tick_exit_landing()
         if not ch:call("get_IsFlight()") or ch:call("get_IsGround()") then return end
         local manager=ch:call("get_ActionManager()")
         assert(manager and manager:call("get_GameObject()")==ticket.go,"降落动作管理器归属不符")
-        manager:call("requestActionCore(app.ActionManager.Priority, System.String, System.UInt32)",10,"Ch253HoverToLanding",0)
-        exit_landing_status="退出降落：已提交一次原生指令"
-        event("exit_landing_requested","Exact instance, once after rider release")
+        manager:call("requestActionCore(app.ActionManager.Priority, System.String, System.UInt32)",10,ticket.node,0)
+        exit_landing_status=ticket.node=="Ch253HoverToLanding" and "退出降落：已提交一次原生指令" or "退出悬停：已提交一次原生指令"
+        event("exit_landing_requested",{node=ticket.node,voluntary=ticket.voluntary})
     end)
     if not ok then exit_landing_status="退出降落：跳过／"..tostring(err);event("exit_landing_skipped",tostring(err)) end
 end

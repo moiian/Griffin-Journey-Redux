@@ -53,8 +53,8 @@ passengers.restore_one=function(a)
     a.pose_pending=nil
     if a.moved then
         if core() and core().properties.player==a.owner then
-            -- Hip display is restored above; keep the current physical location.
-            sync_player(a,true)
+            -- Manual exit synchronizes the selected visual seat before releasing FSM.
+            if not apply_exit_seat(a) then sync_player(a,true) end
         end
         a.moved=false
     end
