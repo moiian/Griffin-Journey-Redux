@@ -70,7 +70,7 @@ local function cast(start,finish,radius)
     return count>0,count
 end
 -- One query on voluntary exit, independent of both experimental toggles.
-function guard:ground_within(transform,distance)
+function guard:probe_exit_ground(transform,distance)
     local p=vector(transform:call("get_Position()"))
     local radius=0.01
     -- Bottom of the final sphere is exactly distance below the root.

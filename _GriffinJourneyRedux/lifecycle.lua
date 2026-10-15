@@ -11,8 +11,6 @@ stop_driver = function(reason,suppress_landing,voluntary)
     local departing=active or state.recovery
     if voluntary and departing then
         departing.voluntary_exit=true
-        local ok,err=pcall(capture_exit_seats,departing)
-        if not ok then if event then event("exit_seat_capture_failed",tostring(err)) end end
     end
     if summon then summon:cancel(reason) end
     local early_errors=held_errors
@@ -25,6 +23,10 @@ stop_driver = function(reason,suppress_landing,voluntary)
     if not ai_call_ok then ai_err=ai_ok;ai_ok=false end
     local d = active or state.recovery
     if d and not suppress_landing and request_exit_landing then pcall(request_exit_landing,d) end
+    if voluntary and d then
+        local ok,err=pcall(capture_exit_seats,d)
+        if not ok then if event then event("exit_seat_capture_failed",tostring(err)) end end
+    end
     if d and exiting==d and d.exit_keep_passengers and not suppress_landing and next(d.passengers or {}) then
         passengers.held=d;d.held_next=nil
         for _,a in pairs(d.passengers) do a.exit_seat=nil;a.exit_seat_applied=nil end

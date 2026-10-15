@@ -238,8 +238,10 @@ menu.editor=function()
     if type(imgui.is_item_hovered)=="function" and type(imgui.set_tooltip)=="function" and imgui.is_item_hovered() then
         imgui.set_tooltip("修改参数立即生效，停止调节1秒后合并保存一次；也可立即保存。恢复默认配置需确认应用。")
     end
-    if menu.edit_dirty then imgui.text(menu.defaults_draft and "默认配置尚未应用，请确认后点击应用并保存。" or "修改已实时生效；停止调节1秒后自动保存。") end
-    if menu.pending_save then imgui.text("保存已排队，继续游戏或进入照片模式后应用。") end
-    if menu.edit_status then imgui.text(menu.edit_status) end
+    local text=menu.save_error
+        or (menu.defaults_draft and "默认配置待确认：点击应用并保存。")
+        or (menu.pending_save and "保存待应用：继续游戏或进入照片模式。")
+        or "修改实时生效，停调1秒后自动保存。"
+    imgui.text((text:gsub("[\r\n]+"," ")))
 end
 end

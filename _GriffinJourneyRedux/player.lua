@@ -28,7 +28,9 @@ function capture_exit_seats(d)
     end
     local preset=settings.seat_presets[1]
     capture(d,preset.player)
-    for _,a in pairs(d.passengers or {}) do capture(a,passengers.seat(a.group,a.slot,preset)) end
+    if not d.exit_keep_passengers then
+        for _,a in pairs(d.passengers or {}) do capture(a,passengers.seat(a.group,a.slot,preset)) end
+    end
 end
 function apply_exit_seat(a)
     if not a.exit_seat or a.exit_seat_applied then return end

@@ -199,13 +199,19 @@ function tick_hover_camera_yaw(controller)
     end
 end
 function tick_camera_yaw(controller)
-    local d,s=active,follow_state
+    local d=active
     if not alive or not settings.camera_auto_yaw then return end
-    if not d or not s or camera_mode~="griffin" or d.gear~=2 or not d.controls_active or d.external_control then
-        yaw_state=nil; yaw_status="自动跟随待机：仅2档头部镜头生效";return
+    if not d or d.gear~=2 or not d.controls_active or d.external_control then
+        yaw_state=nil; yaw_status="自动跟随待机：仅2档驾驶生效";return
     end
-    if controller~=s.controller then return end
-    local ok,err=pcall(update_camera_yaw,d,s,controller,false,input.x~=0 or input.y~=0,settings.camera_yaw_speed)
+    local ok,err=pcall(function()
+        local manager=assert(sdk.get_managed_singleton("app.CameraManager"),"CameraManager unavailable")
+        local main=manager._MainCameraControllers and manager._MainCameraControllers[0]
+        assert(main and main:get_Valid() and main:call("get_TargetCharacter()")==d.player
+            and main._CurrentCameraController==controller,"Sprint camera ownership changed")
+        local s={main=main,manager=manager,controller=controller}
+        update_camera_yaw(d,s,controller,false,input.x~=0 or input.y~=0,settings.camera_yaw_speed)
+    end)
     if not ok then yaw_failed(err) end
 end
 function install_yaw_hook()
@@ -232,9 +238,16 @@ function install_yaw_hook()
                     if candidate==main._CurrentCameraController then storage.griffin_hover_yaw_controller=candidate end
                 end)
             end
-            if alive and settings.camera_auto_yaw and active and follow_state then
-                local candidate=sdk.to_managed_object(args[2])
-                if candidate==follow_state.controller then storage.griffin_yaw_controller=candidate end
+            if settings.camera_auto_yaw and active.gear==2 and active.controls_active
+                and not active.external_control and not menu.gameplay_paused() then
+                pcall(function()
+                    if not owned_player(active,true) then return end
+                    local manager=sdk.get_managed_singleton("app.CameraManager")
+                    local main=manager and manager._MainCameraControllers and manager._MainCameraControllers[0]
+                    if not main or not main:get_Valid() or main:call("get_TargetCharacter()")~=active.player then return end
+                    local candidate=sdk.to_managed_object(args[2])
+                    if candidate==main._CurrentCameraController then storage.griffin_yaw_controller=candidate end
+                end)
             end
         end,function(retval)
             if not alive or not active or (world and not world.usable) or menu.photo_active() then return retval end

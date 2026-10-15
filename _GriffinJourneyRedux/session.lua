@@ -1,9 +1,9 @@
 -- Griffin Journey Redux: session
 return function(ctx)
 local _ENV=ctx
--- Griffin Flight Beta 0.3.48. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.3.49. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-VERSION = "0.3.48"
+VERSION = "0.3.49"
 state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 _G.GriffinJourneyReduxState = state
@@ -176,7 +176,8 @@ function capture_party(c, player)
 end
 function validate_spawn(r,visual_only)
     local c = assert(core(), "NickCore unavailable")
-    assert(c.properties.player == r.owner and (not menu.gameplay_paused() or visual_only and menu.visual_allowed()), "Player changed or game paused")
+    local visual=visual_only and (menu.visual_allowed() or passengers.held and passengers.held.spawn==r and not passengers.held.held_releasing)
+    assert(c.properties.player == r.owner and (not menu.gameplay_paused() or visual), "Player changed or game paused")
     local result = r.result
     assert(result and result.go and result.chara, "等待狮鹫生成完成")
     assert(result.go:get_Valid() and result.chara:get_Valid(), "Griffin no longer valid")

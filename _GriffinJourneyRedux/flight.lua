@@ -175,7 +175,7 @@ function request_exit_landing(d)
     if d.voluntary_exit then
         local ok,near=pcall(function()
             assert(validate_spawn(d.spawn,true)==ch,"Exit height instance changed")
-            return hover_collision:ground_within(ch:call("get_Transform()"),25)
+            return hover_collision:probe_exit_ground(ch:call("get_Transform()"),25)
         end)
         if not ok or not near then node="Ch253HoverWaitHoHomingHeight" end
         d.exit_keep_passengers=ok and near==false
