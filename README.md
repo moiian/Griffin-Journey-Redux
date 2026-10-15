@@ -1,6 +1,6 @@
 # Griffin Journey Redux
 
-Version **0.3.50** · Author **aelinore**
+Version **0.3.51** · Author **aelinore**
 
 Fly a friendly Griffin with configurable controls, a head-following camera, and individual seats for the player, pawns, and accompanying NPCs. Requires the installed **NickCore**, its EnemySpawner, and `run_once`. Only the exact Griffin created by this mod is controlled.
 
@@ -58,3 +58,7 @@ Lua54 compilation, offline behavior checks, and both player-only and add-on inst
 Open **详细配置 → 隐藏界面**. The master switch, four timing conditions and eight HUD categories are independent and enabled by default. Conditions: 20 gameplay seconds after an accepted summon, driving, 10 gameplay seconds after leaving the driver, or while the exact exited Griffin is still in its native hovering action. Menu/hotkey/direct spawn and performance/item API paths share these events. Pauses do not consume the timers; pending/rejected or canceled summons do not restart or retain a false hiding window.
 
 Categories: player skills, pawn commands, player HP, player stamina, player status icons, boss HP, pawn names/HP, and minimap. Other HUD and menus pass through. Whole selected groups are skipped at GUI drawing; selective player panels are restored after the draw, with end-of-render/reset recovery. The feature does not require HUD Controls or Hotkeys and does not alter their files. HUD switches follow draft/preview/explicit-save/default-reset behavior. Visual behavior and coexistence with another active HUD mod require in-game confirmation.
+
+## Collision escape
+
+Gear-1 horizontal obstruction retries the current native pose every 0.2 seconds while the same input is held. If three distinct directions (forward/backward/left turn/right turn) are rejected before a successful horizontal move or turn, horizontal translation and yaw collision checks are bypassed for 4.2 seconds. Repeated input in one direction counts once; a diagonal rejection counts only its dominant axis. Vertical movement checks and near-ground landing stay active. The existing Debug return-to-safe experiment retains its own policy. Escape state is temporary per hover binding, clears on toggle/release/reentry, and never changes saved collision settings.

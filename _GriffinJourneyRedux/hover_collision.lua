@@ -91,6 +91,35 @@ local function command()
     return {vertical=up~=down and (up and 1 or -1) or 0,
         longitudinal=sign(input.y or 0),turn=sign(input.hover_x or input.x or 0)}
 end
+-- Escape state belongs to this hover binding, never to saved configuration.
+function guard:horizontal_bypass(m)
+    local until_time=m.horizontal_bypass_until
+    if not until_time then return false end
+    local t=now()
+    if t>=until_time or t<m.horizontal_bypass_started then
+        m.horizontal_bypass_until=nil;m.horizontal_bypass_started=nil;m.horizontal_blocks=nil
+        return false
+    end
+    return true
+end
+function guard:horizontal_block(m,delta,angle)
+    if self.block_policy or self:horizontal_bypass(m) then return end
+    local c=command()
+    if c.vertical~=0 or delta.x*delta.x+delta.z*delta.z<1e-10 and math.abs(angle)<1e-5 then return end
+    local x,y=input.hover_x or input.x or 0,input.y or 0
+    local direction
+    -- A diagonal rejection proves only one attempt; never count both axes at once.
+    if math.abs(y)>=math.abs(x) and y~=0 then direction=y>0 and "forward" or "backward"
+    elseif x~=0 then direction=x>0 and "right" or "left" end
+    if not direction then return end
+    local blocked=m.horizontal_blocks or {};m.horizontal_blocks=blocked;blocked[direction]=true
+    local count=0;for _ in pairs(blocked) do count=count+1 end
+    if count<3 then return end
+    local t=now();m.horizontal_bypass_started=t;m.horizontal_bypass_until=t+4.2
+    m.horizontal_blocks=nil;m.input_lock=nil;m.input_lock_retry=nil
+    self.status="1档防穿模：水平脱困4.2秒，上下检测保持开启"
+    if self.on_event then self:record("horizontal_escape",{duration=4.2},true) end
+end
 local function freeze(m,current)
     local safe=m.collision_safe
     if guard.block_policy then
@@ -114,6 +143,7 @@ function guard:set_enabled(value)
             assert(validate_spawn(d.spawn)==m.character,"Collision binding changed")
             m.position=vector(m.transform:call("get_UniversalPosition()"));m.yaw=yaw_of(m)
             m.vx=0;m.vy=0;m.vz=0;m.turn=0;m.coast=nil
+            m.horizontal_blocks=nil;m.horizontal_bypass_until=nil;m.horizontal_bypass_started=nil;m.input_lock_retry=nil
             m.collision_safe=nil;m.pending_pose=nil;m.rebase_after_block=nil;m.input_lock=nil;m.collision_resume_pending=nil;m.last_time=now()
             d.heading={x=math.sin(m.yaw),z=math.cos(m.yaw)}
         end)
@@ -126,7 +156,9 @@ function guard:set_enabled(value)
 end
 function guard:latch(m,reason)
     if self.block_policy or m.input_lock then return end
-    m.input_lock=command();m.rebase_after_block=true
+    local c=command()
+    if c.vertical==0 and self:horizontal_bypass(m) then return end
+    m.input_lock=c;m.input_lock_retry=now()+0.2;m.rebase_after_block=true
     if self.on_event then self:record("input_block_latched",{reason=reason,command=m.input_lock,actual=self.actual,target=self.target,
         },true) end
 end
@@ -136,14 +168,19 @@ function guard:hold_input(d,m)
     local c=command()
     local same=locked.vertical==c.vertical and locked.longitudinal==c.longitudinal and locked.turn==c.turn
     m.vx=0;m.vy=0;m.vz=0;m.turn=0;m.coast=nil;m.pending_pose=nil
-    if not same then
-        m.input_lock=nil;m.rebase_after_block=true;m.collision_resume_pending=true
+    -- Recheck a held direction against the current native pose instead of
+    -- retaining a rejected contact forever after geometry/native motion changes.
+    local t=now()
+    local retry=m.input_lock_retry or t
+    if not same or locked.vertical==0 and (t>=retry or t<retry-0.2 or self:horizontal_bypass(m)) then
+        m.input_lock_retry=nil;m.input_lock=nil;m.rebase_after_block=true;m.collision_resume_pending=true
         if self.on_event then self:record("input_block_released",{previous=locked,current=c,position=m.position},true) end
         return false
     end
     m.last_time=now()
     if self.on_path then self.on_path(m,m.position,{x=0,y=0,z=0},0,"held_block") end
-    self.status="1档防穿模：同向输入已阻断，请松开或改变方向后重试"
+    self.status=locked.vertical==0 and "1档防穿模：同向受阻，定时重新检测"
+        or "1档防穿模：同向输入已阻断，请松开或改变方向后重试"
     d.heading={x=math.sin(m.yaw),z=math.cos(m.yaw)}
     return true
 end
@@ -190,8 +227,15 @@ function guard:constrain(d,m,current)
             self.status="1档防穿模：等待位移";return
         end
         if self.retry_at and now()<self.retry_at then freeze(m,current);return end
+        local horizontal=delta.x*delta.x+delta.z*delta.z>=1e-10 or math.abs(angle)>=1e-5
+        local bypass=self:horizontal_bypass(m)
         local local_p=m.transform:call("get_Position()");vector(local_p)
         local oldx,oldz,newx,newz=math.sin(yaw),math.cos(yaw),math.sin(m.yaw),math.cos(m.yaw)
+        if bypass then
+            -- Ignore horizontal translation and yaw only. Vertical sweeps retain
+            -- the same spheres, distances, margins and collision filter.
+            newx,newz=oldx,oldz
+        end
         local offsets={{forward=0,right=0,center=true},{forward=self.span,right=0},{forward=-self.span,right=0}}
         if self.lateral>0 then
             offsets[#offsets+1]={forward=0,right=self.lateral}
@@ -200,12 +244,13 @@ function guard:constrain(d,m,current)
         for _,point in ipairs(offsets) do
             local offset,side=point.forward,point.right
             local start={x=local_p.x+oldx*offset+oldz*side,y=local_p.y+self.height,z=local_p.z+oldz*offset-oldx*side}
-            local actual_finish={x=local_p.x+delta.x+newx*offset+newz*side,y=local_p.y+delta.y+self.height,z=local_p.z+delta.z+newz*offset-newx*side}
+            local actual_finish={x=local_p.x+(bypass and 0 or delta.x)+newx*offset+newz*side,y=local_p.y+delta.y+self.height,z=local_p.z+(bypass and 0 or delta.z)+newz*offset-newx*side}
             local move={x=actual_finish.x-start.x,y=actual_finish.y-start.y,z=actual_finish.z-start.z}
             local length=math.sqrt(dot(move,move))
             if length>=0.00001 then
                 local distance=point.center and self.center_distance or (side~=0 and self.side_distance or self.end_distance)
                 if length>distance+0.00001 then
+                    if not bypass then self:horizontal_block(m,delta,angle) end
                     freeze(m,current);self:latch(m,"step_exceeds_fixed_distance")
                     self.status="1档防穿模：本次位移超过固定探测距离，请调大距离"
                     return
@@ -214,7 +259,7 @@ function guard:constrain(d,m,current)
                 -- follows step length. Rotation keeps the existing arc margin.
                 local direction={x=move.x/length,y=move.y/length,z=move.z/length}
                 local finish={x=start.x+direction.x*distance,y=start.y+direction.y*distance,z=start.z+direction.z*distance}
-                local radius=self.radius+self.margin+(point.center and self.center_margin or 0)+math.sqrt(offset*offset+side*side)*(1-math.cos(math.abs(angle)/2))
+                local radius=self.radius+self.margin+(point.center and self.center_margin or 0)+math.sqrt(offset*offset+side*side)*(1-math.cos(bypass and 0 or math.abs(angle)/2))
                 if self.on_query then self.on_query(point,false) end
                 local hit,count=cast(start,finish,radius)
                 if not hit then
@@ -225,13 +270,17 @@ function guard:constrain(d,m,current)
                 end
                 if self.on_ball then self.on_ball(point,distance,length,radius,direction,hit) end
                 if hit then
+                    if not bypass then self:horizontal_block(m,delta,angle) end
                     freeze(m,current);self:latch(m,"fixed_probe_contact")
                     self.status="1档防穿模：固定距离内有障碍，已拒绝位移"
                     return
                 end
             end
         end
-        allowed=true;self.retry_at=nil;self.status="1档防穿模：路径畅通"
+        if horizontal then m.horizontal_blocks=nil end
+        allowed=true;self.retry_at=nil
+        self.status=bypass and string.format("1档防穿模：水平脱困剩余 %.1f 秒，上下检测开启",m.horizontal_bypass_until-now())
+            or "1档防穿模：路径畅通"
     end)
     if not ok then
         freeze(m,current);self:latch(m,"query_error");self.retry_at=now()+0.5
