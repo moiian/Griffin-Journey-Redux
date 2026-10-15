@@ -75,6 +75,13 @@ menu.migrate_physical=function()
 end
 menu.migrate_physical()
 settings.physical_seat_revision=1
+-- Keep the hidden hover anchor outside the normal array so saved layout indices stay stable.
+local hover=loaded_settings and loaded_settings.hover_player_preset
+if type(hover)~="table" or type(hover.player)~="table"
+    or not finite(hover.player.height) or not finite(hover.player.forward) or not finite(hover.player.side) then
+    hover={player=settings.seat_presets[1].player}
+end
+settings.hover_player_preset={schema=5,name="[-1] 悬停／一档玩家实体位置",player=menu.clone(hover.player)}
 settings.preset_store_revision=1
 menu.show_physical=false
 menu.selected_index=settings.seat_index
@@ -196,15 +203,19 @@ menu.edit_seat=function(seat,id,preset)
     end
     for _,spec in ipairs({{"side","X（左右）",-10,10},{"forward","Z（前后）",-15,15},{"height","Y（高度）",-5,15}}) do
         if not finite(seat[spec[1]]) then seat[spec[1]]=0 end
-        if preset==menu.draft.seat_presets[1] or seat.anchor=="root" then spec[3],spec[4]=-100,100 end
+        if preset==menu.draft.seat_presets[1] or preset==menu.draft.hover_player_preset or seat.anchor=="root" then spec[3],spec[4]=-100,100 end
         local changed,value=menu.number(spec[2].."###"..id..spec[1],seat[spec[1]],0.05,spec[3],spec[4])
         if changed and finite(value) then seat[spec[1]]=math.max(spec[3],math.min(spec[4],value));dirty=true end
     end
-    if menu.edit_facing(seat,id=="BetaPlayerSeat" and "BetaPlayerFacing" or id) then dirty=true end
+    if preset==menu.draft.hover_player_preset then
+        local changed,value=menu.toggle("实体偏移跟随狮鹫倾斜###"..id.."PhysicalTilt",(seat.tilt_follow or 1)>0)
+        if changed then seat.tilt_follow=value and 1 or 0;dirty=true end
+    end
+    if preset~=menu.draft.hover_player_preset and menu.edit_facing(seat,id=="BetaPlayerSeat" and "BetaPlayerFacing" or id) then dirty=true end
     if dirty then
         menu.persist_preset(preset)
     end
-    menu.animation(seat,id=="BetaPlayerSeat" and "BetaPlayerPose" or id,preset)
+    if preset~=menu.draft.hover_player_preset then menu.animation(seat,id=="BetaPlayerSeat" and "BetaPlayerPose" or id,preset) end
 end
 menu.passenger_seats=function(preset)
     for _,group in ipairs({"pawns","companions"}) do
@@ -239,6 +250,7 @@ menu.build_defaults=function()
         for _,field in ipairs({"anchor","neck_joint","height","forward","side","tilt_follow","pitch_offset"}) do seat[field]=player[field] end
         physical.pawns[i]=seat
     end
+    config.hover_player_preset={schema=5,name="[-1] 悬停／一档玩家实体位置",player=menu.clone(physical.player)}
     config.seat_presets={physical,normal}
     config.pawn_seats=normal.pawns;config.companion_seats=normal.companions
     return config
@@ -251,18 +263,20 @@ menu.presets=function()
     if aligned then imgui.indent(0) end
     imgui.text("当前生效预设："..ctx.settings.seat_presets[ctx.settings.seat_index].name)
     if imgui.separator then imgui.separator() end
-    local first=menu.show_physical and 1 or 2
-    local names={};for i=first,#settings.seat_presets do names[#names+1]=settings.seat_presets[i].name end
+    local first=menu.show_physical and 0 or 2
+    local names={};for i=first,#settings.seat_presets do names[#names+1]=(i==0 and settings.hover_player_preset or settings.seat_presets[i]).name end
     menu.selected_index=math.max(first,math.min(#settings.seat_presets,menu.selected_index or settings.seat_index))
     if type(imgui.combo)=="function" then
         local changed,index=imgui.combo("编辑布局###BetaPresetSelect",menu.selected_index-first+1,names)
         if changed and names[index] then
-            menu.selected_index=index+first-1;settings.seat_index=menu.selected_index;menu.confirm_delete=nil;menu.changed()
+            menu.selected_index=index+first-1
+            if menu.selected_index~=0 then settings.seat_index=menu.selected_index end
+            menu.confirm_delete=nil;menu.changed()
         end
     end
     local index=menu.selected_index
-    local preset=settings.seat_presets[index]
-    if index~=1 then
+    local preset=index==0 and settings.hover_player_preset or settings.seat_presets[index]
+    if index>1 then
         if #settings.seat_presets<15 and beta_button("＋新增预设（最多15项）###BetaPresetNew") then
             local clone=menu.clone(preset);clone.camera=nil
             clone.name="狮鹫座位 - "..(#settings.seat_presets+1)
@@ -294,13 +308,14 @@ menu.presets=function()
             local changed,name=imgui.input_text("预设名称###BetaPresetName",preset.name)
             if changed and type(name)=="string" and name:match("%S") then preset.name=name:sub(1,120);menu.persist_preset(preset) end
         end
-    else imgui.text("调试[0]：各随从／同伴的实体与当前Hip使用各自参数；玩家参数只控制玩家Hip。") end
+    elseif index==0 then imgui.text("调试[-1]：仅控制悬停／一档的玩家实体位置，不切换当前显示预设。")
+    else imgui.text("调试[0]：玩家退出位置；随从／同伴实体位置使用各自参数。") end
     finish_header()
     if imgui.tree_node("玩家参数###BetaPlayerParameters") then
         menu.edit_seat(preset.player,"BetaPlayerSeat",preset)
         imgui.tree_pop()
     end
-    menu.passenger_seats(preset)
+    if index~=0 then menu.passenger_seats(preset) end
     if menu.pending_edit then imgui.text("修改已排队，继续游戏或进入照片模式后应用。") end
     if active and menu.photo_active() then imgui.text("照片模式：保持座位显示；飞行输入和动画请求暂停。") end
     if menu.save_error then imgui.text(menu.save_error) end

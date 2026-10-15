@@ -120,9 +120,9 @@ function navigation_anchor(d,ch,tr,fx,fz)
     assert(d.rider_head and d.rider_head:get_Valid(),"未找到狮鹫头部，不能建立头部球面导航")
     assert(validate_spawn(d.spawn)==ch,"Griffin reference changed")
     if d.gear==1 and not d.external_control then
-        local preset=assert(settings.seat_presets and settings.seat_presets[1],"Physical player preset unavailable")
+        local preset=assert(settings.hover_player_preset,"Hover player preset unavailable")
         local target,base=rider_seat(d,preset.player)
-        return target,target,{mode="physical_player",preset_index=1,center=base}
+        return target,target,{mode="physical_player",preset_index=-1,center=base}
     end
     local center=vector(d.rider_head:call("get_Position()"))
     local anchor_detail={mode="head"}

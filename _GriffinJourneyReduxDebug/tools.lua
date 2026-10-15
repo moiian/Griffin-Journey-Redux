@@ -477,15 +477,16 @@ function debug_tools:draw()
         local changed,value=menu.toggle(mode.label.."###BetaAnchor_"..mode.key,anchor_mode==mode.key)
         if changed then change_anchor_mode(value and mode.key or (mode.key=="full" and "rider" or "full")) end
     end
-        local changed,value=menu.toggle("显示预设[0]（仅手动调试）",menu.show_physical)
+        local changed,value=menu.toggle("显示预设[-1]／[0]（仅手动调试）",menu.show_physical)
         if changed then
             menu.show_physical=value
             if not value then
                 if settings.seat_index==1 or menu.selected_index==1 then menu.queue_preset(menu.last_normal or 2) end
+                if menu.selected_index==0 then menu.selected_index=settings.seat_index end
                 if menu.pending_preset==settings.seat_presets[1] then menu.pending_preset=nil end
             end
         end
-        if menu.show_physical then imgui.text("在座位预设的当前布局中选择[0]，编辑实体位置。") end
+        if menu.show_physical then imgui.text("座位预设中：[-1]调整悬停／一档玩家实体位置；[0]调整退出玩家与乘客实体位置。") end
         changed,value=menu.toggle("【实验1】持续重置跌落高度＋SecFall",passengers.fall_experiment.reset)
         if changed then passengers.set_fall_experiment("reset",value) end
         changed,value=menu.toggle("【实验2】强制IsGround返回着地",passengers.fall_experiment.ground)

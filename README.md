@@ -1,6 +1,6 @@
 # Griffin Journey Redux
 
-Version **0.3.49** · Author **aelinore**
+Version **0.3.50** · Author **aelinore**
 
 Fly a friendly Griffin with configurable controls, a head-following camera, and individual seats for the player, pawns, and accompanying NPCs. Requires the installed **NickCore**, its EnemySpawner, and `run_once`. Only the exact Griffin created by this mod is controlled.
 
@@ -29,7 +29,7 @@ Open **Griffin Journey Redux** in REFramework. The controls at the top apply to 
 - **恢复未修改**: restores the last saved configuration and cancels a pending save. Once automatic saving has completed, this is no longer an undo of that saved edit.
 - **恢复默认配置**: builds a staged default draft. This destructive replacement still needs **应用并保存**; it is never automatically confirmed. **恢复未修改** cancels it. Optional developer switches return to startup defaults at safe application.
 
-Choose **编辑布局** to edit a layout. Displayed normal presets start at [1]; [0] is the hidden physical calibration and voluntary-exit layout, available for editing only through Debug. Internal indices are unchanged. Player and passenger seats have independent position, facing, tilt, and action settings. Ordinary bystanders are not seated.
+Choose **编辑布局** to edit a layout. Displayed normal presets start at [1]. Both [-1] and [0] are hidden and can be exposed only through Debug: [-1] sets the player physical anchor in hover/gear 1; [0] sets the player exit position and passenger physical anchors. Editing [-1] leaves the current visible layout unchanged and has no passenger/action controls. Existing installations copy [0] player parameters into [-1] once in memory; custom [-1] settings are retained. Normal layout indices stay unchanged. Player and passenger seats have independent position, facing, tilt, and action settings. Ordinary bystanders are not seated.
 
 Ordinary paused menus defer application and saving until gameplay resumes. Photo Mode allows visual preview while physics, flight controls and animation requests remain paused. Preset hotkeys also schedule one delayed save. Script Reset saves ordinary unsaved edits once before shutdown, without applying native changes or confirming a staged factory reset.
 

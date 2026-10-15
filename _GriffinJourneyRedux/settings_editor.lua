@@ -136,6 +136,7 @@ menu.apply_edits=function(visual)
         local old_anim=settings.rider_anim
         local previous=settings.seat_presets[old_index]
         local old_physical=settings.seat_presets[1]
+        local old_hover=settings.hover_player_preset
         local next_config=ticket.config
         if not ticket.replace_seats then
             retain_generated_seats(next_config)
@@ -152,6 +153,7 @@ menu.apply_edits=function(visual)
         local selected=settings.seat_presets[settings.seat_index]
         local seat_changed=old_index~=settings.seat_index or not equal(old_physical.player,settings.seat_presets[1].player)
             or not equal(previous.player,selected.player)
+            or not equal(old_hover.player,settings.hover_player_preset.player)
         if active then
             if seat_changed then active.fall_reset_pending=true end
             if old_index~=settings.seat_index or old_anim~=settings.rider_anim then active.pose_pending=settings.rider_anim end
