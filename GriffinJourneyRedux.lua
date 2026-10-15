@@ -1,4 +1,4 @@
--- Griffin Journey Redux 0.3.51. Requires NickCore, EnemySpawner and run_once.
+-- Griffin Journey Redux 0.3.52. Requires NickCore, EnemySpawner and run_once.
 -- One private context per script generation. Only the compatible state/bridge aliases are global.
 -- REFramework's autorun search paths do not survive into deferred callbacks.
 -- Resolve this mod's modules from the entry file, without changing global paths.

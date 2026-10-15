@@ -100,6 +100,7 @@ menu.pull_values=function(index)
     player.anchor=player.anchor=="root" and "root" or (player.anchor=="neck" and "neck" or "head")
     player.neck_joint=type(player.neck_joint)=="string" and player.neck_joint or ""
     player.anim=type(player.anim)=="string" and player.anim or ""
+    player.randomIdle=player.randomIdle==true;player.pelvisCompensation=player.pelvisCompensation==true
     for _,spec in ipairs({{"height",1,-5,15},{"forward",0,-15,15},{"side",0,-10,10},
         {"lookX",0,-1,1},{"lookZ",1,-1,1},{"tilt_follow",index==1 and 0 or 1,0,1},{"pitch_offset",0,-45,45}}) do
         local value=player[spec[1]]
@@ -107,7 +108,7 @@ menu.pull_values=function(index)
         player[spec[1]]=finite(value) and ((index==1 or player.anchor=="root") and coordinate and value or math.max(spec[3],math.min(spec[4],value))) or spec[2]
     end
     for key,value in pairs(player) do
-        if ({anchor=true,neck_joint=true,anim=true,height=true,forward=true,side=true,lookX=true,lookZ=true,tilt_follow=true,pitch_offset=true})[key] then
+        if ({randomIdle=true,pelvisCompensation=true,anchor=true,neck_joint=true,anim=true,height=true,forward=true,side=true,lookX=true,lookZ=true,tilt_follow=true,pitch_offset=true})[key] then
             settings["rider_"..key]=value
         end
     end
@@ -168,6 +169,12 @@ menu.edit_facing=function(seat,id)
     return dirty
 end
 menu.animation=function(seat,id,preset)
+    if preset~=menu.draft.seat_presets[1] then
+        for _,spec in ipairs({{"randomIdle","随机坐姿"},{"pelvisCompensation","锁定骨盆"}}) do
+            local changed,value=menu.toggle(spec[2].."###"..id..spec[1],seat[spec[1]]==true)
+            if changed then seat[spec[1]]=value;menu.persist_preset(preset) end
+        end
+    end
     if type(seat.anim)~="string" then seat.anim="" end
     if type(imgui.input_text)=="function" then
         local changed,value=imgui.input_text("动作名称###"..id.."Anim",seat.anim)

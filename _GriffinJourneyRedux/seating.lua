@@ -3,7 +3,7 @@ return function(ctx)
 local _ENV=ctx
 passengers.player_config=function()
     return {anchor=settings.rider_anchor,neck_joint=settings.rider_neck_joint,height=settings.rider_height,
-        forward=settings.rider_forward,side=settings.rider_side,anim=settings.rider_anim,lookX=settings.rider_lookX,lookZ=settings.rider_lookZ,
+        forward=settings.rider_forward,side=settings.rider_side,anim=settings.rider_anim,randomIdle=settings.rider_randomIdle==true,pelvisCompensation=settings.rider_pelvisCompensation==true,lookX=settings.rider_lookX,lookZ=settings.rider_lookZ,
         tilt_follow=settings.rider_tilt_follow,pitch_offset=settings.rider_pitch_offset}
 end
 passengers.basis=function(d,config,position_only)
@@ -182,6 +182,7 @@ passengers.seat=function(group,index,preset,physical_override)
     end
     if seat.enabled==nil then seat.enabled=true end
     if type(seat.anim)~="string" then seat.anim="" end
+    seat.randomIdle=seat.randomIdle==true;seat.pelvisCompensation=seat.pelvisCompensation==true
     for _,spec in ipairs({{"lookX",0,-1,1},{"lookZ",1,-1,1},{"tilt_follow",physical and 0 or 1,0,1},{"pitch_offset",0,-45,45}}) do
         local key,default,lo,hi=spec[1],spec[2],spec[3],spec[4]
         seat[key]=finite(seat[key]) and math.max(lo,math.min(hi,seat[key])) or default

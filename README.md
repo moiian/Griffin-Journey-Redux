@@ -1,6 +1,6 @@
 # Griffin Journey Redux
 
-Version **0.3.51** · Author **aelinore**
+Version **0.3.52** · Author **aelinore**
 
 Fly a friendly Griffin with configurable controls, a head-following camera, and individual seats for the player, pawns, and accompanying NPCs. Requires the installed **NickCore**, its EnemySpawner, and `run_once`. Only the exact Griffin created by this mod is controlled.
 
@@ -62,3 +62,9 @@ Categories: player skills, pawn commands, player HP, player stamina, player stat
 ## Collision escape
 
 Gear-1 horizontal obstruction retries the current native pose every 0.2 seconds while the same input is held. If three distinct directions (forward/backward/left turn/right turn) are rejected before a successful horizontal move or turn, horizontal translation and yaw collision checks are bypassed for 4.2 seconds. Repeated input in one direction counts once; a diagonal rejection counts only its dominant axis. Vertical movement checks and near-ground landing stay active. The existing Debug return-to-safe experiment retains its own policy. Escape state is temporary per hover binding, clears on toggle/release/reentry, and never changes saved collision settings.
+
+## Random seated poses and pelvis lock
+
+Each visible player/pawn/companion seat has independent **随机坐姿** and **锁定骨盆** switches, both off for existing presets. Random poses reuse Oxcarts Journey Redux's seven action nodes: the first variation follows after 5-30 seconds, subsequent variations after 10-45 seconds. They use this mod's existing scoped action/FSM handoff, suspend in pause/Photo Mode, and stop retrying after a request failure until the option or layout/base action changes.
+
+Pelvis lock reuses OJR's baseline projection algorithm along the seat up axis. It compensates animated height while retaining lateral animation and does not move physical roots. It is integrated into the existing owned bone restore/write pipeline for both player and NPCs. High-altitude retained NPC seats keep these options after player exit; release/Reset clears their transient state. Hidden [-1]/[0] physical presets do not expose the switches. Flags save with the seat through the existing one-second debounce. No OJR runtime dependency is added.

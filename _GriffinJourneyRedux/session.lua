@@ -1,9 +1,9 @@
 -- Griffin Journey Redux: session
 return function(ctx)
 local _ENV=ctx
--- Griffin Flight Beta 0.3.51. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.3.52. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-VERSION = "0.3.51"
+VERSION = "0.3.52"
 state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 _G.GriffinJourneyReduxState = state
@@ -27,7 +27,7 @@ passengers.frame=0
 passengers.protection={damage=true,relocation=true}
 masks = nil
 input = {x = 0, y = 0, buttons = 0}
-settings = {distance = 30, fov = 90, freeze_player = true, rider_anim="", rider_lookX=0, rider_lookZ=1, rider_tilt_follow=1, rider_pitch_offset=0, rider_anchor="head", rider_neck_joint="", rider_height=1.0, rider_forward=0, rider_side=0, navigation_radius=2.914, steering_yaw=49.406, steering_pitch=22, navigation_height=1.038, bumper_pitch=59, controls_revision=1, camera_auto_yaw=true, camera_yaw_speed=129.414, camera_manual_threshold=0.55, sprint_stop_tau=1.286, hover_accel_tau=0.611, hover_decel_tau=1.01, hover_reverse_tau=0.617, hover_forward_speed=12, hover_backward_speed=6.226, hover_climb_speed=7.642, hover_descend_speed=12, hover_up_accel_tau=0.604, hover_up_decel_tau=0.206, hover_down_accel_tau=0.212, hover_down_decel_tau=0.617, hover_turn_speed=75.991, hover_camera_yaw_speed=120, boarding_distance=20}
+settings = {distance = 30, fov = 90, freeze_player = true, rider_anim="", rider_randomIdle=false, rider_pelvisCompensation=false, rider_lookX=0, rider_lookZ=1, rider_tilt_follow=1, rider_pitch_offset=0, rider_anchor="head", rider_neck_joint="", rider_height=1.0, rider_forward=0, rider_side=0, navigation_radius=2.914, steering_yaw=49.406, steering_pitch=22, navigation_height=1.038, bumper_pitch=59, controls_revision=1, camera_auto_yaw=true, camera_yaw_speed=129.414, camera_manual_threshold=0.55, sprint_stop_tau=1.286, hover_accel_tau=0.611, hover_decel_tau=1.01, hover_reverse_tau=0.617, hover_forward_speed=12, hover_backward_speed=6.226, hover_climb_speed=7.642, hover_descend_speed=12, hover_up_accel_tau=0.604, hover_up_decel_tau=0.206, hover_down_accel_tau=0.212, hover_down_decel_tau=0.617, hover_turn_speed=75.991, hover_camera_yaw_speed=120, boarding_distance=20}
 -- Capture product defaults before reading any personal configuration.
 settings.anti_jitter=true
 menu.default_seed={}

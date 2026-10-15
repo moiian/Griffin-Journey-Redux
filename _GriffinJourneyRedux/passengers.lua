@@ -1,6 +1,54 @@
 -- Griffin Journey Redux: passengers
 return function(ctx)
 local _ENV=ctx
+-- Reused from OJR journey.lua: same seven nodes and 5-30s / 10-45s intervals.
+local idle_nodes={"SitOnChairActions","LivSitChairCrosslegs","LivSitChairLean",
+    "SitOnChairCrossArmStart","LivSitPose","LivSitChairBook01","LivSitChairLoseieus"}
+local function visual_spec(a)
+    local preset=settings.seat_presets[settings.seat_index]
+    if a.group then return preset[a.group] and preset[a.group][a.slot] end
+    return preset.player
+end
+passengers.clear_seat_animation=function(a)
+    a.idle_next=nil;a.idle_clock=nil;a.idle_layout=nil;a.idle_base=nil;a.idle_failed=nil;a.pelvis_state=nil
+end
+passengers.tick_random_pose=function(a)
+    local spec=visual_spec(a)
+    if not spec or spec.randomIdle~=true or settings.seat_index==1 then
+        a.idle_next=nil;a.idle_clock=nil;a.idle_layout=nil;a.idle_base=nil;a.idle_failed=nil
+        return
+    end
+    local t=now()
+    if not a.idle_next or a.idle_layout~=settings.seat_index or a.idle_base~=spec.anim or t<(a.idle_clock or t) then
+        a.idle_next=t+5+math.random()*25;a.idle_layout=settings.seat_index;a.idle_base=spec.anim;a.idle_failed=nil
+    end
+    a.idle_clock=t
+    if a.idle_failed or a.pose_freeze_frame or t<a.idle_next then return end
+    local node=idle_nodes[math.random(1,#idle_nodes)]
+    local ok,err=pcall(passengers.play_pose,a,node)
+    a.idle_next=t+10+math.random()*35
+    if not ok then
+        a.idle_failed=true;status="随机坐姿请求失败："..tostring(err)
+        if event then event("random_seat_animation_error",{group=a.group or "player",slot=a.slot,error=tostring(err)}) end
+    end
+end
+-- OJR pelvis.lua projection/baseline compensation, merged into our single owned
+-- bone write. This avoids stacking a second correction/restore callback.
+passengers.lock_pelvis=function(a,original,actor,target,spec)
+    if spec.pelvisCompensation~=true or settings.seat_index==1 then a.pelvis_state=nil;return target end
+    if a.pose_freeze_frame then return target end
+    local _,up=passengers.basis(a,spec,true)
+    local offset=(original.x-actor.x)*up.x+(original.y-actor.y)*up.y+(original.z-actor.z)*up.z
+    local s=a.pelvis_state
+    if not s or s.hip~=a.hip_joint or s.layout~=settings.seat_index then
+        s={hip=a.hip_joint,layout=settings.seat_index,baseline=offset};a.pelvis_state=s
+    end
+    local delta=s.baseline-offset
+    if math.abs(delta)>0.0001 then
+        target={x=target.x+up.x*delta,y=target.y+up.y*delta,z=target.z+up.z*delta}
+    end
+    return target
+end
 passengers.play_pose=function(a,node)
     assert((active or passengers.held) and alive and not menu.gameplay_paused(),"请开始驾驶并关闭暂停菜单后播放")
     assert(owned_player(a,false) and player_fsm(a.player)==a.fsm,"Animation actor binding changed")
@@ -23,6 +71,7 @@ passengers.play_pose=function(a,node)
     if event then event("seat_animation_requested",{group=a.group or "player",slot=a.slot,node=node}) end
 end
 passengers.tick_pose=function(a)
+    if menu.gameplay_paused() then return end
     if a.pose_freeze_frame and passengers.frame>=a.pose_freeze_frame then
         local desired=false
         if not a.group and not settings.freeze_player then desired=a.original_fsm end
@@ -35,6 +84,7 @@ passengers.tick_pose=function(a)
         local ok,err=pcall(passengers.play_pose,a,node)
         if not ok then if event then event("seat_animation_error",{group=a.group or "player",slot=a.slot,error=tostring(err)}) end;status="动画请求失败："..tostring(err) end
     end
+    passengers.tick_random_pose(a)
 end
 
 passengers.visual_seat=function(group,index)
@@ -42,6 +92,7 @@ passengers.visual_seat=function(group,index)
     return passengers.seat(group,index)
 end
 passengers.restore_one=function(a)
+    passengers.clear_seat_animation(a)
     anti_jitter:forget_passenger(a)
     if not a.player:get_Valid() then
         a.bones_applied=nil;a.moved=false;a.fsm_touched=false;return
@@ -237,15 +288,17 @@ passengers.post=function()
                 assert(owned_player(a,false),"Passenger changed")
                 restore_bone(a)
                 local actor=vector(a.transform:call("get_Position()"))
-                local seat=rider_seat(a,passengers.visual_seat(a.group,a.slot))
+                local config=passengers.visual_seat(a.group,a.slot)
+                local seat=rider_seat(a,config)
                 local items={}
                 for _,spec in ipairs({{joint=a.root_joint,key="root"},{joint=a.hip_joint,key="hip"}}) do
                     local joint=spec.joint
                     if joint and joint:get_Valid() then
                         local original=vector(joint:call("get_Position()"))
                         local anchor=spec.key=="hip" and seat or a.neutral_anchor
-                        items[#items+1]={joint=joint,original=original,
-                            written={x=anchor.x+original.x-actor.x,y=anchor.y+original.y-actor.y,z=anchor.z+original.z-actor.z}}
+                        local target={x=anchor.x+original.x-actor.x,y=anchor.y+original.y-actor.y,z=anchor.z+original.z-actor.z}
+                        if spec.key=="hip" then target=passengers.lock_pelvis(a,original,actor,target,config) end
+                        items[#items+1]={joint=joint,original=original,written=target}
                     end
                 end
                 a.bones_applied=items

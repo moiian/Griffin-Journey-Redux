@@ -37,6 +37,7 @@ stop_driver = function(reason,suppress_landing,voluntary)
     local camera_ok,camera_err=pcall(restore_camera)
     if not camera_ok then early_errors[#early_errors+1]="镜头恢复 "..tostring(camera_err) end
     if not d then return ai_ok and held_ok end
+    passengers.clear_seat_animation(d)
     local sprint_ok,sprint_err=pcall(sprint_motion.clear,sprint_motion,d)
     if not sprint_ok then early_errors[#early_errors+1]="冲刺释放 "..tostring(sprint_err) end
     d.intent = nil -- queued native action callbacks must see that driving has ended

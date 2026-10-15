@@ -131,8 +131,9 @@ menu.player_visual_post=function()
         assert(owned_player(d,true),"Player binding changed")
         restore_bone(d)
         local actor=vector(d.transform:call("get_Position()"))
+        local config=passengers.player_config()
         local seat,head
-        if d.anchor_mode=="rider" then seat,head=rider_seat(d) end
+        if d.anchor_mode=="rider" then seat,head=rider_seat(d,config) end
         local items={}
         -- Same capture/write/restore ordering as the user-validated Hip stick mode.
         for _,spec in ipairs({{joint=d.root_joint,key="root_bone"},{joint=d.hip_joint,key="hip"}}) do
@@ -142,6 +143,7 @@ menu.player_visual_post=function()
                 local anchor=d.neutral_anchor
                 if seat and spec.key=="hip" then anchor=seat end
                 local target={x=anchor.x+original.x-actor.x,y=anchor.y+original.y-actor.y,z=anchor.z+original.z-actor.z}
+                if spec.key=="hip" then target=passengers.lock_pelvis(d,original,actor,target,config) end
                 items[#items+1]={joint=joint,key=spec.key,original=original,written=target}
             end
         end
