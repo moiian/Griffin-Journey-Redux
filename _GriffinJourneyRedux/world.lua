@@ -103,7 +103,7 @@ local function poll(allow_initialize)
             end
             local initialized,err=pcall(initialize,ctx)
             if not initialized then
-                world.failed=true;reset_world();world.usable=false
+                world.failed=true;world.error=tostring(err);reset_world();world.usable=false
                 log.error("[Griffin Journey Redux] startup failed: "..tostring(err))
             end
         else
@@ -122,7 +122,7 @@ native_re.on_pre_application_entry("UpdateBehavior",function() poll(false) end)
 native_re.on_draw_ui(function()
     if world.usable then return end
     if imgui.tree_node("Griffin Journey Redux###GriffinJourneyRedux") then
-        imgui.text("等待加载存档")
+        imgui.text(world.failed and ("初始化失败："..tostring(world.error)) or "等待加载存档")
         imgui.tree_pop()
     end
 end)

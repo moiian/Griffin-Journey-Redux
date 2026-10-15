@@ -1,6 +1,6 @@
 # Griffin Journey Redux
 
-Version **0.3.47** · Author **aelinore**
+Version **0.3.48** · Author **aelinore**
 
 Fly a friendly Griffin with configurable controls, a head-following camera, and individual seats for the player, pawns, and accompanying NPCs. Requires the installed **NickCore**, its EnemySpawner, and `run_once`. Only the exact Griffin created by this mod is controlled.
 
@@ -14,7 +14,7 @@ The separately supplied **Debug Addon** installs `_GriffinJourneyReduxDebug` alo
 
 ## Save loading, pause and Photo Mode
 
-Before a save supplies a valid player shared by CharacterManager and NickCore, only the lightweight entry runs and the menu displays **等待加载存档**. Settings, gameplay modules and optional Debug initialize once after loading. Returning to the title suspends runtime callbacks; reentering a save reuses installed hooks instead of registering another set.
+Before a save supplies a valid player shared by CharacterManager and NickCore, only the lightweight entry runs and the menu displays **等待加载存档**. Settings, gameplay modules and optional Debug initialize once after loading. Deferred module loading resolves files from this entry script and does not depend on temporary autorun search paths. Startup failures display their actual error instead of a misleading waiting message. Returning to the title suspends runtime callbacks; reentering a save reuses installed hooks instead of registering another set.
 
 Ordinary pause keeps driving ownership, FSM, seats and camera state. It suspends new input/actions and samples pause timing even when behavior updates stop. A loading GUI alone does not end a valid same-player session. Inconclusive manager reads retain the session; confirmed player removal, invalidation or replacement releases old control and cancels old queued work.
 
