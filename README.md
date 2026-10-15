@@ -1,6 +1,6 @@
 # Griffin Journey Redux
 
-Version **0.3.45** · Author **aelinore**
+Version **0.3.46** · Author **aelinore**
 
 Fly a friendly Griffin with configurable controls, a head-following camera, and individual seats for the player, pawns, and accompanying NPCs. Requires the installed **NickCore**, its EnemySpawner, and `run_once`. Only the exact Griffin created by this mod is controlled.
 
@@ -11,6 +11,14 @@ The **Runtime** archive contains the player scripts. Extract its `reframework` f
 For an existing Beta installation, remove the old `GriffinFlightBeta.lua` entry before loading Griffin Journey Redux. End driving before resetting scripts. The public player installation does not need `_GriffinJourneyReduxDebug`.
 
 The separately supplied **Debug Addon** installs `_GriffinJourneyReduxDebug` alongside the player modules. It connects to the existing driver and does not run another copy of the mod. Remove this folder for a player-only installation. Experiments and recording start off, even if older settings enabled them.
+
+## Save loading, pause and Photo Mode
+
+Before a save supplies a valid player shared by CharacterManager and NickCore, only the lightweight entry runs and the menu displays **等待加载存档**. Settings, gameplay modules and optional Debug initialize once after loading. Returning to the title suspends runtime callbacks; reentering a save reuses installed hooks instead of registering another set.
+
+Ordinary pause keeps driving ownership, FSM, seats and camera state. It suspends new input/actions and samples pause timing even when behavior updates stop. A loading GUI alone does not end a valid same-player session. Inconclusive manager reads retain the session; confirmed player removal, invalidation or replacement releases old control and cancels old queued work.
+
+Photo Mode retains player/passenger seat display and seat editing. On entry, the mod returns its owned camera values and follow binding once, then leaves Photo Mode FOV, distance and rotation alone. Normal driving camera behavior resumes after exit. Visual changes in Photo Mode do not move physical roots or request new poses.
 
 ## Configure and save
 

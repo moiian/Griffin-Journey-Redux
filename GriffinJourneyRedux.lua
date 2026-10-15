@@ -1,6 +1,6 @@
--- Griffin Journey Redux 0.3.45. Requires NickCore, EnemySpawner and run_once.
+-- Griffin Journey Redux 0.3.46. Requires NickCore, EnemySpawner and run_once.
 -- One private context per script generation. Only the compatible state/bridge aliases are global.
-local ctx=setmetatable({}, {__index=_G})
+return require("_GriffinJourneyRedux.world")(function(ctx)
 require("_GriffinJourneyRedux.session")(ctx)
 require("_GriffinJourneyRedux.ownership")(ctx)
 require("_GriffinJourneyRedux.player")(ctx)
@@ -31,3 +31,5 @@ if available then
     if not initialized then error("Griffin Journey Redux Debug: "..tostring(err)) end
 end
 require("_GriffinJourneyRedux.ui")(ctx)
+
+end)

@@ -29,7 +29,7 @@ function change_camera_mode(key)
     camera_mode=key -- Explicit off takes effect before queued native restoration.
     follow_due=key=="griffin";follow_next=0
     run_once(function()
-        if not alive or revision~=follow_revision then return end
+        if not alive or revision~=follow_revision or menu.photo_active() then return end
         local ok,err=restore_follow()
         if not ok then camera_follow_status="镜头恢复未完成："..tostring(err);return end
         camera_follow_status=key=="original" and "镜头跟随：游戏默认" or "镜头跟随已选择，驾驶期间生效。"
@@ -216,7 +216,7 @@ function install_yaw_hook()
         assert(def:get_method("setYaw(System.Single)") and def:get_method("get_Angle()") and
             def:get_method("get_YawRange()") and def:get_method("get_YawRangeDeg()"),"镜头水平角接口不可用")
         sdk.hook(method,function(args)
-            if not alive then return end
+            if not alive or not active or (world and not world.usable) or menu.photo_active() then return end
             local storage_ok,storage=pcall(thread.get_hook_storage)
             if not storage_ok or not storage then return end
             storage.griffin_yaw_controller=nil
@@ -237,7 +237,7 @@ function install_yaw_hook()
                 if candidate==follow_state.controller then storage.griffin_yaw_controller=candidate end
             end
         end,function(retval)
-            if not alive then return retval end
+            if not alive or not active or (world and not world.usable) or menu.photo_active() then return retval end
             local storage_ok,storage=pcall(thread.get_hook_storage)
             if not storage_ok or not storage then return retval end
             -- Snapshot both before any native call: the first callback may invalidate
@@ -272,4 +272,20 @@ function restore_camera()
     end)
     if not ok then if event then event("camera_restore_error", tostring(err)) end end
 end
+-- Hand the camera back once on entering Photo Mode. Seat rendering remains active.
+menu.tick_photo_camera=function()
+    local photo=menu.photo_active()
+    if photo and not menu.photo_camera_suspended then
+        menu.photo_camera_suspended=true
+        local wanted=camera_mode
+        restore_camera()
+        camera_mode=wanted
+        follow_due=wanted=="griffin";follow_next=0
+    elseif not photo and menu.photo_camera_suspended then
+        menu.photo_camera_suspended=nil
+        if active then active.camera_failed=nil end
+        follow_due=camera_mode=="griffin";follow_next=0
+    end
+end
+
 end

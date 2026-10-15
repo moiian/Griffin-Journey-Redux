@@ -12,6 +12,7 @@ local function phase(fn)
 end
 re.on_frame(phase(function()
     if not alive then return end
+    menu.tick_photo_camera()
     menu.tick_save()
     tick_cleanup_departures()
     shop_item:tick()
@@ -19,6 +20,8 @@ re.on_frame(phase(function()
     local c = core()
     if not c then return end
     if menu.gameplay_paused() then
+        tick_driver() -- Keep pause timing current even when behavior updates stop.
+        summon:tick()
         flush()
         return
     end
@@ -94,6 +97,7 @@ end))
 
 re.on_pre_application_entry("UpdateBehavior",phase(function()
     if not alive then return end
+    menu.tick_photo_camera()
     menu.apply_edits()
     consumables:tick()
     spawn_watch:tick()
@@ -167,6 +171,7 @@ re.on_application_entry("UpdateJointExpression",phase(function()
 end))
 re.on_pre_application_entry("PrepareRendering",phase(function()
 
+    menu.tick_photo_camera()
     if not menu.visual_allowed() then return end
     -- Menu transitions can replace the pose before NickCore reports pause. Keep
     -- this fallback active every rendered frame, using the same Hip restore path.

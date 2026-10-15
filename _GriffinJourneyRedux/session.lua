@@ -1,9 +1,9 @@
 -- Griffin Journey Redux: session
 return function(ctx)
 local _ENV=ctx
--- Griffin Flight Beta 0.3.45. Requires installed NickCore + EnemySpawner + run_once.
+-- Griffin Flight Beta 0.3.46. Requires installed NickCore + EnemySpawner + run_once.
 -- Separate from GriffinMountExperiment; no OJR/LMD/NickCore files are changed.
-VERSION = "0.3.45"
+VERSION = "0.3.46"
 state = rawget(_G, "GriffinFlightBetaState") or {spawns = {}}
 _G.GriffinFlightBetaState = state
 _G.GriffinJourneyReduxState = state
@@ -39,6 +39,7 @@ skip_think_status = "跳过思考：默认开启，等待狮鹫就绪"
 
 function core()
     local c = rawget(_G, "NickCore")
+    if world and not world.usable then return end
     if c and c.properties and c.object and c.enemySpawner and type(run_once) == "function" then return c end
 end
 -- Same native Photo Mode flag used by OJR. Failure keeps ordinary pause behavior.
@@ -51,7 +52,7 @@ menu.photo_active=function()
 end
 menu.gameplay_paused=function()
     local c=core()
-    return not c or c.properties.isPaused or menu.photo_active()
+    return not c or c.properties.isPaused or (world and world.paused) or menu.photo_active()
 end
 menu.visual_allowed=function()
     local c=core()
