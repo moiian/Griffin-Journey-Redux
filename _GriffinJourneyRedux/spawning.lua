@@ -79,7 +79,7 @@ delete_one = function(r)
         if not alive then r.destroy_queued = false; return end
         if menu.gameplay_paused() then r.destroy_queued=false;return end
         local ok, err = pcall(function()
-            assert(not (active and active.spawn==r) and not (state.recovery and state.recovery.spawn==r), "End this Griffin driving before deletion")
+            assert(not (active and active.spawn==r) and not (passengers.held and passengers.held.spawn==r) and not (state.recovery and state.recovery.spawn==r), "End this Griffin driving before deletion")
             assert(r.result == result and result.go == go, "Spawn reference changed")
             if go:get_Valid() then
                 if result.chara and result.chara:get_Valid() then

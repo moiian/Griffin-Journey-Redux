@@ -2,7 +2,7 @@
 return function(ctx)
 local _ENV=ctx
 passengers.play_pose=function(a,node)
-    assert(active and alive and not menu.gameplay_paused(),"请开始驾驶并关闭暂停菜单后播放")
+    assert((active or passengers.held) and alive and not menu.gameplay_paused(),"请开始驾驶并关闭暂停菜单后播放")
     assert(owned_player(a,false) and player_fsm(a.player)==a.fsm,"Animation actor binding changed")
     node=type(node)=="string" and node:match("^%s*(.-)%s*$") or ""
     if node=="" then return end
@@ -97,6 +97,61 @@ passengers.prepare_rig=function(a,d)
     a.heading=d.heading;a.body_pitch=d.body_pitch;a.rider_griffin_transform=d.rider_griffin_transform
     a.rider_head=d.rider_head;a.rider_head_name=d.rider_head_name;a.rider_necks=d.rider_necks
 end
+-- Only the already controlled passengers survive a confirmed high-altitude exit.
+passengers.visual_allowed=function()
+    if active then return menu.visual_allowed() end
+    local d,c=passengers.held,core()
+    if not alive or not d or d.held_releasing or not c or c.properties.player~=d.player then return false end
+    return pcall(validate_spawn,d.spawn,true)
+end
+passengers.release_held=function(reason)
+    local d=passengers.held
+    if not d then return true,{} end
+    d.held_releasing=true
+    local errors=passengers.restore_all(d)
+    if #errors==0 then
+        passengers.held=nil
+        status="悬停乘客已释放："..tostring(reason)
+    else status="悬停乘客释放待重试："..table.concat(errors,"; ") end
+    return #errors==0,errors
+end
+passengers.tick_held=function()
+    local d=passengers.held
+    if not d or not alive or menu.gameplay_paused() then return end
+    local t=now()
+    if d.held_last and t<d.held_last then d.held_next=nil end
+    d.held_last=t
+    if d.held_releasing then
+        if not d.held_next or t>=d.held_next then d.held_next=t+.2;passengers.release_held("恢复重试") end
+        return
+    end
+    local ok,err=pcall(function()
+        local ch=validate_spawn(d.spawn)
+        local tr=ch:call("get_Transform()")
+        if not d.held_next or t>=d.held_next then
+            d.held_next=t+.2
+            assert(spawn_watch:mountable(d.spawn),"狮鹫不能继续承载乘客")
+            assert(ch:call("get_IsFlight()") and not ch:call("get_IsGround()"),"狮鹫已结束悬空")
+            local a=vector(d.player:call("get_Transform()"):call("get_UniversalPosition()"))
+            local b=vector(tr:call("get_UniversalPosition()"))
+            local x,y,z=a.x-b.x,a.y-b.y,a.z-b.z
+            if x*x+y*y+z*z>225 then passengers.release_held("玩家离狮鹫超过15米");return end
+        end
+        if passengers.held~=d then return end
+        local q=tr:call("get_Rotation()")
+        assert(q and finite(q.x) and finite(q.y) and finite(q.z) and finite(q.w),"狮鹫旋转无效")
+        local norm=math.sqrt(q.x*q.x+q.y*q.y+q.z*q.z+q.w*q.w)
+        assert(norm>.0001,"狮鹫旋转长度无效")
+        local qx,qy,qz,qw=q.x/norm,q.y/norm,q.z/norm,q.w/norm
+        local x,z,length=passengers.horizontal_heading(d,qx,qy,qz,qw)
+        d.heading={x=x,z=z}
+        d.body_pitch=math.atan(2*(qy*qz-qw*qx),length)*180/math.pi
+        if d.rider_griffin_transform~=tr or not d.rider_head or not d.rider_head:get_Valid() then prepare_rider(d) end
+        passengers.tick(d)
+        if not next(d.passengers) then passengers.held=nil end
+    end)
+    if not ok then passengers.release_held(err) end
+end
 passengers.tick=function(d)
     d.passengers=d.passengers or {}
     passengers.last_error=nil
@@ -104,7 +159,7 @@ passengers.tick=function(d)
     for _,group in ipairs({"pawns","companions"}) do
         for i,ch in ipairs((passengers.roster or {})[group] or {}) do
             local seat=passengers.seat(group,i)
-            if seat.enabled and ch:get_Valid() then wanted[ch]={group=group,slot=i} end
+            if seat.enabled and ch:get_Valid() and (d~=passengers.held or d.passengers[ch]) then wanted[ch]={group=group,slot=i} end
         end
     end
     for ch,a in pairs(d.passengers) do
@@ -163,8 +218,9 @@ passengers.tick=function(d)
     end
 end
 passengers.pre=function()
-    if not alive or not active or not menu.visual_allowed() then return end
-    for _,a in pairs(active.passengers or {}) do
+    local d=active or passengers.held
+    if not passengers.visual_allowed() then return end
+    for _,a in pairs(d.passengers or {}) do
         local ok,err=pcall(function()
             restore_bone(a)
             if a.anchor_target then passengers.orient(a,passengers.visual_seat(a.group,a.slot)) end
@@ -173,8 +229,8 @@ passengers.pre=function()
     end
 end
 passengers.post=function()
-    local d=active
-    if not alive or not d or not menu.visual_allowed() then return end
+    local d=active or passengers.held
+    if not passengers.visual_allowed() then return end
     for _,a in pairs(d.passengers or {}) do
         if a.anchor_target then
             local ok,err=pcall(function()

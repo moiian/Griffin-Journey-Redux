@@ -200,9 +200,10 @@ passengers.seat=function(group,index,preset,physical_override)
 end
 -- Same receiver-scoped damage policy as OJR; no global invincibility fields.
 passengers.controlled=function(ch,include_player)
-    local d,c=active,core()
+    local d,c=active or passengers.held,core()
     if not alive or not d or not c or c.properties.player~=d.player then return end
-    local a=include_player and ch==d.player and d or (d.passengers or {})[ch]
+    local a=include_player and active==d and ch==d.player and d or (d.passengers or {})[ch]
+    if d.held_releasing then return end
     if a and a.moved and a.anchor_target and not a.recovery_pending and ch:get_Valid() then return a end
 end
 end

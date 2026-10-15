@@ -106,7 +106,7 @@ re.on_pre_application_entry("UpdateBehavior",phase(function()
     if menu.apply_pending_preset then menu.apply_pending_preset() end
     passengers.refresh();tick_skip_think()
     if driver_extension then driver_extension:tick(active) end
-    tick_driver();tick_camera_follow()
+    tick_driver();passengers.tick_held();tick_camera_follow()
 
 end))
 re.on_application_entry("UpdateBehavior",phase(function()
@@ -172,7 +172,7 @@ end))
 re.on_pre_application_entry("PrepareRendering",phase(function()
 
     menu.tick_photo_camera()
-    if not menu.visual_allowed() then return end
+    if not menu.visual_allowed() and not passengers.visual_allowed() then return end
     -- Menu transitions can replace the pose before NickCore reports pause. Keep
     -- this fallback active every rendered frame, using the same Hip restore path.
     -- No physics, AI, input or FSM updates here; normal menu preset changes wait.

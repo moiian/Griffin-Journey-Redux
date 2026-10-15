@@ -18,6 +18,7 @@ local function horizontal_heading(d,qx,qy,qz,qw)
     if right>0.000001 then return -rz/right,rx/right,length end
     return 0,1,length
 end
+passengers.horizontal_heading=horizontal_heading
 function hotkey_start_driver()
     if active or state.recovery or queued then return end
     local r=state.spawns[#state.spawns]
@@ -40,6 +41,7 @@ function hotkey_start_driver()
 end
 
 function start_driver(expected_spawn)
+    if passengers.held and passengers.held.held_releasing then status="请等待乘客释放完成。";return end
     if summon and summon.current then status="请等待召唤演出结束。";return end
     local experiment = rawget(_G, "GriffinMountExperimentControl")
     if experiment and experiment.is_driving() then status = "请先结束实验工具的玩家固定。"; return end
@@ -79,6 +81,10 @@ function start_driver(expected_spawn)
             assert(type(d.original_fsm) == "boolean", "Cannot capture player state")
             input = read_pad()
             d.previous_buttons = input.buttons -- holding A/RT on enable is not a fresh press
+            if passengers.held and passengers.held.spawn==r then
+                anti_jitter:stop()
+                d.passengers=passengers.held.passengers;passengers.held.passengers={};passengers.held=nil
+            end
             active = d
             install_yaw_hook()
             if settings.head_camera~=false then change_camera_mode("griffin") end
@@ -172,6 +178,7 @@ function request_exit_landing(d)
             return hover_collision:ground_within(ch:call("get_Transform()"),25)
         end)
         if not ok or not near then node="Ch253HoverWaitHoHomingHeight" end
+        d.exit_keep_passengers=ok and near==false
         if event then event("exit_ground_check",{threshold=25,query_ok=ok,ground_within_limit=ok and near or false,
             node=node,error=not ok and tostring(near) or nil}) end
     end

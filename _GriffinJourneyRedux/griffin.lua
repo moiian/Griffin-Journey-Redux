@@ -93,7 +93,7 @@ function install_fall_hook()
         local method=td and td:get_method("requestFallDead()")
         assert(method and sdk.PreHookResult and sdk.PreHookResult.SKIP_ORIGINAL,"Fall request hook unavailable")
         sdk.hook(method,function(args)
-            local d,c=active,core()
+            local d,c=active or passengers.held,core()
             if alive and d and c and not menu.gameplay_paused() and c.properties.player==d.player then
                 local ch=sdk.to_managed_object(args[2])
                 local member=d.passengers and d.passengers[ch]

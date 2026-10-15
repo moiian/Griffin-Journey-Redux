@@ -2,7 +2,7 @@
 return function(ctx)
 local _ENV=ctx
 passengers.each_controlled=function(fn)
-    local d=active
+    local d=active or passengers.held
     if not d then return end
     local a=passengers.controlled(d.player,true)
     if a then local value=fn(a);if value then return value end end
@@ -55,7 +55,7 @@ passengers.install_protection=function()
     end
     for _,signature in ipairs({"damageProc(app.HitController.DamageInfo)","updateDamage(app.HitController.DamageInfo, System.UInt32, System.Single, System.Boolean)"}) do
         hook("app.HitController",signature,function(args)
-            if not active then return end
+            if not active and not passengers.held then return end
             local info=sdk.to_managed_object(args[3])
             local a=passengers.receiver(info and info["<DamageGameObject>k__BackingField"])
             if a then
@@ -66,7 +66,7 @@ passengers.install_protection=function()
     end
     -- Closer to HP application, covering direct routes that bypass damageProc/updateDamage.
     hook("app.HitController","updateDamageHp(app.HitController.DamageInfo, System.Single, System.Boolean)",function(args)
-        if not active then return end
+        if not active and not passengers.held then return end
         local a=passengers.component_actor(sdk.to_managed_object(args[2]))
         if a then
             if passengers.on_protection then passengers.on_protection(a,"updateDamageHp",passengers.protection.damage) end
@@ -76,7 +76,7 @@ passengers.install_protection=function()
     for _,signature in ipairs({"safeWarp(app.Character, via.Position)","safeWarp(app.Character, via.Position, via.Quaternion)",
         "pawnLost(app.Character, System.Boolean, System.Boolean)","setPawnLostTimer(app.Character)"}) do
         hook("app.PawnManager",signature,function(args)
-            if not active then return end
+            if not active and not passengers.held then return end
             local a=passengers.controlled(sdk.to_managed_object(args[3]))
             if a and a.group=="pawns" then
                 if passengers.on_protection then passengers.on_protection(a,signature,passengers.protection.relocation) end
@@ -85,7 +85,7 @@ passengers.install_protection=function()
         end)
     end
     hook("app.PawnManager","pawnLost(app.InstanceInfo, app.DummyArg_2_0_0_37)",function(args)
-        if not active then return end
+        if not active and not passengers.held then return end
         local info=sdk.to_managed_object(args[3])
         local a=passengers.container_actor(info and info["<Container>k__BackingField"])
         if a and a.group=="pawns" then

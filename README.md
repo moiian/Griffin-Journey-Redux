@@ -1,6 +1,6 @@
 # Griffin Journey Redux
 
-Version **0.3.46** · Author **aelinore**
+Version **0.3.47** · Author **aelinore**
 
 Fly a friendly Griffin with configurable controls, a head-following camera, and individual seats for the player, pawns, and accompanying NPCs. Requires the installed **NickCore**, its EnemySpawner, and `run_once`. Only the exact Griffin created by this mod is controlled.
 
@@ -43,7 +43,7 @@ Use **详细配置 → 测试按钮** to spawn a Griffin or play the summoning p
 
 The body guard applies only to gear 1. It uses fixed directional probe lengths, rejects blocked writes, and waits for held input to change before retrying. Near-ground landing covers both gears, with the existing 5 Hz / 20 Hz limits and three-hit confirmation. Camera distance and FOV are global and do not change with seat presets.
 
-Player and seated-NPC anti-jitter defaults on, loads saved true/false correctly, and remains a scoped gameplay feature. LT/RT changes gears only in flight; takeoff input queuing is preserved. Scoped protection remains enabled. Voluntary exit captures the hidden physical layout's seat positions before releasing actors. An airborne Griffin lands when a surface is within 25 metres below its root and hovers otherwise. Automatic protection and deletion retain their separate recovery behavior.
+Player and seated-NPC anti-jitter defaults on, loads saved true/false correctly, and remains a scoped gameplay feature. LT/RT changes gears only in flight; takeoff input queuing is preserved. Scoped protection remains enabled. Voluntary exit captures the hidden physical layout's seat positions before releasing actors. An airborne Griffin lands when a surface is within 25 metres below its root and hovers otherwise. On a voluntary exit with a confirmed ground distance beyond 25 metres, only the player is released; already seated pawns and companions remain anchored. They are released when the player moves more than 15 metres from the Griffin root in 3D (checked every 0.2 seconds), or the Griffin lands/becomes unavailable. Reboarding adopts those same passenger bindings. Pause and Photo Mode retain their display; deletion, Reset and world exit restore their original states. A failed ground query keeps the old hover fallback but releases all actors. Automatic protection and deletion retain their separate recovery behavior.
 
 ## Items and developer tools
 

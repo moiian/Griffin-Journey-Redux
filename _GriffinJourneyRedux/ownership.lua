@@ -2,7 +2,7 @@
 return function(ctx)
 local _ENV=ctx
 AntiJitter=require("_GriffinJourneyRedux.antijitter")
-anti_jitter=AntiJitter.new({driver=function() return active end,
+anti_jitter=AntiJitter.new({driver=function() return active or passengers.held end,
             passenger_owned=function(d,a)
                 return a and a.owner==d.player and a.spawn==d.spawn and passengers.controlled(a.player)==a
                     and owned_player(a,false) and player_fsm(a.player)==a.fsm
@@ -17,7 +17,7 @@ anti_jitter=AntiJitter.new({driver=function() return active end,
                     and ch:call("get_GameObject()")==go
             end,
             owned=function(d)
-                if not alive or state.generation~=generation or not d or active~=d or not owned_player(d,true)
+                if not alive or state.generation~=generation or not d or (active~=d and passengers.held~=d) or not owned_player(d,true)
                     or player_fsm(d.player)~=d.fsm then return false end
                 local r=d.spawn;local result=r and r.result
                 return result and r.owner==d.player and result.go and result.chara

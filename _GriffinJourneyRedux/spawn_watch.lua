@@ -48,8 +48,8 @@ function watch:reap_invalid()
 end
 local function exit(r,reason)
     watch.last_reason=reason;watch.status="狮鹫生命周期："..reason
-    if active and active.spawn==r then
-        stop_driver(reason)
+    if active and active.spawn==r or passengers.held and passengers.held.spawn==r then
+        stop_driver(reason,passengers.held~=nil)
         if event then event("driver_boundary_exit",{reason=reason}) end
     end
 end
