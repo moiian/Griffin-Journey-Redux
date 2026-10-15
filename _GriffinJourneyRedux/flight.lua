@@ -298,9 +298,9 @@ function tick_driver()
             local node=held(pressed,masks.ground_wind_end) and "Ch253WingWindAttackEnd" or "Ch253WingWindAttackStartLoop"
             hover_motion:release(d);d.controls_active=false;d.control_node=nil;d.manual_hold=nil;d.auto_hover=false
             set_intent(d,node,"ground_wind")
-        elseif held(pressed,masks.rt) then
+        elseif held(pressed,masks.rt) and flying and not ground then
             resume(2)
-        elseif held(pressed,masks.lt) then
+        elseif held(pressed,masks.lt) and flying and not ground then
             local momentum=d.gear==2 and sprint_motion:capture(d) or nil
             resume(1);hover_motion:brake(d)
             if momentum then d.sprint_handoff=momentum end

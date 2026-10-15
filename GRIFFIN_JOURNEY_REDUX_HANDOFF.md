@@ -1,3 +1,7 @@
+## 当前维护更新：0.3.45（2026-10-15）
+
+本节取代下文历史0.3.44的手动保存契约：普通修改立即生效，停调1秒合并保存，保留立即保存；恢复默认仍需确认。anti_jitter默认true且正确加载保存bool；地面LT/RT不换档/切实体锚点，起飞意向排队保留。44Lua编译、32专项/2旧版复现、3落体/8玩法双模式/20默认/8驾驶默认/66HUD通过，仅离线，实机镜头/防抖待确认。测试LocalTests/maintenance_0345，细节见MAINTENANCE_0345_AUTOSAVE_ANTIJITTER_GROUND.md；0.3.44布局/HUD/隐藏[0]退出保留，Settings/Debug/bundle/第三方不写，不合main。
+
 # Griffin Journey Redux 新会话交接
 
 ## 当前状态（2026-10-15）

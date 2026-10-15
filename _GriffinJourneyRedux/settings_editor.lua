@@ -1,7 +1,9 @@
--- Menu edits are drafts; preview is independent of explicit disk persistence.
+-- Ordinary edits apply live; one debounced save follows the last edit.
 return function(ctx)
 local _ENV=ctx
-menu.realtime=false
+menu.realtime=true
+menu.save_delay=1
+menu.save_clock=os.clock
 menu.draft=menu.clone(settings)
 menu.saved=menu.clone(settings)
 menu.edit_revision=0
@@ -79,8 +81,9 @@ end
 -- Existing gameplay callers only mark configuration dirty; they never write files.
 controls.save=function()
     if not menu.applying_edits then
-        menu.edit_dirty=true
-        menu.edit_revision=menu.edit_revision+1
+        menu.edit_dirty=true;menu.edit_revision=menu.edit_revision+1
+        if menu.pending_save and menu.pending_save.automatic then menu.pending_save=nil end
+        if menu.realtime and not menu.defaults_draft then menu.save_due=menu.save_clock()+menu.save_delay end
     end
     return true
 end
@@ -92,7 +95,32 @@ menu.queue_edits=function(save,snapshot)
 end
 menu.changed=function()
     menu.edit_dirty=true;menu.edit_revision=menu.edit_revision+1
+    if menu.pending_save and menu.pending_save.automatic then menu.pending_save=nil end
+    if menu.realtime and not menu.defaults_draft then menu.save_due=menu.save_clock()+menu.save_delay end
     if menu.realtime then menu.queue_edits(false) end
+end
+menu.tick_save=function()
+    if not current() or not menu.realtime or menu.defaults_draft or not menu.edit_dirty
+        or not menu.save_due or menu.save_clock()<menu.save_due or menu.pending_save then return end
+    menu.save_due=nil
+    menu.queue_edits(true)
+    menu.pending_save.automatic=true
+end
+-- Reset may follow an edit before the one-second idle deadline. Save data only;
+-- never apply native options, move actors or confirm a staged factory reset here.
+menu.flush_settings=function()
+    if not current() or not menu.realtime or menu.defaults_draft or not menu.edit_dirty then return end
+    local snapshot=menu.clone(menu.draft)
+    retain_generated_seats(snapshot);normalize(snapshot)
+    local runtime=settings
+    settings=snapshot
+    local valid,err=pcall(function() menu.reindex();menu.pull_values(snapshot.seat_index) end)
+    settings=runtime
+    if not valid then menu.save_error="设置保存失败："..tostring(err);return end
+    local ok,result=pcall(json.dump_file,settings_path,snapshot)
+    if ok and result~=false then
+        menu.saved=menu.clone(snapshot);menu.edit_dirty=false;menu.save_due=nil;menu.save_error=nil
+    else menu.save_error="设置保存失败："..tostring(result) end
 end
 menu.apply_edits=function(visual)
     if not current() then return end
@@ -144,10 +172,13 @@ menu.apply_edits=function(visual)
                 menu.saved=menu.clone(settings)
                 menu.edit_dirty=menu.edit_revision~=ticket.revision
                 menu.save_error=nil
-                if not menu.edit_dirty then menu.defaults_draft=false end
+                if not menu.edit_dirty then
+                    menu.defaults_draft=false;menu.realtime=true;menu.save_due=nil
+                end
                 menu.edit_status="设置已应用并保存"
             else
                 menu.edit_dirty=true
+                menu.save_due=nil
                 menu.save_error="设置保存失败，当前内容仍在内存中："..tostring(result)
             end
         elseif ticket.discard then menu.edit_status="未保存修改已撤销"
@@ -164,6 +195,7 @@ end
 -- Reset the editable configuration; disk writes still require explicit save.
 menu.restore_defaults=function()
     menu.pending_save=nil;menu.pending_edit=nil;menu.pending_preset=nil
+    menu.save_due=nil
     menu.draft=menu.build_defaults()
     menu.defaults_draft=true
     menu.realtime=false;menu.show_physical=false
@@ -174,7 +206,7 @@ menu.restore_defaults=function()
     menu.edit_status="默认配置已恢复到草稿，点击应用并保存后生效。"
 end
 menu.editor=function()
-    local highlight=menu.edit_dirty and (menu.edit_revision~=menu.applied_revision or menu.save_error~=nil)
+    local highlight=menu.edit_dirty
     local styled=highlight and type(imgui.push_style_color)=="function" and type(imgui.pop_style_color)=="function"
     if styled then
         imgui.push_style_color(21,0xff98652b)
@@ -182,12 +214,13 @@ menu.editor=function()
         imgui.push_style_color(23,0xff86551e)
         imgui.push_style_color(0,0xffe8f5ff)
     end
-    local save=beta_button("应用并保存###GriffinApplySave")
+    local save=beta_button((menu.defaults_draft and "应用并保存" or "立即保存").."###GriffinApplySave")
     if styled then imgui.pop_style_color(4) end
     if save and menu.edit_dirty then menu.queue_edits(true) end
     if imgui.same_line then imgui.same_line() end
     if beta_button("恢复未修改###GriffinDiscardEdits") then
         menu.pending_save=nil;menu.pending_edit=nil
+        menu.save_due=nil;menu.realtime=true
         menu.defaults_draft=false;reset_session_pending=false
         menu.draft=menu.clone(menu.saved)
         menu.selected_index=menu.draft.seat_index
@@ -201,17 +234,11 @@ menu.editor=function()
     if imgui.same_line then imgui.same_line() end
     if beta_button("恢复默认配置###GriffinRestoreDefaults") then menu.restore_defaults() end
     if imgui.same_line then imgui.same_line() end
-    local changed,value=menu.toggle("实时应用修改###GriffinLiveApply",menu.realtime)
-    if changed then
-        menu.realtime=value
-        if value and menu.edit_dirty then menu.queue_edits(false) end
-    end
-    if imgui.same_line then imgui.same_line() end
     imgui.text("[?]")
     if type(imgui.is_item_hovered)=="function" and type(imgui.set_tooltip)=="function" and imgui.is_item_hovered() then
-        imgui.set_tooltip("方便调试参数，开启后实时应用配置。默认关闭可节省性能。")
+        imgui.set_tooltip("修改参数立即生效，停止调节1秒后合并保存一次；也可立即保存。恢复默认配置需确认应用。")
     end
-    if menu.edit_dirty then imgui.text("有未保存修改；拖动参数不会写入配置文件。") end
+    if menu.edit_dirty then imgui.text(menu.defaults_draft and "默认配置尚未应用，请确认后点击应用并保存。" or "修改已实时生效；停止调节1秒后自动保存。") end
     if menu.pending_save then imgui.text("保存已排队，继续游戏或进入照片模式后应用。") end
     if menu.edit_status then imgui.text(menu.edit_status) end
 end

@@ -255,7 +255,7 @@ menu.presets=function()
     local names={};for i=first,#settings.seat_presets do names[#names+1]=settings.seat_presets[i].name end
     menu.selected_index=math.max(first,math.min(#settings.seat_presets,menu.selected_index or settings.seat_index))
     if type(imgui.combo)=="function" then
-        local changed,index=imgui.combo("编辑布局（应用后生效）###BetaPresetSelect",menu.selected_index-first+1,names)
+        local changed,index=imgui.combo("编辑布局###BetaPresetSelect",menu.selected_index-first+1,names)
         if changed and names[index] then
             menu.selected_index=index+first-1;settings.seat_index=menu.selected_index;menu.confirm_delete=nil;menu.changed()
         end
@@ -304,7 +304,7 @@ menu.presets=function()
     if menu.pending_edit then imgui.text("修改已排队，继续游戏或进入照片模式后应用。") end
     if active and menu.photo_active() then imgui.text("照片模式：保持座位显示；飞行输入和动画请求暂停。") end
     if menu.save_error then imgui.text(menu.save_error) end
-    imgui.text("记得点击保存按钮")
+    imgui.text(menu.defaults_draft and "默认配置需确认应用后保存" or "修改立即生效，停止调节1秒后自动保存")
 end
 
 menu.stop=function()

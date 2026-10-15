@@ -12,6 +12,7 @@ local function phase(fn)
 end
 re.on_frame(phase(function()
     if not alive then return end
+    menu.tick_save()
     tick_cleanup_departures()
     shop_item:tick()
     anti_jitter:tick()
@@ -270,6 +271,7 @@ _G.GriffinFlightBetaBridge = bridge
 _G.GriffinJourneyReduxBridge = bridge
 
 re.on_script_reset(phase(function()
+    menu.flush_settings()
     shop_item:shutdown()
     summon:cancel("脚本重置")
     stop_driver("脚本重置",true)
